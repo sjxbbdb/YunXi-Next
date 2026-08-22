@@ -94,10 +94,47 @@ function Add-PathPrefix([string]$CurrentPath, [string]$Prefix) {
     return (@($Prefix) + $segments) -join ';'
 }
 
+function Publish-EnvironmentChange {
+    if (-not ('YunXiEnvironmentBroadcast' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class YunXiEnvironmentBroadcast
+{
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr SendMessageTimeout(
+        IntPtr window,
+        uint message,
+        UIntPtr wordParameter,
+        string longParameter,
+        uint flags,
+        uint timeout,
+        out UIntPtr result);
+
+    public static void Publish()
+    {
+        UIntPtr result;
+        SendMessageTimeout(
+            new IntPtr(0xffff),
+            0x001a,
+            UIntPtr.Zero,
+            "Environment",
+            0x0002,
+            5000,
+            out result);
+    }
+}
+'@
+    }
+    [YunXiEnvironmentBroadcast]::Publish()
+}
+
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 $newUserPath = Add-PathPrefix $userPath $routerBin
 [Environment]::SetEnvironmentVariable('Path', $newUserPath, 'User')
 $env:Path = Add-PathPrefix $env:Path $routerBin
+Publish-EnvironmentChange
 
 & $installedLauncher next --version
 if ($LASTEXITCODE -ne 0) {

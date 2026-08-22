@@ -54,6 +54,14 @@ $env:DEEPSEEK_API_KEY = "your-key"
 yunxi next
 ```
 
+An already-open terminal may still hold the old PATH. Refresh that process once
+before running `yunxi next`:
+
+```powershell
+$router = Join-Path $env:LOCALAPPDATA 'YunXi\bin'
+$env:Path = "$router;$env:Path"
+```
+
 Send one prompt without entering interactive mode:
 
 ```powershell
