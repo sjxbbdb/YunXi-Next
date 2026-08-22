@@ -1,0 +1,9 @@
+# Documentation
+
+This directory contains repository-wide design documents. Crate-specific usage
+stays beside the crate that owns it.
+
+| File | Responsibility |
+| --- | --- |
+| [`project-structure.md`](project-structure.md) | Canonical directory and file ownership map |
+| [`kernel-architecture.md`](kernel-architecture.md) | Trusted boundary, runtime flow, and non-goals |

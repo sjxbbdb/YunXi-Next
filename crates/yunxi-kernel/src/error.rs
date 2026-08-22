@@ -1,3 +1,5 @@
+//! Public failures returned by kernel lifecycle operations.
+
 use std::error::Error;
 use std::fmt;
 

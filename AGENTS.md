@@ -17,6 +17,9 @@
 
 - Use Rust 2024.
 - Keep the kernel dependency surface minimal.
+- Give each source file one clear responsibility.
+- Add a concise `README.md` when introducing a non-generated directory.
+- Update `docs/project-structure.md` when files or directories move.
 - Forbid unsafe code in the kernel workspace.
 - Run `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and
   `cargo test` before claiming completion.

@@ -1,3 +1,5 @@
+//! Empty-kernel smoke executable.
+
 use yunxi_kernel::YunxiKernel;
 
 fn main() {

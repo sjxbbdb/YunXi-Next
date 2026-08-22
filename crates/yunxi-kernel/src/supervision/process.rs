@@ -1,3 +1,5 @@
+//! One-thread-per-plugin child process supervision.
+
 use std::io;
 use std::process::Child;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};

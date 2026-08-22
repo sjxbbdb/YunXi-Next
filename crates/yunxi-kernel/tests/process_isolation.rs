@@ -1,3 +1,5 @@
+//! Black-box tests that launch real child processes to verify isolation.
+
 use std::env;
 use std::process;
 use std::thread;

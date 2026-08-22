@@ -26,6 +26,14 @@ automatically restart a crashing plugin.
 Process isolation protects the kernel from plugin crashes. It is not yet a
 filesystem, network, or resource-usage sandbox.
 
+## Repository Map
+
+- [`crates/`](crates/README.md) contains production Rust packages.
+- [`docs/`](docs/README.md) contains architecture and repository maps.
+- [`AGENTS.md`](AGENTS.md) defines repository boundaries and verification rules.
+- [`docs/project-structure.md`](docs/project-structure.md) explains every tracked
+  directory and source file.
+
 ## Verify
 
 ```text

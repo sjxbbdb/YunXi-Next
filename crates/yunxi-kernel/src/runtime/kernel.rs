@@ -1,46 +1,12 @@
+//! Authoritative plugin registry and lifecycle coordinator.
+
 use std::collections::BTreeMap;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 
-use crate::supervisor::{SupervisorCommand, SupervisorEvent, SupervisorHandle, spawn_supervisor};
+use super::{KernelSnapshot, KernelState};
+use crate::supervision::{SupervisorCommand, SupervisorEvent, SupervisorHandle, spawn_supervisor};
 use crate::{KernelError, PluginFailure, PluginId, PluginSnapshot, PluginSpec, PluginState};
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum KernelState {
-    Running,
-    ShuttingDown,
-    Stopped,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct KernelSnapshot {
-    state: KernelState,
-    plugins: Vec<PluginSnapshot>,
-}
-
-impl KernelSnapshot {
-    pub fn state(&self) -> KernelState {
-        self.state
-    }
-
-    pub fn plugins(&self) -> &[PluginSnapshot] {
-        &self.plugins
-    }
-
-    pub fn running_plugin_count(&self) -> usize {
-        self.plugins
-            .iter()
-            .filter(|plugin| matches!(plugin.state(), PluginState::Running { .. }))
-            .count()
-    }
-
-    pub fn failed_plugin_count(&self) -> usize {
-        self.plugins
-            .iter()
-            .filter(|plugin| plugin.state().is_failed())
-            .count()
-    }
-}
 
 struct PluginSlot {
     spec: PluginSpec,
