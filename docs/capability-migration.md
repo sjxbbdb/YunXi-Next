@@ -46,8 +46,8 @@ surfaces. They are not allowed to bypass the trusted approval or routing layer.
 | Skills and dynamic tools | `yunxi-agent-skills`, `yunxi-agent-tools` | `tool.skills@1` | `yunxi-tool-skills` | Planned: inheritance wave 3 |
 | Multi-agent coordination | `yunxi-agent-multi-agent` | `tool.multi-agent@1` | `yunxi-multi-agent` | Planned: inheritance wave 3 |
 | Weixin channel | `yunxi-agent-weixin` | `channel.weixin@1` | `yunxi-channel-weixin` | Planned: inheritance wave 4 |
-| Speech recognition | `yunxi-agent-voice` | `voice.transcribe@1` | `yunxi-voice` | Planned: inheritance wave 4 |
-| Speech synthesis | `yunxi-agent-voice` | `voice.synthesize@1` | `yunxi-voice` | Planned: inheritance wave 4 |
+| Voice input (speech recognition) | `yunxi-agent-voice` | `voice.transcribe@1` | `yunxi-voice` | Planned: inheritance wave 4 |
+| Voice output (speech synthesis) | `yunxi-agent-voice` | `voice.synthesize@1` | `yunxi-voice` | Planned: inheritance wave 4 |
 
 Legacy `yunxi-agent-core`, `yunxi-agent-protocol`, and
 `yunxi-agent-runtime` contain mixed contracts and orchestration. Their behavior
@@ -80,6 +80,32 @@ cross-plugin acceptance fixtures instead of a runtime capability.
 6. **Management surface:** Web settings reads manifests, changes persisted
    enable state, and shows lifecycle health from the kernel and plugin host.
 
+## Voice Migration Boundary
+
+Voice input and voice output are both part of the inheritance scope. They are
+separate capabilities even when one executable provides both, so either side
+can be disabled, replaced, or restarted without taking down text chat.
+
+The planned contracts have these minimum properties:
+
+- `voice.transcribe@1` accepts bounded audio chunks, emits partial and final
+  transcripts, and supports cancellation and backpressure;
+- `voice.synthesize@1` accepts bounded text, emits audio chunks, and supports
+  cancellation and backpressure;
+- microphone, speaker, and device permissions are host-issued grants rather
+  than authority inferred by a voice plugin;
+- raw audio is not persisted by default; an explicit user action is required
+  for recording or diagnostic retention;
+- a missing device, provider timeout, malformed audio frame, or plugin crash
+  produces a visible warning and leaves the text CLI/model route available;
+- channel adapters such as Weixin consume these same contracts instead of
+  embedding a second speech implementation.
+
+The voice wave must include loopback fixtures for partial/final input,
+streamed output, cancellation, backpressure, permission denial, and failure
+fallback. A provider-specific speech SDK is an implementation detail of the
+plugin and must not leak into the host protocol.
+
 ## Per-Plugin Acceptance Gate
 
 A legacy capability is marked integrated only when all of these are true:
@@ -92,6 +118,10 @@ A legacy capability is marked integrated only when all of these are true:
 6. Filesystem, network, secret, and approval requirements are explicit.
 7. Its sibling plugin and the kernel stay healthy during a failure test.
 8. Its directory has ownership documentation and focused tests.
+
+Voice plugins additionally prove that device grants are enforced, streamed
+audio can be cancelled without hanging the host, and raw audio is absent from
+default persistent state.
 
 The migration ledger status changes only after these gates pass; source copied
 into the new repository but still called in-process remains `planned`.
