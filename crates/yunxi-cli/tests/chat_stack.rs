@@ -163,6 +163,183 @@ fn legacy_memory_is_recalled_through_memory_and_persona_processes() {
     fs::remove_dir_all(home).expect("remove memory fixture");
 }
 
+#[test]
+fn session_storage_persists_and_resumes_across_cli_processes() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let server = thread::spawn(move || serve_requests(listener, 2));
+    let workspace = unique_temp_dir("yunxi-session-e2e");
+    fs::create_dir_all(&workspace).expect("create workspace");
+
+    let first = configured_cli(address)
+        .current_dir(&workspace)
+        .env("YUNXI_NEXT_STORAGE_ENABLED", "true")
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .args(["--once", "first saved turn"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch first CLI");
+    let first = wait_for_cli(first);
+    assert!(first.status.success());
+
+    let session_path = fs::read_dir(workspace.join(".yunxi-next/sessions"))
+        .expect("read session directory")
+        .map(|entry| entry.expect("session entry").path())
+        .find(|path| path.extension().and_then(|value| value.to_str()) == Some("json"))
+        .expect("saved session");
+    let session: serde_json::Value =
+        serde_json::from_slice(&fs::read(&session_path).expect("read session"))
+            .expect("parse session");
+    let session_id = session["id"].as_str().expect("session id").to_string();
+
+    let mut second = configured_cli(address)
+        .current_dir(&workspace)
+        .env("YUNXI_NEXT_STORAGE_ENABLED", "true")
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch second CLI");
+    write!(
+        second.stdin.take().expect("open CLI stdin"),
+        "/resume {session_id}\nsecond saved turn\n/quit\n"
+    )
+    .expect("write CLI commands");
+    let second = wait_for_cli(second);
+    assert!(
+        second.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&second.stderr)
+    );
+    let bodies = server.join().expect("join mock API");
+    assert_eq!(bodies.len(), 2);
+    assert!(bodies[1].contains("first saved turn"));
+    assert!(bodies[1].contains("second saved turn"));
+    let session: serde_json::Value =
+        serde_json::from_slice(&fs::read(&session_path).expect("read updated session"))
+            .expect("parse updated session");
+    assert_eq!(session["messages"].as_array().expect("messages").len(), 4);
+    fs::remove_dir_all(workspace).expect("remove workspace");
+}
+
+#[test]
+fn successful_turn_writes_project_memory_through_memory_process() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let server = thread::spawn(move || serve_one_request(listener));
+    let workspace = unique_temp_dir("yunxi-memory-write-e2e");
+    fs::create_dir_all(&workspace).expect("create workspace");
+
+    let child = configured_cli(address)
+        .current_dir(&workspace)
+        .env("YUNXI_NEXT_MEMORY_ENABLED", "true")
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .args(["--once", "这是项目硬性要求：所有插件必须有测试"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch CLI");
+    let output = wait_for_cli(child);
+    server.join().expect("join mock API");
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let memory = fs::read_to_string(workspace.join(".yunxi-next/memory/workspace-memory.jsonl"))
+        .expect("read written memory");
+    assert!(memory.contains("项目硬性约束"));
+    assert!(!workspace.join(".yunxi/memory").exists());
+    fs::remove_dir_all(workspace).expect("remove workspace");
+}
+
+#[test]
+fn companion_decision_is_injected_into_the_model_request() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let server = thread::spawn(move || serve_one_request(listener));
+
+    let child = configured_cli(address)
+        .env("YUNXI_NEXT_COMPANION_ENABLED", "true")
+        .env("YUNXI_NEXT_MAILBOX_ENABLED", "false")
+        .env("YUNXI_NEXT_SCHEDULER_ENABLED", "false")
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .args(["--once", "我现在非常焦虑，不知道怎么做"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch CLI");
+    let output = wait_for_cli(child);
+    let request = server.join().expect("join mock API");
+
+    assert!(output.status.success());
+    assert!(request.contains("yunxi_companion_policy"));
+    assert!(request.contains("without diagnosis"));
+}
+
+#[test]
+fn proactive_plan_is_enqueued_and_listed_through_mailbox_process() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let server = thread::spawn(move || serve_one_request(listener));
+    let workspace = unique_temp_dir("yunxi-mailbox-e2e");
+    fs::create_dir_all(&workspace).expect("create workspace");
+    let mut child = configured_cli(address)
+        .current_dir(&workspace)
+        .env("YUNXI_NEXT_COMPANION_ENABLED", "true")
+        .env("YUNXI_NEXT_MAILBOX_ENABLED", "true")
+        .env("YUNXI_NEXT_SCHEDULER_ENABLED", "true")
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch CLI");
+    child
+        .stdin
+        .take()
+        .expect("open CLI stdin")
+        .write_all(b"unfinished task: migrate state\n/mailbox\n/quit\n")
+        .expect("write CLI input");
+    let output = wait_for_cli(child);
+    server.join().expect("join mock API");
+
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 output");
+    assert!(stdout.contains("Unread: 1"));
+    assert!(stdout.contains("YunXi follow-up"));
+    let item = fs::read_dir(workspace.join(".yunxi-next/mailbox"))
+        .expect("read mailbox")
+        .map(|entry| entry.expect("mailbox entry").path())
+        .find(|path| path.extension().and_then(|value| value.to_str()) == Some("json"))
+        .expect("encrypted item");
+    let raw = fs::read_to_string(item).expect("read encrypted item");
+    assert!(!raw.contains("还可以继续处理"));
+    fs::remove_dir_all(workspace).expect("remove workspace");
+}
+
 fn serve_one_request(listener: TcpListener) -> String {
     let (stream, body) = accept_request(&listener);
     write_response(
@@ -171,6 +348,23 @@ fn serve_one_request(listener: TcpListener) -> String {
         r#"{"choices":[{"message":{"content":"fixture reply"},"finish_reason":"stop"}]}"#,
     );
     body
+}
+
+fn serve_requests(listener: TcpListener, count: usize) -> Vec<String> {
+    (0..count)
+        .map(|index| {
+            let (stream, body) = accept_request(&listener);
+            write_response(
+                stream,
+                "200 OK",
+                &format!(
+                    "{{\"choices\":[{{\"message\":{{\"content\":\"fixture reply {}\"}},\"finish_reason\":\"stop\"}}]}}",
+                    index + 1
+                ),
+            );
+            body
+        })
+        .collect()
 }
 
 fn accept_request(listener: &TcpListener) -> (std::net::TcpStream, String) {
@@ -185,6 +379,9 @@ fn accept_request(listener: &TcpListener) -> (std::net::TcpStream, String) {
             Err(error) => panic!("mock API accept failed: {error}"),
         }
     };
+    stream
+        .set_nonblocking(false)
+        .expect("make accepted API stream blocking");
     let mut reader = BufReader::new(stream.try_clone().expect("clone API stream"));
     let mut request_line = String::new();
     reader
@@ -238,6 +435,11 @@ fn configured_cli(address: std::net::SocketAddr) -> Command {
         .env("YUNXI_PROVIDER_API_KEY", "fixture-secret")
         .env("YUNXI_AGENT_MODEL", "fixture-model")
         .env("YUNXI_PROVIDER_TIMEOUT_MILLIS", "3000")
+        .env("YUNXI_NEXT_MEMORY_ENABLED", "false")
+        .env("YUNXI_NEXT_COMPANION_ENABLED", "false")
+        .env("YUNXI_NEXT_MAILBOX_ENABLED", "false")
+        .env("YUNXI_NEXT_SCHEDULER_ENABLED", "false")
+        .env("YUNXI_NEXT_STORAGE_ENABLED", "false")
         .env("NO_PROXY", "127.0.0.1,localhost")
         .env("no_proxy", "127.0.0.1,localhost");
     command

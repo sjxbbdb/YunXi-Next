@@ -1,14 +1,16 @@
 # `yunxi-memory`
 
-`yunxi-memory` is the read-only provider for `memory.recall@1`. It consumes the
-legacy YunXi JSONL memory layout without rewriting it, filters records by state,
-privacy, expiry, and workspace scope, then returns bounded boot and dynamic
-context records.
+`yunxi-memory` provides `memory.recall@1` and `memory.write@1`. Recall consumes
+legacy and YunXi Next JSONL records, filters them by state, privacy, expiry, and
+workspace scope, then returns bounded boot and dynamic context records.
 
-This first inheritance wave cannot write, approve, reject, merge, or clear
-memories. Those operations belong to the later `memory.write` contract.
+Write calls perform deterministic rule extraction, privacy classification,
+deduplication, conflict staging, and explicit approve/reject review. New data
+is written only beneath `.yunxi-next` or `YUNXI_NEXT_HOME`; legacy `.yunxi`
+files remain read-only. Provider-based extraction and bulk clear are not yet
+implemented.
 
 | Path | Responsibility |
 | --- | --- |
-| [`src/`](src/README.md) | Legacy schema, bounded store, recall policy, and protocol loop |
+| [`src/`](src/README.md) | Schema, bounded store, recall/write policy, and protocol loop |
 | `Cargo.toml` | Serde, JSON, and protocol dependencies |

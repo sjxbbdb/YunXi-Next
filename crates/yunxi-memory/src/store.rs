@@ -1,4 +1,4 @@
-//! Bounded read-only loading of legacy global and workspace memory files.
+//! Bounded legacy/Next loading and Next-only JSONL persistence.
 
 use std::collections::BTreeMap;
 use std::collections::hash_map::DefaultHasher;
@@ -6,9 +6,12 @@ use std::error::Error;
 use std::fmt;
 use std::fs;
 use std::hash::{Hash, Hasher};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::record::StoredMemoryRecord;
+use yunxi_protocol::WorkspaceGrant;
+
+use crate::record::{MemoryScope, MemoryStatus, StoredMemoryRecord};
 
 const MAX_MEMORY_FILE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_MEMORY_LINE_BYTES: usize = 1024 * 1024;
@@ -16,8 +19,10 @@ const MAX_LOADED_RECORDS: usize = 50_000;
 
 #[derive(Clone, Debug)]
 pub(crate) struct MemoryStore {
-    global_root: PathBuf,
-    workspace_root: PathBuf,
+    legacy_global_root: PathBuf,
+    next_global_root: PathBuf,
+    legacy_workspace_root: PathBuf,
+    next_workspace_root: PathBuf,
     workspace_fingerprint: String,
 }
 
@@ -29,10 +34,27 @@ pub(crate) struct MemoryLoad {
 
 impl MemoryStore {
     pub(crate) fn for_workspace(cwd: &Path) -> Result<Self, MemoryStoreError> {
-        Self::with_home(cwd, &yunxi_home_dir())
+        Self::with_homes(cwd, &legacy_home_dir(), &next_home_dir())
     }
 
+    pub(crate) fn from_grant(grant: &WorkspaceGrant) -> Result<Self, MemoryStoreError> {
+        let next_home = grant
+            .state_root()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| grant.root().join(".yunxi-next"));
+        Self::with_homes(grant.root(), &legacy_home_dir(), &next_home)
+    }
+
+    #[cfg(test)]
     pub(crate) fn with_home(cwd: &Path, home: &Path) -> Result<Self, MemoryStoreError> {
+        Self::with_homes(cwd, home, &home.join(".yunxi-next-fixture"))
+    }
+
+    pub(crate) fn with_homes(
+        cwd: &Path,
+        legacy_home: &Path,
+        next_home: &Path,
+    ) -> Result<Self, MemoryStoreError> {
         let canonical = fs::canonicalize(cwd).map_err(|source| MemoryStoreError::Workspace {
             path: cwd.to_path_buf(),
             source,
@@ -41,8 +63,10 @@ impl MemoryStore {
             return Err(MemoryStoreError::NotDirectory(canonical));
         }
         Ok(Self {
-            global_root: home.join("memory"),
-            workspace_root: cwd.join(".yunxi").join("memory"),
+            legacy_global_root: legacy_home.join("memory"),
+            next_global_root: next_home.join("memory"),
+            legacy_workspace_root: canonical.join(".yunxi").join("memory"),
+            next_workspace_root: canonical.join(".yunxi-next").join("memory"),
             workspace_fingerprint: workspace_fingerprint(&canonical),
         })
     }
@@ -53,10 +77,14 @@ impl MemoryStore {
 
     pub(crate) fn load(&self) -> MemoryLoad {
         let paths = [
-            self.global_root.join("global-memory.jsonl"),
-            self.global_root.join("pending.jsonl"),
-            self.workspace_root.join("workspace-memory.jsonl"),
-            self.workspace_root.join("pending.jsonl"),
+            self.next_global_root.join("global-memory.jsonl"),
+            self.next_global_root.join("pending.jsonl"),
+            self.next_workspace_root.join("workspace-memory.jsonl"),
+            self.next_workspace_root.join("pending.jsonl"),
+            self.legacy_global_root.join("global-memory.jsonl"),
+            self.legacy_global_root.join("pending.jsonl"),
+            self.legacy_workspace_root.join("workspace-memory.jsonl"),
+            self.legacy_workspace_root.join("pending.jsonl"),
         ];
         let mut load = MemoryLoad::default();
         for path in paths {
@@ -77,6 +105,46 @@ impl MemoryStore {
         });
         load
     }
+
+    pub(crate) fn append(&self, record: &StoredMemoryRecord) -> Result<(), MemoryStoreError> {
+        let pending = record.status == MemoryStatus::Pending;
+        let root = match &record.scope {
+            MemoryScope::Workspace { .. } => &self.next_workspace_root,
+            MemoryScope::GlobalUser | MemoryScope::AgentIdentity | MemoryScope::Relationship => {
+                &self.next_global_root
+            }
+        };
+        let file_name = if pending {
+            "pending.jsonl"
+        } else if matches!(&record.scope, MemoryScope::Workspace { .. }) {
+            "workspace-memory.jsonl"
+        } else {
+            "global-memory.jsonl"
+        };
+        fs::create_dir_all(root).map_err(|source| MemoryStoreError::Io {
+            path: root.clone(),
+            source,
+        })?;
+        let path = root.join(file_name);
+        let mut line = serde_json::to_vec(record).map_err(MemoryStoreError::Serialize)?;
+        if line.len() > MAX_MEMORY_LINE_BYTES {
+            return Err(MemoryStoreError::RecordTooLarge {
+                maximum: MAX_MEMORY_LINE_BYTES,
+            });
+        }
+        line.push(b'\n');
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|source| MemoryStoreError::Io {
+                path: path.clone(),
+                source,
+            })?;
+        file.write_all(&line)
+            .and_then(|_| file.sync_data())
+            .map_err(|source| MemoryStoreError::Io { path, source })
+    }
 }
 
 pub(crate) fn workspace_fingerprint(path: &Path) -> String {
@@ -89,7 +157,7 @@ pub(crate) fn workspace_fingerprint(path: &Path) -> String {
     format!("{:016x}", hasher.finish())
 }
 
-fn yunxi_home_dir() -> PathBuf {
+fn legacy_home_dir() -> PathBuf {
     if let Some(path) = std::env::var_os("YUNXI_HOME") {
         return PathBuf::from(path);
     }
@@ -100,6 +168,19 @@ fn yunxi_home_dir() -> PathBuf {
         return PathBuf::from(path).join(".yunxi");
     }
     PathBuf::from(".yunxi")
+}
+
+fn next_home_dir() -> PathBuf {
+    if let Some(path) = std::env::var_os("YUNXI_NEXT_HOME") {
+        return PathBuf::from(path);
+    }
+    if let Some(path) = std::env::var_os("USERPROFILE") {
+        return PathBuf::from(path).join(".yunxi-next");
+    }
+    if let Some(path) = std::env::var_os("HOME") {
+        return PathBuf::from(path).join(".yunxi-next");
+    }
+    PathBuf::from(".yunxi-next")
 }
 
 fn read_memory_file(path: &Path, load: &mut MemoryLoad) {
@@ -215,6 +296,14 @@ pub enum MemoryStoreError {
         source: std::io::Error,
     },
     NotDirectory(PathBuf),
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    Serialize(serde_json::Error),
+    RecordTooLarge {
+        maximum: usize,
+    },
 }
 
 impl fmt::Display for MemoryStoreError {
@@ -234,6 +323,17 @@ impl fmt::Display for MemoryStoreError {
                     path.display()
                 )
             }
+            Self::Io { path, source } => {
+                write!(
+                    formatter,
+                    "memory I/O failed at {}: {source}",
+                    path.display()
+                )
+            }
+            Self::Serialize(error) => write!(formatter, "failed to serialize memory: {error}"),
+            Self::RecordTooLarge { maximum } => {
+                write!(formatter, "memory record exceeds {maximum} bytes")
+            }
         }
     }
 }
@@ -241,8 +341,9 @@ impl fmt::Display for MemoryStoreError {
 impl Error for MemoryStoreError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
-            Self::Workspace { source, .. } => Some(source),
-            Self::NotDirectory(_) => None,
+            Self::Workspace { source, .. } | Self::Io { source, .. } => Some(source),
+            Self::Serialize(error) => Some(error),
+            Self::NotDirectory(_) | Self::RecordTooLarge { .. } => None,
         }
     }
 }

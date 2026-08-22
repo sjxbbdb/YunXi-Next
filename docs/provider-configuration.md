@@ -64,10 +64,28 @@ persisted plugin manifest and Web settings page are implemented.
 | --- | --- | --- |
 | `YUNXI_NEXT_CONTEXT_ENABLED` | `true` | Launch `context.compose@1` for `AGENTS.md` context |
 | `YUNXI_NEXT_PERSONA_ENABLED` | `true` | Enable persona expression context |
-| `YUNXI_NEXT_MEMORY_ENABLED` | `false` | Launch read-only legacy `memory.recall@1` |
+| `YUNXI_NEXT_MEMORY_ENABLED` | `false` | Launch `memory.recall@1` and `memory.write@1` |
+| `YUNXI_NEXT_STORAGE_ENABLED` | `true` | Launch persistent `storage.sessions@1` |
+| `YUNXI_NEXT_COMPANION_ENABLED` | `false` | Launch deterministic `companion.decide@1` |
+| `YUNXI_NEXT_MAILBOX_ENABLED` | companion value | Launch encrypted `companion.mailbox@1` |
+| `YUNXI_NEXT_SCHEDULER_ENABLED` | companion value | Launch `scheduler.proactive@1` |
+| `YUNXI_NEXT_COMPANION_TOOL_REQUESTS` | `false` | Permit scheduler plans that ask the user to approve a tool; never executes it |
 
-`YUNXI_NEXT_PERSONA_ENABLED` and `YUNXI_NEXT_MEMORY_ENABLED` take precedence
-over the legacy `YUNXI_PERSONA_ENABLED` and `YUNXI_MEMORY_ENABLED` variables.
+The Next persona, memory, and companion variables take precedence over legacy
+`YUNXI_PERSONA_ENABLED`, `YUNXI_MEMORY_ENABLED`, and
+`YUNXI_COMPANION_ENABLED` variables.
 When memory is enabled while persona expression is disabled, the persona
 process runs only as the safety wrapper for memory context. A disabled
 capability is not launched and has no catalog route.
+
+Each optional built-in executable also has a development-only path override:
+`YUNXI_NEXT_CONTEXT_PLUGIN`, `YUNXI_NEXT_PERSONA_PLUGIN`,
+`YUNXI_NEXT_MEMORY_PLUGIN`, `YUNXI_NEXT_STORAGE_PLUGIN`,
+`YUNXI_NEXT_COMPANION_PLUGIN`, `YUNXI_NEXT_MAILBOX_PLUGIN`, and
+`YUNXI_NEXT_SCHEDULER_PLUGIN`.
+
+`YUNXI_NEXT_HOME` selects the global YunXi Next state root for memory. The
+mailbox accepts `YUNXI_NEXT_MAILBOX_KEY_HEX` (64 hex characters) when an
+externally managed encryption key is required; otherwise it creates a key
+inside the granted workspace mailbox directory. The legacy
+`YUNXI_MAILBOX_KEY_HEX` name is also accepted for transition use.

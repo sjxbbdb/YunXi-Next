@@ -1,0 +1,16 @@
+[package]
+name = "yunxi-scheduler"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+yunxi-protocol = { path = "../yunxi-protocol" }
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "yunxi-scheduler"
+path = "src/bin/yunxi-scheduler.rs"

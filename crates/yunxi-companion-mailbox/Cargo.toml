@@ -1,0 +1,21 @@
+[package]
+name = "yunxi-companion-mailbox"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+base64.workspace = true
+chacha20poly1305.workspace = true
+getrandom.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+yunxi-protocol = { path = "../yunxi-protocol" }
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "yunxi-companion-mailbox"
+path = "src/bin/yunxi-companion-mailbox.rs"

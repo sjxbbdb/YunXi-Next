@@ -6,6 +6,8 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+yunxi-companion = { path = "../yunxi-companion" }
+yunxi-companion-mailbox = { path = "../yunxi-companion-mailbox" }
 yunxi-context = { path = "../yunxi-context" }
 yunxi-kernel = { path = "../yunxi-kernel" }
 yunxi-memory = { path = "../yunxi-memory" }
@@ -13,10 +15,15 @@ yunxi-model-openai = { path = "../yunxi-model-openai" }
 yunxi-persona = { path = "../yunxi-persona" }
 yunxi-plugin-host = { path = "../yunxi-plugin-host" }
 yunxi-protocol = { path = "../yunxi-protocol" }
+yunxi-scheduler = { path = "../yunxi-scheduler" }
+yunxi-storage = { path = "../yunxi-storage" }
 
 [[bin]]
 name = "yunxi-next"
 path = "src/main.rs"
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true

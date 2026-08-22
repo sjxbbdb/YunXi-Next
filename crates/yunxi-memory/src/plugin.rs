@@ -1,4 +1,4 @@
-//! Plugin-side handshake and request dispatch for read-only memory recall.
+//! Plugin-side handshake and dispatch for memory recall, writes, and review.
 
 use std::error::Error;
 use std::fmt;
@@ -6,25 +6,30 @@ use std::time::Duration;
 
 use yunxi_protocol::{
     CapabilityDescriptor, CapabilityError, HostMessage, InvocationCodecError, InvocationResponse,
-    MEMORY_RECALL_OPERATION, MemoryRecallRequest, PluginMessage, ProtocolError, capabilities,
-    connect_plugin,
+    MEMORY_RECALL_OPERATION, MEMORY_WRITE_EXTRACT_OPERATION, MEMORY_WRITE_REVIEW_OPERATION,
+    MemoryRecallRequest, MemoryReviewRequest, MemoryWriteRequest, PluginMessage, ProtocolError,
+    capabilities, connect_plugin,
 };
 
-use crate::{MemoryRecallError, recall};
+use crate::{MemoryRecallError, MemoryWriteError, extract_and_store, recall, review_memory};
 
 pub const MEMORY_PLUGIN_ID: &str = "yunxi.memory";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub fn run_memory_plugin() -> Result<(), MemoryPluginError> {
-    let capability = CapabilityDescriptor::new(
+    let recall_capability = CapabilityDescriptor::new(
         capabilities::MEMORY_RECALL,
         capabilities::MEMORY_RECALL_VERSION,
+    )?;
+    let write_capability = CapabilityDescriptor::new(
+        capabilities::MEMORY_WRITE,
+        capabilities::MEMORY_WRITE_VERSION,
     )?;
     let mut session = connect_plugin(
         MEMORY_PLUGIN_ID,
         "Read-only long-term memory",
         env!("CARGO_PKG_VERSION"),
-        vec![capability],
+        vec![recall_capability, write_capability],
         CONNECT_TIMEOUT,
     )?;
 
@@ -32,41 +37,69 @@ pub fn run_memory_plugin() -> Result<(), MemoryPluginError> {
         match session.receive()? {
             HostMessage::Invoke { request } => {
                 let request_id = request.request_id();
-                if request.capability().id().as_str() != capabilities::MEMORY_RECALL
-                    || request.capability().version() != capabilities::MEMORY_RECALL_VERSION
-                    || request.operation() != MEMORY_RECALL_OPERATION
-                {
-                    send_failure(
-                        &mut session,
-                        request_id,
-                        "unsupported_operation",
-                        "memory plugin does not support the requested operation".to_string(),
-                    )?;
-                    continue;
-                }
-                let payload = match request.decode_payload::<MemoryRecallRequest>() {
-                    Ok(payload) => payload,
-                    Err(error) => {
+                let capability = request.capability().id().as_str();
+                let response = match (
+                    capability,
+                    request.capability().version(),
+                    request.operation(),
+                ) {
+                    (
+                        capabilities::MEMORY_RECALL,
+                        capabilities::MEMORY_RECALL_VERSION,
+                        MEMORY_RECALL_OPERATION,
+                    ) => request
+                        .decode_payload::<MemoryRecallRequest>()
+                        .map_err(MemoryPluginError::Invocation)
+                        .and_then(|payload| recall(&payload).map_err(MemoryPluginError::Recall))
+                        .and_then(|result| {
+                            InvocationResponse::encode(request_id, &result)
+                                .map_err(MemoryPluginError::Invocation)
+                        }),
+                    (
+                        capabilities::MEMORY_WRITE,
+                        capabilities::MEMORY_WRITE_VERSION,
+                        MEMORY_WRITE_EXTRACT_OPERATION,
+                    ) => request
+                        .decode_payload::<MemoryWriteRequest>()
+                        .map_err(MemoryPluginError::Invocation)
+                        .and_then(|payload| {
+                            extract_and_store(&payload).map_err(MemoryPluginError::Write)
+                        })
+                        .and_then(|result| {
+                            InvocationResponse::encode(request_id, &result)
+                                .map_err(MemoryPluginError::Invocation)
+                        }),
+                    (
+                        capabilities::MEMORY_WRITE,
+                        capabilities::MEMORY_WRITE_VERSION,
+                        MEMORY_WRITE_REVIEW_OPERATION,
+                    ) => request
+                        .decode_payload::<MemoryReviewRequest>()
+                        .map_err(MemoryPluginError::Invocation)
+                        .and_then(|payload| {
+                            review_memory(&payload).map_err(MemoryPluginError::Write)
+                        })
+                        .and_then(|result| {
+                            InvocationResponse::encode(request_id, &result)
+                                .map_err(MemoryPluginError::Invocation)
+                        }),
+                    _ => {
                         send_failure(
                             &mut session,
                             request_id,
-                            "invalid_request",
-                            error.to_string(),
+                            "unsupported_operation",
+                            "memory plugin does not support the requested operation".to_string(),
                         )?;
                         continue;
                     }
                 };
-                match recall(&payload) {
-                    Ok(result) => {
-                        let response = InvocationResponse::encode(request_id, &result)?;
+                match response {
+                    Ok(response) => {
                         session.send(&PluginMessage::InvocationCompleted { response })?;
                     }
-                    Err(error) => send_failure(
-                        &mut session,
-                        request_id,
-                        "memory_recall_error",
-                        error.to_string(),
-                    )?,
+                    Err(error) => {
+                        send_failure(&mut session, request_id, error.code(), error.to_string())?
+                    }
                 }
             }
             HostMessage::Shutdown => return Ok(()),
@@ -97,9 +130,24 @@ fn send_failure(
 pub enum MemoryPluginError {
     Capability(CapabilityError),
     Recall(MemoryRecallError),
+    Write(MemoryWriteError),
     Invocation(InvocationCodecError),
     Protocol(ProtocolError),
     UnexpectedHostMessage(String),
+}
+
+impl MemoryPluginError {
+    fn code(&self) -> &'static str {
+        match self {
+            Self::Invocation(_) => "invalid_request",
+            Self::Recall(_) => "memory_recall_error",
+            Self::Write(MemoryWriteError::WriteNotGranted) => "write_not_granted",
+            Self::Write(_) => "memory_write_error",
+            Self::Capability(_) | Self::Protocol(_) | Self::UnexpectedHostMessage(_) => {
+                "plugin_error"
+            }
+        }
+    }
 }
 
 impl fmt::Display for MemoryPluginError {
@@ -107,6 +155,7 @@ impl fmt::Display for MemoryPluginError {
         match self {
             Self::Capability(error) => write!(formatter, "invalid capability: {error}"),
             Self::Recall(error) => error.fmt(formatter),
+            Self::Write(error) => error.fmt(formatter),
             Self::Invocation(error) => error.fmt(formatter),
             Self::Protocol(error) => error.fmt(formatter),
             Self::UnexpectedHostMessage(message) => formatter.write_str(message),
@@ -119,6 +168,7 @@ impl Error for MemoryPluginError {
         match self {
             Self::Capability(error) => Some(error),
             Self::Recall(error) => Some(error),
+            Self::Write(error) => Some(error),
             Self::Invocation(error) => Some(error),
             Self::Protocol(error) => Some(error),
             Self::UnexpectedHostMessage(_) => None,

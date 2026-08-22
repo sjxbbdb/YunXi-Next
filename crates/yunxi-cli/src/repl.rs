@@ -4,6 +4,7 @@ use std::io::{self, BufRead, Write};
 
 use yunxi_protocol::ChatMessage;
 
+use crate::management::{ManagementCommand, ManagementResult};
 use crate::session::ChatBackend;
 use crate::ui::Palette;
 
@@ -53,6 +54,14 @@ where
             "/help" => {
                 writeln!(output, "/status  show kernel and plugin state")?;
                 writeln!(output, "/clear   clear conversation history")?;
+                writeln!(output, "/sessions  list saved sessions")?;
+                writeln!(output, "/resume <id>  resume a saved session")?;
+                writeln!(output, "/new  start a new persistent session")?;
+                writeln!(output, "/memory approve|reject <id>  review pending memory")?;
+                writeln!(
+                    output,
+                    "/mailbox [read <id>]  list or read companion messages"
+                )?;
                 writeln!(output, "/quit    exit YunXi")?;
             }
             "/status" => {
@@ -78,11 +87,25 @@ where
             }
             "/quit" | "/exit" => return Ok(()),
             command if command.starts_with('/') => {
-                writeln!(
-                    output,
-                    "{} unknown command `{command}`",
-                    palette.error("error:")
-                )?;
+                match parse_management_command(command) {
+                    Ok(Some(command)) => match backend.manage(command) {
+                        Ok(result) => apply_management_result(result, &mut history, output)?,
+                        Err(error) => {
+                            writeln!(output, "{} {error}", palette.error("error:"))?;
+                        }
+                    },
+                    Ok(None) => {
+                        writeln!(
+                            output,
+                            "{} unknown command `{command}`",
+                            palette.error("error:")
+                        )?;
+                    }
+                    Err(error) => {
+                        writeln!(output, "{} {error}", palette.error("error:"))?;
+                    }
+                }
+                write_notices(backend, output, &palette)?;
             }
             prompt => {
                 let mut request = history.clone();
@@ -102,6 +125,44 @@ where
             }
         }
     }
+}
+
+fn parse_management_command(value: &str) -> Result<Option<ManagementCommand>, String> {
+    let parts = value.split_whitespace().collect::<Vec<_>>();
+    match parts.as_slice() {
+        ["/sessions"] => Ok(Some(ManagementCommand::ListSessions)),
+        ["/resume", id] => Ok(Some(ManagementCommand::ResumeSession((*id).to_string()))),
+        ["/resume"] => Err("usage: /resume <session-id>".to_string()),
+        ["/new"] => Ok(Some(ManagementCommand::NewSession)),
+        ["/memory", "approve", id] => Ok(Some(ManagementCommand::ReviewMemory {
+            id: (*id).to_string(),
+            approve: true,
+        })),
+        ["/memory", "reject", id] => Ok(Some(ManagementCommand::ReviewMemory {
+            id: (*id).to_string(),
+            approve: false,
+        })),
+        ["/memory", ..] => Err("usage: /memory approve|reject <memory-id>".to_string()),
+        ["/mailbox"] => Ok(Some(ManagementCommand::ListMailbox)),
+        ["/mailbox", "read", id] => Ok(Some(ManagementCommand::ReadMailbox((*id).to_string()))),
+        ["/mailbox", ..] => Err("usage: /mailbox [read <item-id>]".to_string()),
+        _ => Ok(None),
+    }
+}
+
+fn apply_management_result<W: Write>(
+    result: ManagementResult,
+    history: &mut Vec<ChatMessage>,
+    output: &mut W,
+) -> io::Result<()> {
+    if let Some(replacement) = result.replacement_history {
+        *history = replacement;
+        trim_history(history);
+    }
+    for line in result.lines {
+        writeln!(output, "{line}")?;
+    }
+    Ok(())
 }
 
 fn write_notices<B, W>(backend: &mut B, output: &mut W, palette: &Palette) -> io::Result<()>
@@ -161,6 +222,16 @@ mod tests {
         fn drain_notices(&mut self) -> Vec<String> {
             Vec::new()
         }
+
+        fn manage(&mut self, command: ManagementCommand) -> Result<ManagementResult, String> {
+            match command {
+                ManagementCommand::NewSession => Ok(ManagementResult::replace_history(
+                    vec!["new".to_string()],
+                    Vec::new(),
+                )),
+                _ => Ok(ManagementResult::lines(vec!["managed".to_string()])),
+            }
+        }
     }
 
     #[test]
@@ -188,6 +259,19 @@ mod tests {
             requests: Vec::new(),
         };
         let mut input = Cursor::new("first\n/clear\nsecond\n/quit\n");
+        let mut output = Vec::new();
+
+        run_interactive(&mut backend, &mut input, &mut output, false).expect("run repl");
+
+        assert_eq!(backend.requests[1], [ChatMessage::user("second")]);
+    }
+
+    #[test]
+    fn new_command_replaces_history_through_backend_management() {
+        let mut backend = FakeBackend {
+            requests: Vec::new(),
+        };
+        let mut input = Cursor::new("first\n/new\nsecond\n/quit\n");
         let mut output = Vec::new();
 
         run_interactive(&mut backend, &mut input, &mut output, false).expect("run repl");

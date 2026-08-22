@@ -23,6 +23,28 @@ YunXi Next/
 |   `-- provider-configuration.md      provider environment resolution
 `-- crates/                            production Rust packages
     |-- README.md                      workspace crate and dependency index
+    |-- yunxi-companion/               deterministic response-policy plugin
+    |   |-- Cargo.toml                 protocol-only companion package
+    |   |-- README.md                  capability scope and exclusions
+    |   `-- src/                        companion implementation
+    |       |-- README.md               source file index
+    |       |-- decision.rs             emotion, tone, and follow-up policy
+    |       |-- lib.rs                  stable companion-plugin facade
+    |       |-- plugin.rs               companion capability request loop
+    |       `-- bin/                    standalone plugin entry point
+    |           |-- README.md           binary purpose
+    |           `-- yunxi-companion.rs  companion plugin executable
+    |-- yunxi-companion-mailbox/        encrypted companion mailbox plugin
+    |   |-- Cargo.toml                 crypto, serde, and protocol dependencies
+    |   |-- README.md                  storage and encryption boundary
+    |   `-- src/                        mailbox implementation
+    |       |-- README.md               source file index
+    |       |-- lib.rs                  stable mailbox-plugin facade
+    |       |-- plugin.rs               mailbox capability request loop
+    |       |-- store.rs                encrypted records, keys, and idempotency
+    |       `-- bin/                    standalone plugin entry point
+    |           |-- README.md           binary purpose
+    |           `-- yunxi-companion-mailbox.rs mailbox plugin executable
     |-- yunxi-cli/                     user-facing multi-plugin terminal host
     |   |-- Cargo.toml                 CLI package and `yunxi-next` binary
     |   |-- README.md                  crate scope and layout
@@ -30,9 +52,13 @@ YunXi Next/
     |   |   |-- README.md              source file index
     |   |   |-- args.rs                command-line parser
     |   |   |-- lib.rs                 CLI coordinator and public entry point
+    |   |   |-- management.rs          session, memory, and mailbox command types
     |   |   |-- main.rs                executable and built-in child mode switch
     |   |   |-- repl.rs                commands and bounded chat history
     |   |   |-- session.rs             capability launch, composition, and model routing
+    |   |   |-- session/               stateful orchestration split from model routing
+    |   |   |   |-- README.md          session module ownership
+    |   |   |   `-- stateful.rs        storage, memory-write, scheduler, and mailbox calls
     |   |   `-- ui.rs                  ANSI-aware compact presentation
     |   `-- tests/                     complete process-path tests
     |       |-- README.md              integration test purpose
@@ -77,7 +103,7 @@ YunXi Next/
     |   `-- tests/                      kernel boundary integration tests
     |       |-- README.md               integration test index
     |       `-- process_isolation.rs    real-process crash isolation
-    |-- yunxi-memory/                   read-only memory recall capability plugin
+    |-- yunxi-memory/                   recall and write capability plugin
     |   |-- Cargo.toml                 JSON, serde, and protocol dependencies
     |   |-- README.md                  legacy compatibility and exclusions
     |   `-- src/                        memory implementation
@@ -86,7 +112,8 @@ YunXi Next/
     |       |-- plugin.rs               memory capability request loop
     |       |-- recall.rs               boot and dynamic recall policy
     |       |-- record.rs               legacy-compatible stored record schema
-    |       |-- store.rs                bounded read-only JSONL loading
+    |       |-- store.rs                bounded legacy/Next reads and Next writes
+    |       |-- write.rs                extraction, policy, dedup, and review
     |       `-- bin/                    standalone plugin entry point
     |           |-- README.md           binary purpose
     |           `-- yunxi-memory.rs     memory plugin executable
@@ -126,17 +153,46 @@ YunXi Next/
     |   `-- tests/                      process/protocol isolation tests
     |       |-- README.md               integration test purpose
     |       `-- process_runtime.rs      crashed-route and healthy-sibling verification
+    |-- yunxi-scheduler/                proactive scheduling policy plugin
+    |   |-- Cargo.toml                 protocol-only scheduler package
+    |   |-- README.md                  scheduling boundary and exclusions
+    |   `-- src/                        scheduler implementation
+    |       |-- README.md               source file index
+    |       |-- lib.rs                  stable scheduler-plugin facade
+    |       |-- plugin.rs               scheduler capability request loop
+    |       |-- policy.rs               quiet-hour, signal, and limit policy
+    |       `-- bin/                    standalone plugin entry point
+    |           |-- README.md           binary purpose
+    |           `-- yunxi-scheduler.rs  scheduler plugin executable
+    |-- yunxi-storage/                  persistent session capability plugin
+    |   |-- Cargo.toml                 serde, JSON, and protocol dependencies
+    |   |-- README.md                  session ownership and legacy boundary
+    |   `-- src/                        session storage implementation
+    |       |-- README.md               source file index
+    |       |-- lib.rs                  stable storage-plugin facade
+    |       |-- plugin.rs               session capability request loop
+    |       |-- record.rs               Next schema and legacy projection
+    |       |-- store.rs                bounded persistence and mutations
+    |       `-- bin/                    standalone plugin entry point
+    |           |-- README.md           binary purpose
+    |           `-- yunxi-storage.rs    storage plugin executable
     `-- yunxi-protocol/                 local host/plugin wire contract
         |-- Cargo.toml                  serialization-only dependencies
         |-- README.md                   crate scope and layout
         `-- src/                        protocol implementation
             |-- README.md               source file index
             |-- capability.rs           capability ids, versions, and built-in names
+            |-- companion.rs            companion policy payload contracts
+            |-- grant.rs                explicit workspace-access contract
             |-- handshake.rs            loopback setup and readiness exchange
             |-- identity.rs             context, memory, and persona payload contracts
             |-- invocation.rs           generic typed-payload call envelopes
             |-- lib.rs                  stable protocol facade
+            |-- mailbox.rs              encrypted mailbox payload contracts
+            |-- memory_write.rs         memory extraction and review contracts
             |-- message.rs              versioned host/plugin messages
+            |-- scheduler.rs            proactive scheduling payload contracts
+            |-- sessions.rs             persistent-session payload contracts
             `-- transport.rs            bounded JSONL TCP transport
 ```
 

@@ -2,14 +2,14 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use yunxi_protocol::{MemoryContextKind, MemoryContextRecord};
 
 const CURRENT_SCHEMA_VERSION: u32 = 3;
 const MAX_MEMORY_ID_CHARS: usize = 256;
 const MAX_MEMORY_CONTENT_CHARS: usize = 64 * 1024;
 
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum MemoryScope {
     GlobalUser,
@@ -36,7 +36,7 @@ impl MemoryScope {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum MemoryKind {
     Preference,
@@ -80,7 +80,7 @@ impl MemoryKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum MemorySensitivity {
     #[default]
@@ -89,7 +89,7 @@ pub(crate) enum MemorySensitivity {
     High,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum MemoryStatus {
     Active,
@@ -108,9 +108,17 @@ impl MemoryStatus {
             Self::Archived => "archived",
         }
     }
+
+    pub(crate) fn protocol_status(self) -> yunxi_protocol::MemoryWriteStatus {
+        match self {
+            Self::Active => yunxi_protocol::MemoryWriteStatus::Active,
+            Self::Pending => yunxi_protocol::MemoryWriteStatus::Pending,
+            Self::Rejected | Self::Archived => yunxi_protocol::MemoryWriteStatus::Rejected,
+        }
+    }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum MemoryLayer {
     Profile,
@@ -123,7 +131,7 @@ pub(crate) enum MemoryLayer {
     Unknown,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct MemoryTemporal {
     #[serde(default)]
     pub(crate) observed_at_millis: u128,
@@ -135,15 +143,21 @@ pub(crate) struct MemoryTemporal {
     pub(crate) expires_at_millis: Option<u128>,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub(crate) struct MemoryInvalidation {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) supersedes: Vec<String>,
     #[serde(default)]
     pub(crate) superseded_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) conflicts_with: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) expires_reason: Option<String>,
     #[serde(default)]
     pub(crate) invalidated_at_millis: Option<u128>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct StoredMemoryRecord {
     pub(crate) id: String,
     #[serde(default)]
@@ -151,6 +165,8 @@ pub(crate) struct StoredMemoryRecord {
     pub(crate) scope: MemoryScope,
     pub(crate) kind: MemoryKind,
     pub(crate) content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) source_session_id: Option<String>,
     #[serde(default = "default_confidence")]
     pub(crate) confidence: f32,
     #[serde(default = "default_importance")]
@@ -167,6 +183,8 @@ pub(crate) struct StoredMemoryRecord {
     pub(crate) dedup_key: String,
     #[serde(default = "default_revision")]
     pub(crate) revision: u32,
+    #[serde(default = "default_merged_count")]
+    pub(crate) merged_count: u32,
     #[serde(default)]
     pub(crate) layer: MemoryLayer,
     #[serde(default)]
@@ -176,6 +194,41 @@ pub(crate) struct StoredMemoryRecord {
 }
 
 impl StoredMemoryRecord {
+    pub(crate) fn new(
+        id: impl Into<String>,
+        scope: MemoryScope,
+        kind: MemoryKind,
+        content: impl Into<String>,
+        now: u128,
+    ) -> Self {
+        let mut record = Self {
+            id: id.into(),
+            schema_version: CURRENT_SCHEMA_VERSION,
+            scope,
+            kind,
+            content: content.into(),
+            source_session_id: None,
+            confidence: 0.82,
+            importance: 0.65,
+            sensitivity: MemorySensitivity::Low,
+            status: MemoryStatus::Pending,
+            created_at_millis: now,
+            updated_at_millis: now,
+            dedup_key: String::new(),
+            revision: 1,
+            merged_count: 1,
+            layer: layer_for_kind(kind),
+            temporal: MemoryTemporal {
+                observed_at_millis: now,
+                valid_from_millis: Some(now),
+                ..MemoryTemporal::default()
+            },
+            invalidation: MemoryInvalidation::default(),
+        };
+        record.dedup_key = record.dedup_key();
+        record
+    }
+
     pub(crate) fn validate(&mut self) -> Result<(), String> {
         if self.schema_version > CURRENT_SCHEMA_VERSION {
             return Err(format!(
@@ -210,6 +263,9 @@ impl StoredMemoryRecord {
         }
         if self.revision == 0 {
             self.revision = 1;
+        }
+        if self.merged_count == 0 {
+            self.merged_count = 1;
         }
         if self.layer == MemoryLayer::Unknown {
             self.layer = layer_for_kind(self.kind);
@@ -258,6 +314,16 @@ impl StoredMemoryRecord {
             self.kind.protocol_kind(),
             self.content.clone(),
         )
+    }
+
+    pub(crate) fn protocol_kind(&self) -> MemoryContextKind {
+        self.kind.protocol_kind()
+    }
+
+    pub(crate) fn set_status(&mut self, status: MemoryStatus, now: u128) {
+        self.status = status;
+        self.updated_at_millis = now;
+        self.revision = self.revision.saturating_add(1);
     }
 }
 
@@ -329,5 +395,9 @@ fn default_importance() -> f32 {
 }
 
 fn default_revision() -> u32 {
+    1
+}
+
+fn default_merged_count() -> u32 {
     1
 }

@@ -1,4 +1,4 @@
-//! Standalone entry point for the read-only memory plugin process.
+//! Standalone entry point for the memory recall and write plugin process.
 
 use std::process::ExitCode;
 

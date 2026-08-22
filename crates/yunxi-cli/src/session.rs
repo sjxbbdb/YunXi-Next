@@ -1,5 +1,7 @@
 //! Multi-plugin host orchestration and chat request assembly.
 
+mod stateful;
+
 use std::collections::BTreeSet;
 use std::env;
 use std::error::Error;
@@ -8,6 +10,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use yunxi_companion::COMPANION_PLUGIN_ID;
+use yunxi_companion_mailbox::MAILBOX_PLUGIN_ID;
 use yunxi_context::CONTEXT_PLUGIN_ID;
 use yunxi_kernel::{PluginCommand, PluginId, PluginIdError};
 use yunxi_memory::MEMORY_PLUGIN_ID;
@@ -17,15 +21,21 @@ use yunxi_plugin_host::{
     CatalogError, PluginCallError, PluginHostError, PluginLaunch, ProcessPluginHost,
 };
 use yunxi_protocol::{
-    CONTEXT_COMPOSE_OPERATION, CapabilityDescriptor, CapabilityError, ChatMessage, ChatRequest,
-    ChatResult, ContextComposeRequest, ContextComposeResult, MEMORY_RECALL_OPERATION,
+    COMPANION_DECIDE_OPERATION, CONTEXT_COMPOSE_OPERATION, CapabilityDescriptor, CapabilityError,
+    ChatMessage, ChatRequest, ChatResult, CompanionDecisionRequest, CompanionDecisionResult,
+    ContextComposeRequest, ContextComposeResult, MEMORY_RECALL_OPERATION,
     MODEL_CHAT_COMPLETE_OPERATION, MemoryContextRecord, MemoryRecallRequest, MemoryRecallResult,
     PERSONA_CONTEXT_COMPILE_OPERATION, PersonaContextRequest, PersonaContextResult, capabilities,
 };
+use yunxi_scheduler::SCHEDULER_PLUGIN_ID;
+use yunxi_storage::STORAGE_PLUGIN_ID;
 
 use crate::{
-    INTERNAL_CONTEXT_PLUGIN_ARGUMENT, INTERNAL_MEMORY_PLUGIN_ARGUMENT,
+    INTERNAL_COMPANION_PLUGIN_ARGUMENT, INTERNAL_CONTEXT_PLUGIN_ARGUMENT,
+    INTERNAL_MAILBOX_PLUGIN_ARGUMENT, INTERNAL_MEMORY_PLUGIN_ARGUMENT,
     INTERNAL_MODEL_PLUGIN_ARGUMENT, INTERNAL_PERSONA_PLUGIN_ARGUMENT,
+    INTERNAL_SCHEDULER_PLUGIN_ARGUMENT, INTERNAL_STORAGE_PLUGIN_ARGUMENT,
+    management::{ManagementCommand, ManagementResult},
 };
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -34,8 +44,12 @@ const READ_ONLY_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 const RESPONSE_TIMEOUT_MARGIN: Duration = Duration::from_secs(5);
 
 const CONTEXT_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_CONTEXT_PLUGIN";
+const COMPANION_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_COMPANION_PLUGIN";
+const MAILBOX_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_MAILBOX_PLUGIN";
 const MEMORY_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_MEMORY_PLUGIN";
 const PERSONA_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_PERSONA_PLUGIN";
+const SCHEDULER_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_SCHEDULER_PLUGIN";
+const STORAGE_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_STORAGE_PLUGIN";
 
 pub(crate) trait ChatBackend {
     fn complete(&mut self, messages: &[ChatMessage]) -> Result<String, ChatFailure>;
@@ -43,6 +57,7 @@ pub(crate) trait ChatBackend {
     fn model(&self) -> &str;
     fn status(&mut self) -> BackendStatus;
     fn drain_notices(&mut self) -> Vec<String>;
+    fn manage(&mut self, command: ManagementCommand) -> Result<ManagementResult, String>;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -61,11 +76,18 @@ pub(crate) struct ChatSession {
     model_capability: CapabilityDescriptor,
     context_capability: Option<CapabilityDescriptor>,
     memory_capability: Option<CapabilityDescriptor>,
+    memory_write_capability: Option<CapabilityDescriptor>,
     persona_capability: Option<CapabilityDescriptor>,
+    companion_capability: Option<CapabilityDescriptor>,
+    storage_capability: Option<CapabilityDescriptor>,
+    mailbox_capability: Option<CapabilityDescriptor>,
+    scheduler_capability: Option<CapabilityDescriptor>,
     cwd: PathBuf,
     provider: String,
     model: String,
     first_turn: bool,
+    active_session_id: Option<String>,
+    proactive_in_session: u32,
     notices: Vec<String>,
     reported_notices: BTreeSet<String>,
 }
@@ -154,7 +176,7 @@ impl ChatSession {
             None
         };
 
-        let memory_capability = if switches.memory && persona_capability.is_some() {
+        let memory_capability = if switches.memory {
             let id = PluginId::new(MEMORY_PLUGIN_ID)?;
             let capability = descriptor(
                 capabilities::MEMORY_RECALL,
@@ -163,7 +185,7 @@ impl ChatSession {
             launch_optional(
                 &mut host,
                 id,
-                "Read-only long-term memory",
+                "Long-term memory",
                 optional_command(
                     &executable,
                     INTERNAL_MEMORY_PLUGIN_ARGUMENT,
@@ -174,12 +196,114 @@ impl ChatSession {
             )
             .then_some(capability)
         } else {
-            if switches.memory && persona_capability.is_none() {
-                notices.push(
-                    "memory recall stayed disabled because its context compiler was unavailable"
-                        .to_string(),
-                );
-            }
+            None
+        };
+
+        let memory_write_capability = if memory_capability.is_some() {
+            let capability = descriptor(
+                capabilities::MEMORY_WRITE,
+                capabilities::MEMORY_WRITE_VERSION,
+            )?;
+            optional_secondary_capability(
+                &mut host,
+                &PluginId::new(MEMORY_PLUGIN_ID)?,
+                &capability,
+                &mut notices,
+            )
+            .then_some(capability)
+        } else {
+            None
+        };
+
+        let storage_capability = if switches.storage {
+            let id = PluginId::new(STORAGE_PLUGIN_ID)?;
+            let capability = descriptor(
+                capabilities::STORAGE_SESSIONS,
+                capabilities::STORAGE_SESSIONS_VERSION,
+            )?;
+            launch_optional(
+                &mut host,
+                id,
+                "Persistent conversation sessions",
+                optional_command(
+                    &executable,
+                    INTERNAL_STORAGE_PLUGIN_ARGUMENT,
+                    STORAGE_PLUGIN_PATH_ENV,
+                ),
+                &capability,
+                &mut notices,
+            )
+            .then_some(capability)
+        } else {
+            None
+        };
+
+        let companion_capability = if switches.companion {
+            let id = PluginId::new(COMPANION_PLUGIN_ID)?;
+            let capability = descriptor(
+                capabilities::COMPANION_DECIDE,
+                capabilities::COMPANION_DECIDE_VERSION,
+            )?;
+            launch_optional(
+                &mut host,
+                id,
+                "Deterministic companion policy",
+                optional_command(
+                    &executable,
+                    INTERNAL_COMPANION_PLUGIN_ARGUMENT,
+                    COMPANION_PLUGIN_PATH_ENV,
+                ),
+                &capability,
+                &mut notices,
+            )
+            .then_some(capability)
+        } else {
+            None
+        };
+
+        let mailbox_capability = if switches.mailbox {
+            let id = PluginId::new(MAILBOX_PLUGIN_ID)?;
+            let capability = descriptor(
+                capabilities::COMPANION_MAILBOX,
+                capabilities::COMPANION_MAILBOX_VERSION,
+            )?;
+            launch_optional(
+                &mut host,
+                id,
+                "Encrypted companion mailbox",
+                optional_command(
+                    &executable,
+                    INTERNAL_MAILBOX_PLUGIN_ARGUMENT,
+                    MAILBOX_PLUGIN_PATH_ENV,
+                ),
+                &capability,
+                &mut notices,
+            )
+            .then_some(capability)
+        } else {
+            None
+        };
+
+        let scheduler_capability = if switches.scheduler {
+            let id = PluginId::new(SCHEDULER_PLUGIN_ID)?;
+            let capability = descriptor(
+                capabilities::SCHEDULER_PROACTIVE,
+                capabilities::SCHEDULER_PROACTIVE_VERSION,
+            )?;
+            launch_optional(
+                &mut host,
+                id,
+                "Bounded proactive scheduler",
+                optional_command(
+                    &executable,
+                    INTERNAL_SCHEDULER_PLUGIN_ARGUMENT,
+                    SCHEDULER_PLUGIN_PATH_ENV,
+                ),
+                &capability,
+                &mut notices,
+            )
+            .then_some(capability)
+        } else {
             None
         };
 
@@ -190,11 +314,18 @@ impl ChatSession {
             model_capability,
             context_capability,
             memory_capability,
+            memory_write_capability,
             persona_capability,
+            companion_capability,
+            storage_capability,
+            mailbox_capability,
+            scheduler_capability,
             cwd,
             provider,
             model,
             first_turn: true,
+            active_session_id: None,
+            proactive_in_session: 0,
             notices,
             reported_notices,
         })
@@ -259,15 +390,28 @@ impl ChatSession {
             }
         }
 
+        let companion_memories = boot_memories
+            .iter()
+            .chain(dynamic_memories.iter())
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut persona_identity = None::<(String, String)>;
         if let Some(capability) = self.persona_capability.clone() {
-            let request =
-                PersonaContextRequest::new(boot_memories, dynamic_memories, include_boot_context);
+            let request = PersonaContextRequest::new(
+                boot_memories.clone(),
+                dynamic_memories.clone(),
+                include_boot_context,
+            );
             match self.host.invoke::<_, PersonaContextResult>(
                 &capability,
                 PERSONA_CONTEXT_COMPILE_OPERATION,
                 &request,
             ) {
                 Ok(persona) => {
+                    persona_identity = Some((
+                        persona.profile_id().to_string(),
+                        persona.display_name().to_string(),
+                    ));
                     if let Some(content) =
                         persona.content().filter(|value| !value.trim().is_empty())
                     {
@@ -287,6 +431,38 @@ impl ChatSession {
             }
         }
 
+        if let Some(capability) = self.companion_capability.clone()
+            && let Some(prompt) = latest_user_message(messages)
+        {
+            let mut request =
+                CompanionDecisionRequest::new(prompt).with_memories(companion_memories);
+            if let Some((profile_id, display_name)) = persona_identity {
+                request = request.with_persona(profile_id, display_name);
+            }
+            match self.host.invoke::<_, CompanionDecisionResult>(
+                &capability,
+                COMPANION_DECIDE_OPERATION,
+                &request,
+            ) {
+                Ok(decision) => {
+                    let mut instruction = decision.instruction().unwrap_or_default().to_string();
+                    if let Some(follow_up) = decision.follow_up() {
+                        instruction.push_str("\nOptional follow-up, only when it fits naturally: ");
+                        instruction.push_str(follow_up);
+                    }
+                    if !instruction.trim().is_empty() {
+                        assembled.push(ChatMessage::system(instruction));
+                    }
+                }
+                Err(error) => {
+                    if call_lost_route(&error) {
+                        self.companion_capability = None;
+                    }
+                    self.push_notice(format!("companion capability degraded: {error}"));
+                }
+            }
+        }
+
         self.first_turn = false;
         assembled.extend_from_slice(messages);
         assembled
@@ -302,6 +478,9 @@ impl ChatSession {
 
 impl ChatBackend for ChatSession {
     fn complete(&mut self, messages: &[ChatMessage]) -> Result<String, ChatFailure> {
+        let prompt = latest_user_message(messages)
+            .unwrap_or_default()
+            .to_string();
         let messages = self.assemble_messages(messages);
         let result = self.host.invoke::<_, ChatResult>(
             &self.model_capability,
@@ -309,7 +488,13 @@ impl ChatBackend for ChatSession {
             &ChatRequest::new(messages),
         );
         match result {
-            Ok(result) => Ok(result.content().to_string()),
+            Ok(result) => {
+                let reply = result.content().to_string();
+                self.persist_turn(&prompt, &reply);
+                self.extract_turn_memories(&prompt, &reply);
+                self.evaluate_proactive(&prompt);
+                Ok(reply)
+            }
             Err(PluginCallError::Rejected {
                 code,
                 message,
@@ -362,6 +547,10 @@ impl ChatBackend for ChatSession {
     fn drain_notices(&mut self) -> Vec<String> {
         ChatSession::drain_notices(self)
     }
+
+    fn manage(&mut self, command: ManagementCommand) -> Result<ManagementResult, String> {
+        self.manage_command(command)
+    }
 }
 
 fn descriptor(id: &str, version: u32) -> Result<CapabilityDescriptor, CapabilityError> {
@@ -411,6 +600,37 @@ fn launch_optional(
                 capability.version()
             ));
             host.stop(&id);
+            false
+        }
+    }
+}
+
+fn optional_secondary_capability(
+    host: &mut ProcessPluginHost,
+    expected: &PluginId,
+    capability: &CapabilityDescriptor,
+    notices: &mut Vec<String>,
+) -> bool {
+    match host
+        .catalog()
+        .resolve_unique(capability.id().as_str(), capability.version())
+    {
+        Ok(provider) if provider.id() == expected => true,
+        Ok(provider) => {
+            notices.push(format!(
+                "{}@{} routed to unexpected provider `{}` instead of `{expected}`",
+                capability.id(),
+                capability.version(),
+                provider.id()
+            ));
+            false
+        }
+        Err(error) => {
+            notices.push(format!(
+                "plugin `{expected}` did not provide {}@{}: {error}",
+                capability.id(),
+                capability.version()
+            ));
             false
         }
     }
@@ -486,11 +706,22 @@ fn memory_recall_query(messages: &[ChatMessage]) -> String {
     recent.join("\n")
 }
 
+fn latest_user_message(messages: &[ChatMessage]) -> Option<&str> {
+    messages
+        .iter()
+        .rfind(|message| message.role() == yunxi_protocol::ChatRole::User)
+        .map(ChatMessage::content)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct CapabilitySwitches {
     context: bool,
     persona: bool,
     memory: bool,
+    companion: bool,
+    storage: bool,
+    mailbox: bool,
+    scheduler: bool,
 }
 
 impl CapabilitySwitches {
@@ -502,6 +733,9 @@ impl CapabilitySwitches {
     where
         F: Fn(&str) -> Option<String>,
     {
+        let companion = read_bool(&read, "YUNXI_NEXT_COMPANION_ENABLED")
+            .or_else(|| read_bool(&read, "YUNXI_COMPANION_ENABLED"))
+            .unwrap_or(false);
         Self {
             context: read_bool(&read, "YUNXI_NEXT_CONTEXT_ENABLED").unwrap_or(true),
             persona: read_bool(&read, "YUNXI_NEXT_PERSONA_ENABLED")
@@ -510,6 +744,10 @@ impl CapabilitySwitches {
             memory: read_bool(&read, "YUNXI_NEXT_MEMORY_ENABLED")
                 .or_else(|| read_bool(&read, "YUNXI_MEMORY_ENABLED"))
                 .unwrap_or(false),
+            companion,
+            storage: read_bool(&read, "YUNXI_NEXT_STORAGE_ENABLED").unwrap_or(true),
+            mailbox: read_bool(&read, "YUNXI_NEXT_MAILBOX_ENABLED").unwrap_or(companion),
+            scheduler: read_bool(&read, "YUNXI_NEXT_SCHEDULER_ENABLED").unwrap_or(companion),
         }
     }
 }
@@ -671,6 +909,10 @@ mod tests {
                 context: false,
                 persona: true,
                 memory: false,
+                companion: false,
+                storage: true,
+                mailbox: false,
+                scheduler: false,
             }
         );
     }

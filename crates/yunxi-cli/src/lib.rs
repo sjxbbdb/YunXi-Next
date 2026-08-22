@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 mod args;
+mod management;
 mod repl;
 mod session;
 mod ui;
@@ -16,9 +17,13 @@ use session::{ChatBackend, ChatFailure, ChatSession, SessionError};
 use yunxi_protocol::ChatMessage;
 
 pub const INTERNAL_MODEL_PLUGIN_ARGUMENT: &str = "__model-plugin";
+pub const INTERNAL_COMPANION_PLUGIN_ARGUMENT: &str = "__companion-plugin";
+pub const INTERNAL_MAILBOX_PLUGIN_ARGUMENT: &str = "__mailbox-plugin";
 pub const INTERNAL_CONTEXT_PLUGIN_ARGUMENT: &str = "__context-plugin";
 pub const INTERNAL_MEMORY_PLUGIN_ARGUMENT: &str = "__memory-plugin";
 pub const INTERNAL_PERSONA_PLUGIN_ARGUMENT: &str = "__persona-plugin";
+pub const INTERNAL_SCHEDULER_PLUGIN_ARGUMENT: &str = "__scheduler-plugin";
+pub const INTERNAL_STORAGE_PLUGIN_ARGUMENT: &str = "__storage-plugin";
 
 pub fn run_from_env() -> Result<(), CliError> {
     match args::parse(env::args_os().skip(1))? {

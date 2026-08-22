@@ -34,12 +34,12 @@ surfaces. They are not allowed to bypass the trusted approval or routing layer.
 | Model completion | `yunxi-agent-provider` | `model.chat@1:complete` | `yunxi-model-openai` | Transport integrated; manifest and grants pending |
 | Prompt and AGENTS context | `yunxi-agent-context` | `context.compose@1:compose` | `yunxi-context` | Integrated: bounded root-to-cwd read path |
 | Persona and soul | `yunxi-agent-persona` | `persona.context@1:compile` | `yunxi-persona` | Integrated: default/custom profile and soul read path |
-| Memory recall | `yunxi-agent-persona`, `yunxi-agent-storage` | `memory.recall@1:recall` | `yunxi-memory` | Integrated: read-only legacy JSONL path; writes remain separate |
-| Memory extraction and writes | `yunxi-agent-persona`, `yunxi-agent-storage` | `memory.write@1` | `yunxi-memory` | Planned: inheritance wave 2 |
-| Companion response policy | `yunxi-agent-companion` | `companion.decide@1` | `yunxi-companion` | Planned: inheritance wave 2 |
-| Relationship mailbox | `yunxi-agent-companion`, `yunxi-agent-storage` | `companion.mailbox@1` | `yunxi-companion-mailbox` | Planned: inheritance wave 2 |
-| Proactive scheduling | `yunxi-agent-runtime`, `yunxi-agent-companion` | `scheduler.proactive@1` | `yunxi-scheduler` | Planned: inheritance wave 2 |
-| Session history and resume | `yunxi-agent-storage` | `storage.sessions@1` | `yunxi-storage` | Planned: inheritance wave 2 |
+| Memory recall | `yunxi-agent-persona`, `yunxi-agent-storage` | `memory.recall@1:recall` | `yunxi-memory` | Integrated: bounded legacy + Next JSONL recall |
+| Memory extraction and writes | `yunxi-agent-persona`, `yunxi-agent-storage` | `memory.write@1:extract/review` | `yunxi-memory` | Baseline integrated: rule extraction, privacy policy, dedup, pending review, Next-only writes; provider extractor and bulk management pending |
+| Companion response policy | `yunxi-agent-companion` | `companion.decide@1:decide` | `yunxi-companion` | Integrated: deterministic emotion/tone/follow-up policy reaches model context |
+| Relationship mailbox | `yunxi-agent-companion`, `yunxi-agent-storage` | `companion.mailbox@1` | `yunxi-companion-mailbox` | Baseline integrated: encrypted Next mailbox, idempotency, list/get/read; legacy credential-store mailbox import pending |
+| Proactive scheduling | `yunxi-agent-runtime`, `yunxi-agent-companion` | `scheduler.proactive@1:evaluate` | `yunxi-scheduler` | Baseline integrated: explicit signals, quiet hours, limits, mailbox enqueue; background daemon and love-letter generation pending |
+| Session history and resume | `yunxi-agent-storage` | `storage.sessions@1` | `yunxi-storage` | Baseline integrated: append/list/load/resume and read-only legacy projection; full legacy event replay pending |
 | Shell execution | `yunxi-agent-tools`, `yunxi-agent-exec`, `yunxi-agent-sandbox` | `tool.shell@1` | `yunxi-tool-shell` | Planned after host grants |
 | Patch application | `yunxi-agent-tools`, `yunxi-agent-patch` | `tool.patch@1` | `yunxi-tool-patch` | Planned after host grants |
 | MCP bridge | `yunxi-agent-mcp`, `yunxi-agent-tools` | `tool.mcp@1` | `yunxi-tool-mcp` | Planned: inheritance wave 3 |
@@ -69,8 +69,9 @@ cross-plugin acceptance fixtures instead of a runtime capability.
 2. **Read-only identity path (complete):** context, persona, and memory recall
    compose the system context before a model request. Failure falls back to the
    remaining capabilities and model chat.
-3. **Stateful companion path:** memory writes, storage, companion policy,
-   mailbox, and scheduler gain explicit workspace-scoped storage grants.
+3. **Stateful companion path (baseline complete):** memory writes, storage,
+   companion policy, mailbox, and scheduler use process boundaries and explicit
+   workspace-scoped grants. Remaining parity items are recorded in the ledger.
 4. **Action path:** shell, patch, MCP, skills, and multi-agent run only after
    host-issued approval and resource grants. A plugin result never upgrades its
    own authority.

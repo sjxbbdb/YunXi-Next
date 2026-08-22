@@ -21,10 +21,15 @@ pub mod capabilities {
     pub const MEMORY_RECALL: &str = "memory.recall";
     pub const MEMORY_RECALL_VERSION: u32 = 1;
     pub const MEMORY_WRITE: &str = "memory.write";
+    pub const MEMORY_WRITE_VERSION: u32 = 1;
     pub const COMPANION_DECIDE: &str = "companion.decide";
+    pub const COMPANION_DECIDE_VERSION: u32 = 1;
     pub const COMPANION_MAILBOX: &str = "companion.mailbox";
+    pub const COMPANION_MAILBOX_VERSION: u32 = 1;
     pub const SCHEDULER_PROACTIVE: &str = "scheduler.proactive";
+    pub const SCHEDULER_PROACTIVE_VERSION: u32 = 1;
     pub const STORAGE_SESSIONS: &str = "storage.sessions";
+    pub const STORAGE_SESSIONS_VERSION: u32 = 1;
     pub const TOOL_SHELL: &str = "tool.shell";
     pub const TOOL_PATCH: &str = "tool.patch";
     pub const TOOL_MCP: &str = "tool.mcp";
