@@ -5,4 +5,4 @@ not belong in a Rust crate.
 
 | File | Responsibility |
 | --- | --- |
-| `install-windows.ps1` | Build YunXi Next plus its native router, install stable binaries, and register `yunxi next` without replacing the legacy executable |
+| `install-windows.ps1` | Build and register the independent `yunxi-next` command while preserving legacy `yunxi` |

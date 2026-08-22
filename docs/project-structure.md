@@ -13,7 +13,7 @@ YunXi Next/
 |-- README.md                          project purpose, setup, and entry points
 |-- scripts/                           explicit build and installation operations
 |   |-- README.md                      script index and ownership
-|   `-- install-windows.ps1            non-destructive `yunxi next` PATH installer
+|   `-- install-windows.ps1            standalone `yunxi-next` PATH installer
 |-- docs/                              repository-wide design documents
 |   |-- README.md                      documentation index
 |   |-- chat-runtime.md                end-to-end chat process and failure flow
@@ -23,7 +23,7 @@ YunXi Next/
 `-- crates/                            production Rust packages
     |-- README.md                      workspace crate and dependency index
     |-- yunxi-cli/                     user-facing terminal chat host
-    |   |-- Cargo.toml                 CLI package and `yunxi` binary
+    |   |-- Cargo.toml                 CLI package and `yunxi-next` binary
     |   |-- README.md                  crate scope and layout
     |   |-- src/                       terminal host implementation
     |   |   |-- README.md              source file index
@@ -65,13 +65,6 @@ YunXi Next/
     |   `-- tests/                      kernel boundary integration tests
     |       |-- README.md               integration test index
     |       `-- process_isolation.rs    real-process crash isolation
-    |-- yunxi-launcher/                zero-dependency global command router
-    |   |-- Cargo.toml                 launcher binary package
-    |   |-- README.md                  routing contract and route files
-    |   `-- src/                       launcher implementation
-    |       |-- README.md              source file index
-    |       |-- lib.rs                 route loading and direct process forwarding
-    |       `-- main.rs                exit-code-preserving entry point
     |-- yunxi-model-openai/             first model capability plugin
     |   |-- Cargo.toml                  HTTP and protocol dependencies
     |   |-- README.md                   crate scope and layout

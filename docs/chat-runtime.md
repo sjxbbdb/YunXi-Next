@@ -6,7 +6,7 @@
 terminal user
     |
     v
-yunxi CLI process
+yunxi-next CLI process
   - rolling conversation history
   - YunxiKernel lifecycle coordinator
   - host side of yunxi-protocol
@@ -22,12 +22,12 @@ isolated model plugin process
 model API
 ```
 
-The default distribution launches the same `yunxi` executable in a private
+The default distribution launches the same `yunxi-next` executable in a private
 child mode. This avoids a second installation artifact without weakening
 process isolation: provider HTTP code executes only after the new process starts.
 An external compatible executable can instead be selected with `--plugin`.
-The Windows PATH router maps `yunxi next` to this executable and delegates all
-other `yunxi` commands to the existing legacy executable.
+Windows installs this binary as the independent `yunxi-next` command, leaving
+the existing legacy `yunxi` command untouched.
 
 ## Readiness
 

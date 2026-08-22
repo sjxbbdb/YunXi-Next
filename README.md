@@ -41,7 +41,8 @@ filesystem, network, or resource-usage sandbox.
 
 ## Run
 
-Install the global route without replacing an existing legacy YunXi binary:
+Install the independent `yunxi-next` command without replacing an existing
+legacy YunXi binary:
 
 ```powershell
 .\scripts\install-windows.ps1
@@ -51,21 +52,21 @@ Open a new terminal, set a provider credential, then start the CLI:
 
 ```powershell
 $env:DEEPSEEK_API_KEY = "your-key"
-yunxi next
+yunxi-next
 ```
 
 An already-open terminal may still hold the old PATH. Refresh that process once
-before running `yunxi next`:
+before running `yunxi-next`:
 
 ```powershell
-$router = Join-Path $env:LOCALAPPDATA 'YunXi\bin'
-$env:Path = "$router;$env:Path"
+$nextBin = Join-Path $env:LOCALAPPDATA 'YunXi Next\bin'
+$env:Path = "$nextBin;$env:Path"
 ```
 
 Send one prompt without entering interactive mode:
 
 ```powershell
-yunxi next --once "你好"
+yunxi-next --once "你好"
 ```
 
 See [`docs/provider-configuration.md`](docs/provider-configuration.md) for

@@ -11,7 +11,7 @@ yunxi-model-openai = { path = "../yunxi-model-openai" }
 yunxi-protocol = { path = "../yunxi-protocol" }
 
 [[bin]]
-name = "yunxi"
+name = "yunxi-next"
 path = "src/main.rs"
 
 [lints]

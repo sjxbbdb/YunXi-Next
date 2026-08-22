@@ -157,9 +157,8 @@ fn write_response(mut stream: std::net::TcpStream, status: &str, response: &str)
 }
 
 fn configured_cli(address: std::net::SocketAddr) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_yunxi"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_yunxi-next"));
     command
-        .arg("next")
         .env("YUNXI_PROVIDER_PROFILE", "fixture")
         .env("YUNXI_PROVIDER_BASE_URL", format!("http://{address}/v1"))
         .env("YUNXI_PROVIDER_API_KEY", "fixture-secret")

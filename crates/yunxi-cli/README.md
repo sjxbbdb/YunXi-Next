@@ -11,8 +11,8 @@ client runs in a separately supervised process supplied by
 ## Use
 
 ```powershell
-cargo run -p yunxi-cli --bin yunxi -- next
-cargo run -p yunxi-cli --bin yunxi -- next --once "hello"
+cargo run -p yunxi-cli --bin yunxi-next
+cargo run -p yunxi-cli --bin yunxi-next -- --once "hello"
 ```
 
 Interactive commands are `/help`, `/status`, `/clear`, and `/quit`. Use

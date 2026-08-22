@@ -1,13 +1,12 @@
 <#
 .SYNOPSIS
-Installs the native `yunxi next` route without replacing legacy YunXi.
+Installs the standalone `yunxi-next` command without replacing legacy YunXi.
 #>
 
 [CmdletBinding()]
 param(
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA 'YunXi Next'),
-    [string]$RouterRoot = (Join-Path $env:LOCALAPPDATA 'YunXi'),
-    [string]$LegacyExecutable
+    [string]$ObsoleteRouterRoot = (Join-Path $env:LOCALAPPDATA 'YunXi')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -18,32 +17,21 @@ if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
 
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $installBin = [IO.Path]::GetFullPath((Join-Path $InstallRoot 'bin'))
-$routerBin = [IO.Path]::GetFullPath((Join-Path $RouterRoot 'bin'))
-$sourceNext = Join-Path $repositoryRoot 'target\release\yunxi.exe'
-$sourceLauncher = Join-Path $repositoryRoot 'target\release\yunxi-launcher.exe'
+$obsoleteRouterBin = [IO.Path]::GetFullPath((Join-Path $ObsoleteRouterRoot 'bin'))
+$sourceNext = Join-Path $repositoryRoot 'target\release\yunxi-next.exe'
 $installedNext = Join-Path $installBin 'yunxi-next.exe'
-$installedLauncher = Join-Path $routerBin 'yunxi.exe'
-$nextRouteFile = Join-Path $routerBin 'yunxi-next.path'
-$legacyRouteFile = Join-Path $routerBin 'yunxi-legacy.path'
-$obsoleteBatchRouter = Join-Path $routerBin 'yunxi.cmd'
-
-if ([string]::IsNullOrWhiteSpace($LegacyExecutable)) {
-    $LegacyExecutable = Get-Command yunxi.exe -All -ErrorAction SilentlyContinue |
-        Where-Object {
-            $_.CommandType -eq 'Application' -and
-            -not $_.Source.StartsWith($installBin, [StringComparison]::OrdinalIgnoreCase) -and
-            -not $_.Source.StartsWith($routerBin, [StringComparison]::OrdinalIgnoreCase)
-        } |
-        Select-Object -First 1 -ExpandProperty Source
-}
-
-if (-not [string]::IsNullOrWhiteSpace($LegacyExecutable)) {
-    $LegacyExecutable = (Resolve-Path -LiteralPath $LegacyExecutable).Path
-}
+$obsoleteNextRouteFile = Join-Path $obsoleteRouterBin 'yunxi-next.path'
+$obsoleteRouterDetected = Test-Path -LiteralPath $obsoleteNextRouteFile -PathType Leaf
+$obsoleteRouterFiles = @(
+    (Join-Path $obsoleteRouterBin 'yunxi.exe'),
+    (Join-Path $obsoleteRouterBin 'yunxi.cmd'),
+    $obsoleteNextRouteFile,
+    (Join-Path $obsoleteRouterBin 'yunxi-legacy.path')
+)
 
 Push-Location $repositoryRoot
 try {
-    & cargo build -p yunxi-cli -p yunxi-launcher --release
+    & cargo build -p yunxi-cli --bin yunxi-next --release
     if ($LASTEXITCODE -ne 0) {
         throw "Release build failed with exit code $LASTEXITCODE."
     }
@@ -52,44 +40,37 @@ finally {
     Pop-Location
 }
 
-& $sourceNext next --version
+& $sourceNext --version
 if ($LASTEXITCODE -ne 0) {
-    throw 'The release executable did not accept the `next` subcommand.'
+    throw 'The release `yunxi-next` executable failed its version check.'
 }
 
 New-Item -ItemType Directory -Path $installBin -Force | Out-Null
-New-Item -ItemType Directory -Path $routerBin -Force | Out-Null
 Copy-Item -LiteralPath $sourceNext -Destination $installedNext -Force
-Copy-Item -LiteralPath $sourceLauncher -Destination $installedLauncher -Force
 
 if ((Get-FileHash $sourceNext).Hash -ne (Get-FileHash $installedNext).Hash) {
     throw 'Installed YunXi Next hash does not match the release build.'
 }
-if ((Get-FileHash $sourceLauncher).Hash -ne (Get-FileHash $installedLauncher).Hash) {
-    throw 'Installed launcher hash does not match the release build.'
-}
 
-$utf8WithoutBom = New-Object Text.UTF8Encoding($false)
-[IO.File]::WriteAllText($nextRouteFile, $installedNext, $utf8WithoutBom)
-if ([string]::IsNullOrWhiteSpace($LegacyExecutable)) {
-    if (Test-Path -LiteralPath $legacyRouteFile) {
-        Remove-Item -LiteralPath $legacyRouteFile -Force
+if ($obsoleteRouterDetected) {
+    foreach ($obsoleteRouterFile in $obsoleteRouterFiles) {
+        if (Test-Path -LiteralPath $obsoleteRouterFile -PathType Leaf) {
+            Remove-Item -LiteralPath $obsoleteRouterFile -Force
+        }
     }
-    $legacyLabel = 'not installed'
-}
-else {
-    [IO.File]::WriteAllText($legacyRouteFile, $LegacyExecutable, $utf8WithoutBom)
-    $legacyLabel = $LegacyExecutable
 }
 
-if (Test-Path -LiteralPath $obsoleteBatchRouter) {
-    Remove-Item -LiteralPath $obsoleteBatchRouter -Force
-}
-
-function Add-PathPrefix([string]$CurrentPath, [string]$Prefix) {
+function Set-PathPrefix(
+    [string]$CurrentPath,
+    [string]$Prefix,
+    [string[]]$RemovePaths
+) {
     $segments = @($CurrentPath -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     $segments = @($segments | Where-Object {
-        -not $_.TrimEnd('\').Equals($Prefix.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)
+        $candidate = $_.Trim().Trim('"').TrimEnd('\')
+        -not ($RemovePaths | Where-Object {
+            $candidate.Equals($_.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)
+        })
     })
     return (@($Prefix) + $segments) -join ';'
 }
@@ -131,17 +112,20 @@ public static class YunXiEnvironmentBroadcast
 }
 
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-$newUserPath = Add-PathPrefix $userPath $routerBin
+$pathsToReplace = @($installBin)
+if ($obsoleteRouterDetected) {
+    $pathsToReplace += $obsoleteRouterBin
+}
+$newUserPath = Set-PathPrefix $userPath $installBin $pathsToReplace
 [Environment]::SetEnvironmentVariable('Path', $newUserPath, 'User')
-$env:Path = Add-PathPrefix $env:Path $routerBin
+$env:Path = Set-PathPrefix $env:Path $installBin $pathsToReplace
 Publish-EnvironmentChange
 
-& $installedLauncher next --version
+& $installedNext --version
 if ($LASTEXITCODE -ne 0) {
-    throw 'The installed `yunxi next` route failed its version check.'
+    throw 'The installed `yunxi-next` command failed its version check.'
 }
 
 Write-Host "Installed YunXi Next: $installedNext"
-Write-Host "Registered native launcher: $installedLauncher"
-Write-Host "Legacy YunXi route: $legacyLabel"
-Write-Host 'Open a new terminal, then run: yunxi next'
+Write-Host 'Legacy YunXi was not modified.'
+Write-Host 'Open a new terminal, then run: yunxi-next'

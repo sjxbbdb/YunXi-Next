@@ -2,7 +2,6 @@
 members = [
     "crates/yunxi-cli",
     "crates/yunxi-kernel",
-    "crates/yunxi-launcher",
     "crates/yunxi-model-openai",
     "crates/yunxi-protocol",
 ]
