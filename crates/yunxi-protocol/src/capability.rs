@@ -15,8 +15,11 @@ pub mod capabilities {
     pub const MODEL_CHAT: &str = "model.chat";
     pub const MODEL_CHAT_VERSION: u32 = 1;
     pub const CONTEXT_COMPOSE: &str = "context.compose";
+    pub const CONTEXT_COMPOSE_VERSION: u32 = 1;
     pub const PERSONA_CONTEXT: &str = "persona.context";
+    pub const PERSONA_CONTEXT_VERSION: u32 = 1;
     pub const MEMORY_RECALL: &str = "memory.recall";
+    pub const MEMORY_RECALL_VERSION: u32 = 1;
     pub const MEMORY_WRITE: &str = "memory.write";
     pub const COMPANION_DECIDE: &str = "companion.decide";
     pub const COMPANION_MAILBOX: &str = "companion.mailbox";

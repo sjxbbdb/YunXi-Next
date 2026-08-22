@@ -16,6 +16,9 @@ use session::{ChatBackend, ChatFailure, ChatSession, SessionError};
 use yunxi_protocol::ChatMessage;
 
 pub const INTERNAL_MODEL_PLUGIN_ARGUMENT: &str = "__model-plugin";
+pub const INTERNAL_CONTEXT_PLUGIN_ARGUMENT: &str = "__context-plugin";
+pub const INTERNAL_MEMORY_PLUGIN_ARGUMENT: &str = "__memory-plugin";
+pub const INTERNAL_PERSONA_PLUGIN_ARGUMENT: &str = "__persona-plugin";
 
 pub fn run_from_env() -> Result<(), CliError> {
     match args::parse(env::args_os().skip(1))? {
@@ -34,6 +37,9 @@ pub fn run_from_env() -> Result<(), CliError> {
             let mut session = ChatSession::launch(options.plugin_path.as_deref())?;
             if let Some(prompt) = options.once {
                 let reply = session.complete(&[ChatMessage::user(prompt)])?;
+                for notice in session.drain_notices() {
+                    eprintln!("warning: {notice}");
+                }
                 println!("{reply}");
                 return Ok(());
             }

@@ -1,13 +1,13 @@
 # `yunxi-cli`
 
 This crate is YunXi Next's first user-facing surface. It owns the terminal
-conversation loop, in-memory chat history, and the host side of the model
-plugin connection. It registers the model declaration with
-`yunxi-plugin-host` before routing `model.chat` calls.
+conversation loop, in-memory chat history, and host-side multi-plugin
+orchestration. It composes optional context, memory, and persona results before
+routing the final request to `model.chat@1`.
 
 It intentionally does not contain provider HTTP code. The OpenAI-compatible
-client runs in a separately supervised process supplied by
-`yunxi-model-openai`.
+client and every inherited capability run in separately supervised child
+processes.
 
 ## Use
 
@@ -20,6 +20,7 @@ Interactive commands are `/help`, `/status`, `/clear`, and `/quit`. Use
 `--plugin <PATH>` to launch a separate compatible model-plugin executable.
 Provider setup is documented in
 [`../../docs/provider-configuration.md`](../../docs/provider-configuration.md).
+That document also lists the temporary environment-based capability switches.
 
 ## Files
 

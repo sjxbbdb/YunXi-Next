@@ -13,6 +13,10 @@ use a capability-neutral invocation envelope with typed payloads at each
 capability boundary. Frames are bounded at 16 MiB. The launch token correlates
 a child with its host; it must not be treated as authentication or sandboxing.
 
+Current typed contracts are `model.chat@1`, `context.compose@1`,
+`memory.recall@1`, and `persona.context@1`. Capability versions travel in both
+the readiness declaration and every invocation frame.
+
 | Path | Responsibility |
 | --- | --- |
 | [`src/`](src/README.md) | Protocol messages, transport, and handshake logic |

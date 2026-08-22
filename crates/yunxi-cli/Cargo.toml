@@ -6,8 +6,11 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+yunxi-context = { path = "../yunxi-context" }
 yunxi-kernel = { path = "../yunxi-kernel" }
+yunxi-memory = { path = "../yunxi-memory" }
 yunxi-model-openai = { path = "../yunxi-model-openai" }
+yunxi-persona = { path = "../yunxi-persona" }
 yunxi-plugin-host = { path = "../yunxi-plugin-host" }
 yunxi-protocol = { path = "../yunxi-protocol" }
 

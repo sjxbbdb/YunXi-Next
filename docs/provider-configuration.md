@@ -54,3 +54,20 @@ yunxi-next
 
 Use the shell or a secret manager to inject real credentials. Do not commit
 them to this repository.
+
+## Capability Switches
+
+These process-launch switches are the temporary management surface until the
+persisted plugin manifest and Web settings page are implemented.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `YUNXI_NEXT_CONTEXT_ENABLED` | `true` | Launch `context.compose@1` for `AGENTS.md` context |
+| `YUNXI_NEXT_PERSONA_ENABLED` | `true` | Enable persona expression context |
+| `YUNXI_NEXT_MEMORY_ENABLED` | `false` | Launch read-only legacy `memory.recall@1` |
+
+`YUNXI_NEXT_PERSONA_ENABLED` and `YUNXI_NEXT_MEMORY_ENABLED` take precedence
+over the legacy `YUNXI_PERSONA_ENABLED` and `YUNXI_MEMORY_ENABLED` variables.
+When memory is enabled while persona expression is disabled, the persona
+process runs only as the safety wrapper for memory context. A disabled
+capability is not launched and has no catalog route.

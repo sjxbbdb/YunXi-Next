@@ -6,6 +6,7 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+serde.workspace = true
 yunxi-kernel = { path = "../yunxi-kernel" }
 yunxi-protocol = { path = "../yunxi-protocol" }
 

@@ -1523,15 +1523,34 @@ dependencies = [
 name = "yunxi-cli"
 version = "0.1.0"
 dependencies = [
+ "yunxi-context",
  "yunxi-kernel",
+ "yunxi-memory",
  "yunxi-model-openai",
+ "yunxi-persona",
  "yunxi-plugin-host",
+ "yunxi-protocol",
+]
+
+[[package]]
+name = "yunxi-context"
+version = "0.1.0"
+dependencies = [
  "yunxi-protocol",
 ]
 
 [[package]]
 name = "yunxi-kernel"
 version = "0.1.0"
+
+[[package]]
+name = "yunxi-memory"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "yunxi-protocol",
+]
 
 [[package]]
 name = "yunxi-model-openai"
@@ -1544,9 +1563,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "yunxi-persona"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "yunxi-protocol",
+]
+
+[[package]]
 name = "yunxi-plugin-host"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "yunxi-kernel",
  "yunxi-protocol",
 ]

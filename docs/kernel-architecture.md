@@ -39,6 +39,8 @@ checks above this kernel boundary.
 - Spawn failures are contained as plugin failures.
 - Shutdown requests termination and joins every active supervisor thread.
 - Failed plugins remain failed until an explicit restart.
+- Host-detected transport or malformed-frame failures remain `Failed` even
+  after the supervisor finishes terminating that process.
 - A protocol or API implementation cannot panic inside the kernel process.
 
 ## Explicit Non-Goals

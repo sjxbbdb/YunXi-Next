@@ -32,9 +32,9 @@ surfaces. They are not allowed to bypass the trusted approval or routing layer.
 | Domain | Legacy owner | YunXi Next contract | Target process | Status |
 | --- | --- | --- | --- | --- |
 | Model completion | `yunxi-agent-provider` | `model.chat@1:complete` | `yunxi-model-openai` | Transport integrated; manifest and grants pending |
-| Prompt and AGENTS context | `yunxi-agent-context` | `context.compose@1` | `yunxi-context` | Planned: inheritance wave 1 |
-| Persona and soul | `yunxi-agent-persona` | `persona.context@1` | `yunxi-persona` | Planned: inheritance wave 1 |
-| Memory recall | `yunxi-agent-persona`, `yunxi-agent-storage` | `memory.recall@1` | `yunxi-memory` | Planned: inheritance wave 1 |
+| Prompt and AGENTS context | `yunxi-agent-context` | `context.compose@1:compose` | `yunxi-context` | Integrated: bounded root-to-cwd read path |
+| Persona and soul | `yunxi-agent-persona` | `persona.context@1:compile` | `yunxi-persona` | Integrated: default/custom profile and soul read path |
+| Memory recall | `yunxi-agent-persona`, `yunxi-agent-storage` | `memory.recall@1:recall` | `yunxi-memory` | Integrated: read-only legacy JSONL path; writes remain separate |
 | Memory extraction and writes | `yunxi-agent-persona`, `yunxi-agent-storage` | `memory.write@1` | `yunxi-memory` | Planned: inheritance wave 2 |
 | Companion response policy | `yunxi-agent-companion` | `companion.decide@1` | `yunxi-companion` | Planned: inheritance wave 2 |
 | Relationship mailbox | `yunxi-agent-companion`, `yunxi-agent-storage` | `companion.mailbox@1` | `yunxi-companion-mailbox` | Planned: inheritance wave 2 |
@@ -66,8 +66,9 @@ cross-plugin acceptance fixtures instead of a runtime capability.
 
 1. **Foundation:** generic invocation protocol, validated capability ids, and
    deterministic provider catalog. The model plugin proves the complete path.
-2. **Read-only identity path:** context, persona, and memory recall compose the
-   system context before a model request. Failure falls back to plain chat.
+2. **Read-only identity path (complete):** context, persona, and memory recall
+   compose the system context before a model request. Failure falls back to the
+   remaining capabilities and model chat.
 3. **Stateful companion path:** memory writes, storage, companion policy,
    mailbox, and scheduler gain explicit workspace-scoped storage grants.
 4. **Action path:** shell, patch, MCP, skills, and multi-agent run only after

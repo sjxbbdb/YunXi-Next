@@ -3,6 +3,7 @@
 
 mod capability;
 mod handshake;
+mod identity;
 mod invocation;
 mod message;
 mod transport;
@@ -13,6 +14,12 @@ pub use capability::{
 pub use handshake::{
     CONNECT_ADDRESS_ENV, CONNECT_TOKEN_ENV, HostPluginSession, PluginAcceptor,
     PluginConnectionInfo, PluginSession, connect_plugin,
+};
+pub use identity::{
+    CONTEXT_COMPOSE_OPERATION, ContextComposeRequest, ContextComposeResult,
+    MEMORY_RECALL_OPERATION, MemoryContextKind, MemoryContextRecord, MemoryRecallRequest,
+    MemoryRecallResult, PERSONA_CONTEXT_COMPILE_OPERATION, PersonaContextRequest,
+    PersonaContextResult,
 };
 pub use invocation::{InvocationCodecError, InvocationRequest, InvocationResponse};
 pub use message::{

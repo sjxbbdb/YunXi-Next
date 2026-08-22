@@ -1,8 +1,8 @@
 # CLI source
 
-- `main.rs` selects normal CLI mode or the private model-plugin child mode.
+- `main.rs` selects normal CLI mode or one of the private built-in plugin modes.
 - `lib.rs` coordinates argument handling, session startup, and terminal I/O.
 - `args.rs` parses the deliberately small command-line surface.
-- `session.rs` launches the model plugin, registers its capabilities, and routes chat calls.
+- `session.rs` launches plugins, composes optional identity context, and routes model calls.
 - `repl.rs` owns commands and rolling in-memory conversation history.
 - `ui.rs` contains compact terminal presentation helpers.

@@ -1,9 +1,10 @@
 # YunXi Next
 
 YunXi Next is a Rust rebuild of YunXi around a small trusted kernel and
-process-isolated capabilities. The current baseline is deliberately narrow but
-usable: it can call an OpenAI-compatible chat API from an isolated plugin and
-present a persistent terminal conversation.
+process-isolated capabilities. The current baseline can compose project
+instructions, persona, and read-only legacy memory through optional plugins,
+call an OpenAI-compatible model plugin, and present a persistent terminal
+conversation.
 
 ## Repository Boundary
 
@@ -30,23 +31,31 @@ The L1 capability platform adds:
 - a provider catalog outside the trusted kernel;
 - deterministic rejection of missing or ambiguous capability routes.
 
-The first connected capability and CLI surface add:
+The connected read-only identity path and CLI surface add:
 
 - an isolated OpenAI-compatible Chat Completions plugin using `model.chat@1`;
+- isolated `context.compose@1`, `memory.recall@1`, and `persona.context@1`
+  providers before each model request;
+- compatible reads of legacy `AGENTS.md`, persona profiles, `soul.txt`, and
+  JSONL memory without modifying the legacy repository or memory files;
+- optional capability launch switches, with context and persona enabled by
+  default and memory disabled by default;
 - inherited YunXi/DeepSeek/OpenAI environment configuration;
 - an interactive CLI with rolling in-memory history;
 - `/help`, `/status`, `/clear`, and `/quit` commands;
 - `--once` mode for scripts and health checks.
 
 API failures are returned per request and do not terminate the model plugin.
-Plugin process failures remain visible until an explicit restart; the kernel
-does not automatically restart a crashing plugin.
+An optional context, memory, or persona failure produces a visible warning and
+falls back to the remaining context plus model chat. Plugin process failures
+remain visible until an explicit restart; the kernel does not automatically
+restart a crashing plugin.
 
 Process isolation protects the kernel from plugin crashes. It is not yet a
 filesystem, network, or resource-usage sandbox.
 
-The inheritance plan for persona, memory, companion behavior, tools, Weixin,
-voice, and storage is tracked in
+The remaining inheritance plan for stateful memory, companion behavior, tools,
+Weixin, voice, and storage is tracked in
 [`docs/capability-migration.md`](docs/capability-migration.md). A capability is
 counted as migrated only after it has a real process boundary, versioned
 contract, explicit grants, and failure-containment tests.

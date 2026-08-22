@@ -23,21 +23,32 @@ YunXi Next/
 |   `-- provider-configuration.md      provider environment resolution
 `-- crates/                            production Rust packages
     |-- README.md                      workspace crate and dependency index
-    |-- yunxi-cli/                     user-facing terminal chat host
+    |-- yunxi-cli/                     user-facing multi-plugin terminal host
     |   |-- Cargo.toml                 CLI package and `yunxi-next` binary
     |   |-- README.md                  crate scope and layout
     |   |-- src/                       terminal host implementation
     |   |   |-- README.md              source file index
     |   |   |-- args.rs                command-line parser
     |   |   |-- lib.rs                 CLI coordinator and public entry point
-    |   |   |-- main.rs                executable and private child mode switch
+    |   |   |-- main.rs                executable and built-in child mode switch
     |   |   |-- repl.rs                commands and bounded chat history
-    |   |   |-- session.rs             kernel, catalog, and model-plugin host session
+    |   |   |-- session.rs             capability launch, composition, and model routing
     |   |   `-- ui.rs                  ANSI-aware compact presentation
     |   `-- tests/                     complete process-path tests
     |       |-- README.md              integration test purpose
     |       `-- chat_stack.rs          CLI-to-plugin-to-HTTP verification
-    |-- yunxi-kernel/                  minimal trusted plugin kernel
+    |-- yunxi-context/                 AGENTS.md context capability plugin
+    |   |-- Cargo.toml                 protocol-only context package
+    |   |-- README.md                  capability scope, limits, and layout
+    |   `-- src/                        context implementation
+    |       |-- README.md               source file index
+    |       |-- compose.rs              bounded root-to-cwd instruction loading
+    |       |-- lib.rs                  stable context-plugin facade
+    |       |-- plugin.rs               context capability request loop
+    |       `-- bin/                    standalone plugin entry point
+    |           |-- README.md           binary purpose
+    |           `-- yunxi-context.rs    context plugin executable
+    |-- yunxi-kernel/                   minimal trusted plugin kernel
     |   |-- Cargo.toml                 dependency-free kernel package
     |   |-- README.md                  crate scope and exclusions
     |   |-- src/                       production kernel source
@@ -66,6 +77,19 @@ YunXi Next/
     |   `-- tests/                      kernel boundary integration tests
     |       |-- README.md               integration test index
     |       `-- process_isolation.rs    real-process crash isolation
+    |-- yunxi-memory/                   read-only memory recall capability plugin
+    |   |-- Cargo.toml                 JSON, serde, and protocol dependencies
+    |   |-- README.md                  legacy compatibility and exclusions
+    |   `-- src/                        memory implementation
+    |       |-- README.md               source file index
+    |       |-- lib.rs                  stable memory-plugin facade
+    |       |-- plugin.rs               memory capability request loop
+    |       |-- recall.rs               boot and dynamic recall policy
+    |       |-- record.rs               legacy-compatible stored record schema
+    |       |-- store.rs                bounded read-only JSONL loading
+    |       `-- bin/                    standalone plugin entry point
+    |           |-- README.md           binary purpose
+    |           `-- yunxi-memory.rs     memory plugin executable
     |-- yunxi-model-openai/             first model capability plugin
     |   |-- Cargo.toml                  HTTP and protocol dependencies
     |   |-- README.md                   crate scope and layout
@@ -78,13 +102,30 @@ YunXi Next/
     |       `-- bin/                    standalone plugin entry points
     |           |-- README.md           binary purpose
     |           `-- yunxi-model-openai.rs standalone plugin executable
-    |-- yunxi-plugin-host/              capability provider catalog
-    |   |-- Cargo.toml                  kernel and protocol dependencies
-    |   |-- README.md                   crate scope and exclusions
-    |   `-- src/                        host catalog implementation
+    |-- yunxi-persona/                  persona context capability plugin
+    |   |-- Cargo.toml                 JSON, serde, and protocol dependencies
+    |   |-- README.md                  persona trust boundary and layout
+    |   `-- src/                        persona implementation
     |       |-- README.md               source file index
-    |       |-- catalog.rs              provider indexing and route resolution
-    |       `-- lib.rs                  stable plugin-host facade
+    |       |-- compiler.rs             bounded escaped context rendering
+    |       |-- lib.rs                  stable persona-plugin facade
+    |       |-- plugin.rs               persona capability request loop
+    |       |-- profile.rs              built-in/custom profile and soul loading
+    |       |-- settings.rs             legacy settings compatibility
+    |       `-- bin/                    standalone plugin entry point
+    |           |-- README.md           binary purpose
+    |           `-- yunxi-persona.rs    persona plugin executable
+    |-- yunxi-plugin-host/              multi-process capability host
+    |   |-- Cargo.toml                  serde, kernel, and protocol dependencies
+    |   |-- README.md                   crate scope and exclusions
+    |   |-- src/                        catalog and process runtime
+    |   |   |-- README.md               source file index
+    |   |   |-- catalog.rs              provider indexing and route resolution
+    |   |   |-- lib.rs                  stable plugin-host facade
+    |   |   `-- runtime.rs              launch, invoke, failure removal, and shutdown
+    |   `-- tests/                      process/protocol isolation tests
+    |       |-- README.md               integration test purpose
+    |       `-- process_runtime.rs      crashed-route and healthy-sibling verification
     `-- yunxi-protocol/                 local host/plugin wire contract
         |-- Cargo.toml                  serialization-only dependencies
         |-- README.md                   crate scope and layout
@@ -92,6 +133,7 @@ YunXi Next/
             |-- README.md               source file index
             |-- capability.rs           capability ids, versions, and built-in names
             |-- handshake.rs            loopback setup and readiness exchange
+            |-- identity.rs             context, memory, and persona payload contracts
             |-- invocation.rs           generic typed-payload call envelopes
             |-- lib.rs                  stable protocol facade
             |-- message.rs              versioned host/plugin messages

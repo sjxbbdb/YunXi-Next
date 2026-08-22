@@ -1,8 +1,11 @@
 [workspace]
 members = [
     "crates/yunxi-cli",
+    "crates/yunxi-context",
     "crates/yunxi-kernel",
+    "crates/yunxi-memory",
     "crates/yunxi-model-openai",
+    "crates/yunxi-persona",
     "crates/yunxi-plugin-host",
     "crates/yunxi-protocol",
 ]

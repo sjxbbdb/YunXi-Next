@@ -8,6 +8,7 @@ use super::PluginId;
 pub enum PluginFailure {
     Spawn { message: String },
     UnexpectedExit { code: Option<i32> },
+    Protocol { message: String },
     Monitor { message: String },
     Supervisor { message: String },
 }
@@ -22,6 +23,7 @@ impl fmt::Display for PluginFailure {
             Self::UnexpectedExit { code: None } => {
                 formatter.write_str("process exited unexpectedly without an exit code")
             }
+            Self::Protocol { message } => write!(formatter, "protocol failed: {message}"),
             Self::Monitor { message } => write!(formatter, "process monitor failed: {message}"),
             Self::Supervisor { message } => write!(formatter, "supervisor failed: {message}"),
         }

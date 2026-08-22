@@ -4,7 +4,8 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::{fs, process};
 
 #[test]
 fn once_mode_crosses_the_isolated_plugin_boundary() {
@@ -37,6 +38,8 @@ fn once_mode_crosses_the_isolated_plugin_boundary() {
     );
     assert!(request_body.contains("\"model\":\"fixture-model\""));
     assert!(request_body.contains("\"content\":\"hello from CLI\""));
+    assert!(request_body.contains("YunXi Next Development Instructions"));
+    assert!(request_body.contains("yunxi_persona_context"));
 }
 
 #[test]
@@ -87,6 +90,77 @@ fn api_failure_is_contained_and_the_plugin_serves_the_next_turn() {
     assert!(stdout.contains("recovered reply"));
     assert!(second_body.contains("\"content\":\"second request\""));
     assert!(!second_body.contains("\"content\":\"first request\""));
+}
+
+#[test]
+fn disabled_optional_capabilities_never_launch_or_register_routes() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind unused API endpoint");
+    let address = listener.local_addr().expect("read API endpoint");
+    let mut child = configured_cli(address)
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .env("YUNXI_NEXT_MEMORY_ENABLED", "false")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch YunXi CLI");
+    child
+        .stdin
+        .take()
+        .expect("open CLI stdin")
+        .write_all(b"/status\n/quit\n")
+        .expect("write CLI commands");
+
+    let output = wait_for_cli(child);
+
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 CLI output");
+    assert!(stdout.contains("plugins: 1 | capabilities: 1 | failed: 0"));
+}
+
+#[test]
+fn legacy_memory_is_recalled_through_memory_and_persona_processes() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let server = thread::spawn(move || serve_one_request(listener));
+    let home = unique_temp_dir("yunxi-memory-e2e");
+    fs::create_dir_all(home.join("memory")).expect("create memory directory");
+    let memory = concat!(
+        "{\"id\":\"reply-style\",\"schema_version\":3,",
+        "\"scope\":\"global_user\",\"kind\":\"preference\",",
+        "\"content\":\"用户偏好：回答保持简洁\",\"confidence\":0.95,",
+        "\"importance\":0.9,\"sensitivity\":\"low\",\"status\":\"active\",",
+        "\"created_at_millis\":1,\"updated_at_millis\":1}\n"
+    );
+    fs::write(home.join("memory/global-memory.jsonl"), memory).expect("write legacy memory");
+
+    let child = configured_cli(address)
+        .env("YUNXI_HOME", &home)
+        .env("YUNXI_NEXT_MEMORY_ENABLED", "true")
+        .args(["--once", "hello with memory"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch YunXi CLI");
+    let output = wait_for_cli(child);
+    let request_body = server.join().expect("join mock API");
+
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(request_body.contains("用户偏好：回答保持简洁"));
+    assert!(request_body.contains("boot_memory_context"));
+    fs::remove_dir_all(home).expect("remove memory fixture");
 }
 
 fn serve_one_request(listener: TcpListener) -> String {
@@ -182,4 +256,12 @@ fn wait_for_cli(mut child: std::process::Child) -> std::process::Output {
         thread::sleep(Duration::from_millis(20));
     }
     child.wait_with_output().expect("collect YunXi output")
+}
+
+fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock after epoch")
+        .as_nanos();
+    std::env::temp_dir().join(format!("{prefix}-{}-{unique}", process::id()))
 }

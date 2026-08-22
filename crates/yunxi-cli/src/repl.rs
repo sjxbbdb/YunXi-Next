@@ -32,6 +32,7 @@ where
         ))
     )?;
     writeln!(output, "{}", palette.muted("Enter /help for commands."))?;
+    write_notices(backend, output, &palette)?;
 
     let mut history = Vec::new();
     loop {
@@ -58,7 +59,7 @@ where
                 let status = backend.status();
                 writeln!(
                     output,
-                    "kernel: {} | plugin: {} | protocol: {} | plugins: {} | capabilities: {}",
+                    "kernel: {} | plugin: {} | protocol: {} | plugins: {} | capabilities: {} | failed: {}",
                     status.kernel,
                     status.plugin,
                     if status.protocol_ready {
@@ -67,7 +68,8 @@ where
                         "unavailable"
                     },
                     status.plugins,
-                    status.capabilities
+                    status.capabilities,
+                    status.failed_plugins
                 )?;
             }
             "/clear" => {
@@ -96,9 +98,21 @@ where
                         writeln!(output, "{} {error}", palette.error("error:"))?;
                     }
                 }
+                write_notices(backend, output, &palette)?;
             }
         }
     }
+}
+
+fn write_notices<B, W>(backend: &mut B, output: &mut W, palette: &Palette) -> io::Result<()>
+where
+    B: ChatBackend,
+    W: Write,
+{
+    for notice in backend.drain_notices() {
+        writeln!(output, "{} {notice}", palette.error("warning:"))?;
+    }
+    Ok(())
 }
 
 fn trim_history(history: &mut Vec<ChatMessage>) {
@@ -140,7 +154,12 @@ mod tests {
                 protocol_ready: true,
                 plugins: 1,
                 capabilities: 1,
+                failed_plugins: 0,
             }
+        }
+
+        fn drain_notices(&mut self) -> Vec<String> {
+            Vec::new()
         }
     }
 

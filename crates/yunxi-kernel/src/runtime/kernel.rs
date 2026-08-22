@@ -14,6 +14,7 @@ struct PluginSlot {
     generation: u64,
     commands: Option<Sender<SupervisorCommand>>,
     worker: Option<JoinHandle<()>>,
+    forced_failure: Option<PluginFailure>,
 }
 
 impl PluginSlot {
@@ -24,6 +25,7 @@ impl PluginSlot {
             generation: 0,
             commands: None,
             worker: None,
+            forced_failure: None,
         }
     }
 
@@ -89,6 +91,7 @@ impl YunxiKernel {
                 });
             }
             slot.commands = None;
+            slot.forced_failure = None;
             let previous_worker = slot.worker.take();
             slot.generation = slot.generation.saturating_add(1);
             slot.state = PluginState::Starting;
@@ -149,6 +152,24 @@ impl YunxiKernel {
         }
     }
 
+    pub fn fail(&mut self, id: &PluginId, failure: PluginFailure) -> Result<(), KernelError> {
+        self.ensure_running()?;
+        self.refresh();
+        let slot = self
+            .plugins
+            .get_mut(id)
+            .ok_or_else(|| KernelError::UnknownPlugin { id: id.clone() })?;
+
+        if slot.state.is_active()
+            && let Some(commands) = &slot.commands
+        {
+            let _ignored = commands.send(SupervisorCommand::Stop);
+        }
+        slot.forced_failure = Some(failure.clone());
+        slot.state = PluginState::Failed(failure);
+        Ok(())
+    }
+
     pub fn refresh(&mut self) -> Vec<PluginSnapshot> {
         let mut changed = Vec::new();
         while let Ok(event) = self.event_receiver.try_recv() {
@@ -177,8 +198,10 @@ impl YunxiKernel {
         self.refresh();
         self.state = KernelState::ShuttingDown;
         for slot in self.plugins.values_mut() {
-            if slot.state.is_active() {
-                slot.state = PluginState::Stopping;
+            if slot.state.is_active() || (slot.forced_failure.is_some() && slot.worker.is_some()) {
+                if slot.forced_failure.is_none() {
+                    slot.state = PluginState::Stopping;
+                }
                 if let Some(commands) = &slot.commands {
                     let _ignored = commands.send(SupervisorCommand::Stop);
                 }
@@ -232,7 +255,10 @@ impl YunxiKernel {
         if slot.generation != event.generation {
             return;
         }
-        slot.state = event.state;
+        slot.state = match &slot.forced_failure {
+            Some(failure) => PluginState::Failed(failure.clone()),
+            None => event.state,
+        };
         if slot.state.is_terminal() {
             slot.commands = None;
         }
