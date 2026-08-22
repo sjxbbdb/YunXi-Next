@@ -25,6 +25,18 @@ where
     S: Into<OsString>,
 {
     let mut arguments = arguments.into_iter().map(Into::into);
+    let command = arguments.next().ok_or(ArgumentError::MissingCommand)?;
+    match command.to_str() {
+        Some(command) if command.eq_ignore_ascii_case("next") => {}
+        Some("-h" | "--help") => return Ok(CliAction::Help),
+        Some("-V" | "--version") => return Ok(CliAction::Version),
+        _ => {
+            return Err(ArgumentError::UnexpectedCommand(
+                command.to_string_lossy().into_owned(),
+            ));
+        }
+    }
+
     let mut options = CliOptions::default();
 
     while let Some(argument) = arguments.next() {
@@ -71,6 +83,8 @@ where
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ArgumentError {
+    MissingCommand,
+    UnexpectedCommand(String),
     UnknownOption(String),
     MissingValue(&'static str),
     EmptyValue(&'static str),
@@ -81,6 +95,10 @@ pub(crate) enum ArgumentError {
 impl fmt::Display for ArgumentError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::MissingCommand => formatter.write_str("expected the `next` subcommand"),
+            Self::UnexpectedCommand(command) => {
+                write!(formatter, "expected `next`, received `{command}`")
+            }
             Self::UnknownOption(option) => write!(formatter, "unknown option `{option}`"),
             Self::MissingValue(option) => write!(formatter, "{option} requires a value"),
             Self::EmptyValue(option) => write!(formatter, "{option} cannot be empty"),
@@ -101,6 +119,7 @@ mod tests {
     #[test]
     fn parses_single_prompt_and_external_plugin() {
         let action = parse([
+            "next",
             "--once",
             "hello",
             "--plugin",
@@ -122,8 +141,21 @@ mod tests {
     #[test]
     fn rejects_missing_option_values() {
         assert_eq!(
-            parse(["--once"]),
+            parse(["next", "--once"]),
             Err(ArgumentError::MissingValue("--once"))
         );
+    }
+
+    #[test]
+    fn requires_the_next_subcommand() {
+        assert_eq!(
+            parse(std::iter::empty::<&str>()),
+            Err(ArgumentError::MissingCommand)
+        );
+        assert_eq!(
+            parse(["other"]),
+            Err(ArgumentError::UnexpectedCommand("other".to_string()))
+        );
+        assert_eq!(parse(["NEXT"]), Ok(CliAction::Run(CliOptions::default())));
     }
 }

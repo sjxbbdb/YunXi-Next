@@ -26,6 +26,8 @@ The default distribution launches the same `yunxi` executable in a private
 child mode. This avoids a second installation artifact without weakening
 process isolation: provider HTTP code executes only after the new process starts.
 An external compatible executable can instead be selected with `--plugin`.
+The Windows PATH router maps `yunxi next` to this executable and delegates all
+other `yunxi` commands to the existing legacy executable.
 
 ## Readiness
 

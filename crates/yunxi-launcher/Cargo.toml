@@ -1,0 +1,13 @@
+[package]
+name = "yunxi-launcher"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[[bin]]
+name = "yunxi-launcher"
+path = "src/main.rs"
+
+[lints]
+workspace = true

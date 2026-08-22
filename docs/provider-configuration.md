@@ -39,7 +39,7 @@ DeepSeek using inherited defaults:
 
 ```powershell
 $env:DEEPSEEK_API_KEY = "your-key"
-cargo run -p yunxi-cli --bin yunxi
+yunxi next
 ```
 
 Custom compatible endpoint:
@@ -49,7 +49,7 @@ $env:YUNXI_PROVIDER_PROFILE = "local"
 $env:YUNXI_PROVIDER_BASE_URL = "http://127.0.0.1:8000/v1"
 $env:YUNXI_PROVIDER_API_KEY = "local-key"
 $env:YUNXI_AGENT_MODEL = "local-model"
-cargo run -p yunxi-cli --bin yunxi
+yunxi next
 ```
 
 Use the shell or a secret manager to inject real credentials. Do not commit

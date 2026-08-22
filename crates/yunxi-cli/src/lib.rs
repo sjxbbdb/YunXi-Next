@@ -24,7 +24,7 @@ pub fn run_from_env() -> Result<(), CliError> {
             Ok(())
         }
         CliAction::Version => {
-            println!("yunxi {}", env!("CARGO_PKG_VERSION"));
+            println!("yunxi next {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
         CliAction::Run(options) => {
@@ -50,7 +50,7 @@ pub fn run_from_env() -> Result<(), CliError> {
 
 fn print_help() {
     println!(
-        "YunXi Next\n\nUSAGE:\n    yunxi [OPTIONS]\n\nOPTIONS:\n    --once <PROMPT>   Send one prompt and exit\n    --plugin <PATH>   Use an external compatible model plugin\n    --no-color        Disable ANSI terminal colors\n    -h, --help        Print help\n    -V, --version     Print version"
+        "YunXi Next\n\nUSAGE:\n    yunxi next [OPTIONS]\n\nOPTIONS:\n    --once <PROMPT>   Send one prompt and exit\n    --plugin <PATH>   Use an external compatible model plugin\n    --no-color        Disable ANSI terminal colors\n    -h, --help        Print help\n    -V, --version     Print version"
     );
 }
 

@@ -41,17 +41,23 @@ filesystem, network, or resource-usage sandbox.
 
 ## Run
 
-Set a provider credential in the environment, then start the CLI:
+Install the global route without replacing an existing legacy YunXi binary:
+
+```powershell
+.\scripts\install-windows.ps1
+```
+
+Open a new terminal, set a provider credential, then start the CLI:
 
 ```powershell
 $env:DEEPSEEK_API_KEY = "your-key"
-cargo run -p yunxi-cli --bin yunxi
+yunxi next
 ```
 
 Send one prompt without entering interactive mode:
 
 ```powershell
-cargo run -p yunxi-cli --bin yunxi -- --once "你好"
+yunxi next --once "你好"
 ```
 
 See [`docs/provider-configuration.md`](docs/provider-configuration.md) for
