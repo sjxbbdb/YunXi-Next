@@ -4,6 +4,7 @@ use yunxi_protocol::ChatMessage;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ManagementCommand {
+    ListPlugins,
     ListSessions,
     ResumeSession(String),
     NewSession,

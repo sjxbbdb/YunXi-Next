@@ -53,6 +53,7 @@ where
         match text {
             "/help" => {
                 writeln!(output, "/status  show kernel and plugin state")?;
+                writeln!(output, "/plugins show the composed plugin inventory")?;
                 writeln!(output, "/clear   clear conversation history")?;
                 writeln!(output, "/sessions  list saved sessions")?;
                 writeln!(output, "/resume <id>  resume a saved session")?;
@@ -151,6 +152,7 @@ fn parse_management_command(value: &str) -> Result<Option<ManagementCommand>, St
     }
     let parts = value.split_whitespace().collect::<Vec<_>>();
     match parts.as_slice() {
+        ["/plugins"] => Ok(Some(ManagementCommand::ListPlugins)),
         ["/sessions"] => Ok(Some(ManagementCommand::ListSessions)),
         ["/resume", id] => Ok(Some(ManagementCommand::ResumeSession((*id).to_string()))),
         ["/resume"] => Err("usage: /resume <session-id>".to_string()),
@@ -250,6 +252,9 @@ mod tests {
 
         fn manage(&mut self, command: ManagementCommand) -> Result<ManagementResult, String> {
             match command {
+                ManagementCommand::ListPlugins => {
+                    Ok(ManagementResult::lines(vec!["plugins".to_string()]))
+                }
                 ManagementCommand::NewSession => Ok(ManagementResult::replace_history(
                     vec!["new".to_string()],
                     Vec::new(),

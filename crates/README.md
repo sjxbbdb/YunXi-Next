@@ -7,6 +7,7 @@ when it owns a stable responsibility and can state its dependency direction.
 | --- | --- |
 | [`yunxi-companion`](yunxi-companion/README.md) | Isolated deterministic companion response policy |
 | [`yunxi-companion-mailbox`](yunxi-companion-mailbox/README.md) | Isolated encrypted proactive-message mailbox |
+| [`yunxi-composition`](yunxi-composition/README.md) | Pure dsh-style profile layers and Web plugin inventory projection |
 | [`yunxi-cli`](yunxi-cli/README.md) | Terminal chat, conversation history, and model-plugin hosting |
 | [`yunxi-context`](yunxi-context/README.md) | Isolated root-to-cwd `AGENTS.md` context composition |
 | [`yunxi-kernel`](yunxi-kernel/README.md) | Process-isolated plugin lifecycle and kernel health |
@@ -17,10 +18,12 @@ when it owns a stable responsibility and can state its dependency direction.
 | [`yunxi-protocol`](yunxi-protocol/README.md) | Versioned local messages, bounded transport, and readiness handshake |
 | [`yunxi-scheduler`](yunxi-scheduler/README.md) | Isolated bounded proactive scheduling policy |
 | [`yunxi-storage`](yunxi-storage/README.md) | Isolated persistent sessions and legacy session projection |
+| [`yunxi-web-contract`](yunxi-web-contract/README.md) | Bounded dsh-compatible browser RPC and event envelopes |
 
-Dependency direction is `yunxi-cli -> capability crates + yunxi-plugin-host +
-yunxi-kernel + yunxi-protocol`, `yunxi-plugin-host -> yunxi-kernel +
-yunxi-protocol`, and every capability crate depends inward on
+Dependency direction is `yunxi-cli -> capability crates + yunxi-composition +
+yunxi-plugin-host + yunxi-kernel + yunxi-protocol`, `yunxi-plugin-host ->
+yunxi-kernel + yunxi-protocol`, `yunxi-composition` depends only on serde and
+serde_json, and every capability crate depends inward on
 `yunxi-protocol`. Capability crates do not depend on one another. The kernel has
 no third-party dependencies and does not depend on any capability
 implementation, catalog, serialization, or HTTP package.

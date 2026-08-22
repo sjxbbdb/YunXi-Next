@@ -1,10 +1,13 @@
 //! Stateful post-response orchestration and REPL management calls.
 
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
 
+use yunxi_composition::{EntryId, PluginFiberPhase, PluginInventorySnapshot};
+use yunxi_kernel::PluginState;
 use yunxi_protocol::{
     ActionGrant, COMPANION_MAILBOX_ENQUEUE_OPERATION, COMPANION_MAILBOX_GET_OPERATION,
     COMPANION_MAILBOX_LIST_OPERATION, COMPANION_MAILBOX_MARK_READ_OPERATION,
@@ -133,6 +136,7 @@ impl ChatSession {
         command: ManagementCommand,
     ) -> Result<ManagementResult, String> {
         match command {
+            ManagementCommand::ListPlugins => self.list_plugins(),
             ManagementCommand::ListSessions => self.list_sessions(),
             ManagementCommand::ResumeSession(id) => self.resume_session(&id),
             ManagementCommand::NewSession => {
@@ -160,6 +164,52 @@ impl ChatSession {
                 }
             }
         }
+    }
+
+    fn list_plugins(&mut self) -> Result<ManagementResult, String> {
+        let inventory = self.plugin_inventory();
+        let mut lines = vec!["plugin inventory:".to_string()];
+        for entry in inventory.entries() {
+            let phase = entry
+                .fiber_phase()
+                .map_or_else(|| "disposed".to_string(), |phase| phase.to_string());
+            lines.push(format!(
+                "{} | {} | {} | {}",
+                entry.entry_id(),
+                entry.module_name(),
+                if entry.enabled() {
+                    "enabled"
+                } else {
+                    "disabled"
+                },
+                phase
+            ));
+        }
+        if inventory.entries().is_empty() {
+            lines.push("(empty)".to_string());
+        }
+        Ok(ManagementResult::lines(lines))
+    }
+
+    fn plugin_inventory(&mut self) -> PluginInventorySnapshot {
+        let snapshot = self.host.snapshot();
+        let phases = snapshot
+            .plugins()
+            .iter()
+            .filter_map(|plugin| {
+                let entry_id = EntryId::new(plugin.id().as_str()).ok()?;
+                let phase = match plugin.state() {
+                    PluginState::Registered => PluginFiberPhase::Pending,
+                    PluginState::Starting => PluginFiberPhase::Loading,
+                    PluginState::Running { .. } => PluginFiberPhase::Active,
+                    PluginState::Stopping => PluginFiberPhase::Unloading,
+                    PluginState::Stopped => return None,
+                    PluginState::Failed(_) => PluginFiberPhase::Failed,
+                };
+                Some((entry_id, phase))
+            })
+            .collect::<BTreeMap<_, _>>();
+        PluginInventorySnapshot::with_phases(&self.composition, &phases)
     }
 
     fn queue_shell(&mut self, command: String) -> Result<ManagementResult, String> {

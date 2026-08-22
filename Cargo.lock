@@ -1691,6 +1691,7 @@ dependencies = [
  "serde_json",
  "yunxi-companion",
  "yunxi-companion-mailbox",
+ "yunxi-composition",
  "yunxi-context",
  "yunxi-kernel",
  "yunxi-memory",
@@ -1721,6 +1722,14 @@ dependencies = [
  "serde",
  "serde_json",
  "yunxi-protocol",
+]
+
+[[package]]
+name = "yunxi-composition"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1807,6 +1816,14 @@ name = "yunxi-tool-shell"
 version = "0.1.0"
 dependencies = [
  "yunxi-protocol",
+]
+
+[[package]]
+name = "yunxi-web-contract"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

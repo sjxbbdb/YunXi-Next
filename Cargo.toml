@@ -2,6 +2,7 @@
 members = [
     "crates/yunxi-companion",
     "crates/yunxi-companion-mailbox",
+    "crates/yunxi-composition",
     "crates/yunxi-cli",
     "crates/yunxi-context",
     "crates/yunxi-kernel",
@@ -14,6 +15,7 @@ members = [
     "crates/yunxi-storage",
     "crates/yunxi-tool-shell",
     "crates/yunxi-tool-patch",
+    "crates/yunxi-web-contract",
 ]
 resolver = "3"
 

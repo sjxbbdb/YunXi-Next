@@ -12,6 +12,9 @@ use std::time::Duration;
 
 use yunxi_companion::COMPANION_PLUGIN_ID;
 use yunxi_companion_mailbox::MAILBOX_PLUGIN_ID;
+use yunxi_composition::{
+    CompositionEntry, CompositionError, CompositionSnapshot, ConfigLayer, Profile,
+};
 use yunxi_context::CONTEXT_PLUGIN_ID;
 use yunxi_kernel::{PluginCommand, PluginId, PluginIdError};
 use yunxi_memory::MEMORY_PLUGIN_ID;
@@ -78,6 +81,7 @@ pub(crate) struct BackendStatus {
 
 pub(crate) struct ChatSession {
     host: ProcessPluginHost,
+    composition: CompositionSnapshot,
     model_plugin_id: PluginId,
     model_capability: CapabilityDescriptor,
     context_capability: Option<CapabilityDescriptor>,
@@ -122,6 +126,7 @@ impl ChatSession {
         let executable = env::current_exe()?;
         let cwd = env::current_dir()?;
         let switches = CapabilitySwitches::from_env();
+        let composition = build_composition(&switches)?;
         let mut host = ProcessPluginHost::new();
         let mut notices = Vec::new();
 
@@ -368,6 +373,7 @@ impl ChatSession {
         let reported_notices = notices.iter().cloned().collect();
         Ok(Self {
             host,
+            composition,
             model_plugin_id,
             model_capability,
             context_capability,
@@ -868,6 +874,35 @@ where
     }
 }
 
+fn build_composition(
+    switches: &CapabilitySwitches,
+) -> Result<CompositionSnapshot, CompositionError> {
+    let mut profile = Profile::new("yunxi-next")?;
+    let mut builtin = ConfigLayer::new("yunxi-next.builtin")?;
+    let persona_process_needed = switches.persona || switches.memory;
+    let entries = [
+        (MODEL_PLUGIN_ID, true),
+        (CONTEXT_PLUGIN_ID, switches.context),
+        (PERSONA_PLUGIN_ID, persona_process_needed),
+        (MEMORY_PLUGIN_ID, switches.memory),
+        (STORAGE_PLUGIN_ID, switches.storage),
+        (COMPANION_PLUGIN_ID, switches.companion),
+        (MAILBOX_PLUGIN_ID, switches.mailbox),
+        (SCHEDULER_PLUGIN_ID, switches.scheduler),
+        (SHELL_PLUGIN_ID, switches.shell),
+        (PATCH_PLUGIN_ID, switches.patch),
+    ]
+    .into_iter()
+    .map(|(id, enabled)| {
+        CompositionEntry::new(id, format!("yunxi.plugin.{id}"))
+            .map(|entry| entry.with_enabled(enabled))
+    })
+    .collect::<Result<Vec<_>, _>>()?;
+    builtin.insert(entries)?;
+    profile.add_bundle(builtin)?;
+    profile.compose()
+}
+
 #[derive(Debug)]
 pub(crate) enum SessionError {
     Config(ProviderConfigError),
@@ -876,6 +911,7 @@ pub(crate) enum SessionError {
     Capability(CapabilityError),
     Catalog(CatalogError),
     Host(PluginHostError),
+    Composition(CompositionError),
     ProviderMismatch {
         capability: CapabilityDescriptor,
         expected: PluginId,
@@ -892,6 +928,7 @@ impl fmt::Display for SessionError {
             Self::Capability(error) => write!(formatter, "capability is invalid: {error}"),
             Self::Catalog(error) => write!(formatter, "capability routing failed: {error}"),
             Self::Host(error) => write!(formatter, "plugin host failed: {error}"),
+            Self::Composition(error) => write!(formatter, "plugin composition failed: {error}"),
             Self::ProviderMismatch {
                 capability,
                 expected,
@@ -915,6 +952,7 @@ impl Error for SessionError {
             Self::Capability(error) => Some(error),
             Self::Catalog(error) => Some(error),
             Self::Host(error) => Some(error),
+            Self::Composition(error) => Some(error),
             Self::ProviderMismatch { .. } => None,
         }
     }
@@ -953,6 +991,12 @@ impl From<CatalogError> for SessionError {
 impl From<PluginHostError> for SessionError {
     fn from(error: PluginHostError) -> Self {
         Self::Host(error)
+    }
+}
+
+impl From<CompositionError> for SessionError {
+    fn from(error: CompositionError) -> Self {
+        Self::Composition(error)
     }
 }
 

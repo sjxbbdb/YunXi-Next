@@ -18,6 +18,7 @@ YunXi Next/
 |   |-- README.md                      documentation index
 |   |-- capability-migration.md        legacy capability ledger and acceptance gates
 |   |-- chat-runtime.md                end-to-end chat process and failure flow
+|   |-- dsh-web-compatibility.md       dsh source record and Web wire boundary
 |   |-- kernel-architecture.md         kernel trust and lifecycle design
 |   |-- project-structure.md           this ownership map
 |   `-- provider-configuration.md      provider environment resolution
@@ -45,6 +46,17 @@ YunXi Next/
     |       `-- bin/                    standalone plugin entry point
     |           |-- README.md           binary purpose
     |           `-- yunxi-companion-mailbox.rs mailbox plugin executable
+    |-- yunxi-composition/             pure profile layers and Web inventory projection
+    |   |-- Cargo.toml                 composition crate metadata and dependencies
+    |   |-- README.md                  composition scope and ownership
+    |   `-- src/                       composition implementation
+    |       |-- README.md              source file ownership index
+    |       |-- entry.rs               validated entry ids, modules, and JSON config
+    |       |-- error.rs               composition validation errors
+    |       |-- inventory.rs           dsh-compatible plugin inventory projection
+    |       |-- layer.rs               serializable layer operations
+    |       |-- profile.rs              ordered bundle/profile/overlay composition
+    |       `-- lib.rs                 public composition facade
     |-- yunxi-cli/                     user-facing multi-plugin terminal host
     |   |-- Cargo.toml                 CLI package and `yunxi-next` binary
     |   |-- README.md                  crate scope and layout
@@ -176,31 +188,42 @@ YunXi Next/
     |       `-- bin/                    standalone plugin entry point
     |           |-- README.md           binary purpose
     |           `-- yunxi-storage.rs    storage plugin executable
-    `-- yunxi-protocol/                 local host/plugin wire contract
-        |-- Cargo.toml                  serialization-only dependencies
-        |-- README.md                   crate scope and layout
-        `-- src/                        protocol implementation
-            |-- README.md               source file index
-            |-- capability.rs           capability ids, versions, and built-in names
-            |-- companion.rs            companion policy payload contracts
-            |-- grant.rs                explicit workspace-access contract
-            |-- handshake.rs            loopback setup and readiness exchange
-            |-- identity.rs             context, memory, and persona payload contracts
-            |-- invocation.rs           generic typed-payload call envelopes
-            |-- lib.rs                  stable protocol facade
-            |-- mailbox.rs              encrypted mailbox payload contracts
-            |-- memory_write.rs         memory extraction and review contracts
-            |-- message.rs              versioned host/plugin messages
-            |-- scheduler.rs            proactive scheduling payload contracts
-            |-- sessions.rs             persistent-session payload contracts
-            `-- transport.rs            bounded JSONL TCP transport
+    |-- yunxi-protocol/                 local host/plugin wire contract
+    |   |-- Cargo.toml                  serialization-only dependencies
+    |   |-- README.md                   crate scope and layout
+    |   `-- src/                        protocol implementation
+    |       |-- README.md               source file index
+    |       |-- capability.rs           capability ids, versions, and built-in names
+    |       |-- companion.rs            companion policy payload contracts
+    |       |-- grant.rs                explicit workspace-access contract
+    |       |-- handshake.rs            loopback setup and readiness exchange
+    |       |-- identity.rs             context, memory, and persona payload contracts
+    |       |-- invocation.rs           generic typed-payload call envelopes
+    |       |-- lib.rs                  stable protocol facade
+    |       |-- mailbox.rs              encrypted mailbox payload contracts
+    |       |-- memory_write.rs         memory extraction and review contracts
+    |       |-- message.rs              versioned host/plugin messages
+    |       |-- scheduler.rs            proactive scheduling payload contracts
+    |       |-- sessions.rs             persistent-session payload contracts
+    |       `-- transport.rs            bounded JSONL TCP transport
+    `-- yunxi-web-contract/             dsh-compatible browser wire contract
+        |-- Cargo.toml                  bounded serde contract dependencies
+        |-- README.md                   Web contract scope and transport boundary
+        `-- src/                        Web contract implementation
+            |-- README.md               source file ownership index
+            |-- bounds.rs               frame and payload limits
+            |-- error.rs                Web contract validation errors
+            |-- events.rs               mux and host event channels
+            |-- lib.rs                  public Web contract facade
+            `-- rpc.rs                  four RPC message quadrants
 ```
 
 ## Placement Rules
 
 1. Put stable data definitions in the domain that owns their meaning.
 2. Put process lifecycle in `yunxi-kernel`, not in capability crates.
-3. Put wire compatibility in `yunxi-protocol`, not in the CLI or providers.
+3. Put local plugin wire compatibility in `yunxi-protocol`; put browser wire
+   compatibility in `yunxi-web-contract`, not in the CLI or providers.
 4. Keep provider HTTP details inside the model capability plugin.
 5. Keep executable entry points thin and reusable behavior in libraries.
 6. Add a concise `README.md` to every new non-generated directory.

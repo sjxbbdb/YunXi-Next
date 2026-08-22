@@ -8,6 +8,7 @@ publish = false
 [dependencies]
 yunxi-companion = { path = "../yunxi-companion" }
 yunxi-companion-mailbox = { path = "../yunxi-companion-mailbox" }
+yunxi-composition = { path = "../yunxi-composition" }
 yunxi-context = { path = "../yunxi-context" }
 yunxi-kernel = { path = "../yunxi-kernel" }
 yunxi-memory = { path = "../yunxi-memory" }

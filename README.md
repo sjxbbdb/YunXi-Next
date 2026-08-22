@@ -67,6 +67,13 @@ companion automation, tools, Weixin, voice, and management UI is tracked in
 counted as migrated only after it has a real process boundary, versioned
 contract, explicit grants, and failure-containment tests.
 
+The dsh-inspired composition layer is now represented by
+[`yunxi-composition`](crates/yunxi-composition/README.md). It keeps ordered
+bundle/profile/overlay configuration separate from process supervision and
+projects the current plugin set into the inventory shape needed by the dsh Web
+client. The upstream record and reuse boundary are documented in
+[`docs/dsh-web-compatibility.md`](docs/dsh-web-compatibility.md).
+
 ## Run
 
 Install the independent `yunxi-next` command beside Cargo without replacing an
