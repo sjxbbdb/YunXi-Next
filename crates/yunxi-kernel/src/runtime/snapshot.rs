@@ -1,5 +1,7 @@
 //! Immutable aggregate views of kernel health and plugin state.
 
+use std::fmt;
+
 use crate::{PluginSnapshot, PluginState};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -7,6 +9,16 @@ pub enum KernelState {
     Running,
     ShuttingDown,
     Stopped,
+}
+
+impl fmt::Display for KernelState {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Running => formatter.write_str("running"),
+            Self::ShuttingDown => formatter.write_str("shutting down"),
+            Self::Stopped => formatter.write_str("stopped"),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -13,6 +13,13 @@
 - Plugin shutdown must be explicit and must not leave a supervised child process behind.
 - Automatic restart must be bounded and observable before it is introduced.
 
+## Protocol Invariants
+
+- API credentials must not enter plugin protocol messages or diagnostics.
+- The host must not report a plugin as ready before version and capability negotiation completes.
+- Wire frames and HTTP responses must remain size bounded.
+- A model API request failure must not terminate the model plugin process.
+
 ## Rust
 
 - Use Rust 2024.
@@ -21,5 +28,5 @@
 - Add a concise `README.md` when introducing a non-generated directory.
 - Update `docs/project-structure.md` when files or directories move.
 - Forbid unsafe code in the kernel workspace.
-- Run `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and
-  `cargo test` before claiming completion.
+- Run `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`,
+  and `cargo test --workspace --all-targets` before claiming completion.

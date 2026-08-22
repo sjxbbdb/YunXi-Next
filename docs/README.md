@@ -7,3 +7,5 @@ stays beside the crate that owns it.
 | --- | --- |
 | [`project-structure.md`](project-structure.md) | Canonical directory and file ownership map |
 | [`kernel-architecture.md`](kernel-architecture.md) | Trusted boundary, runtime flow, and non-goals |
+| [`chat-runtime.md`](chat-runtime.md) | CLI, local protocol, model process, and failure flow |
+| [`provider-configuration.md`](provider-configuration.md) | Provider environment variables and resolution order |

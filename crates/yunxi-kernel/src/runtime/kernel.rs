@@ -193,13 +193,15 @@ impl YunxiKernel {
                 .plugins
                 .get_mut(&id)
                 .and_then(|slot| slot.worker.take());
-            if let Some(worker) = worker
-                && worker.join().is_err()
-                && let Some(slot) = self.plugins.get_mut(&id)
-            {
-                slot.state = PluginState::Failed(PluginFailure::Supervisor {
-                    message: "supervisor thread panicked during shutdown".to_string(),
-                });
+            if let Some(worker) = worker {
+                let supervisor_panicked = worker.join().is_err();
+                if supervisor_panicked {
+                    if let Some(slot) = self.plugins.get_mut(&id) {
+                        slot.state = PluginState::Failed(PluginFailure::Supervisor {
+                            message: "supervisor thread panicked during shutdown".to_string(),
+                        });
+                    }
+                }
             }
         }
 
@@ -250,14 +252,16 @@ impl YunxiKernel {
                 .plugins
                 .get_mut(&id)
                 .and_then(|slot| slot.worker.take());
-            if let Some(worker) = worker
-                && worker.join().is_err()
-                && let Some(slot) = self.plugins.get_mut(&id)
-            {
-                slot.commands = None;
-                slot.state = PluginState::Failed(PluginFailure::Supervisor {
-                    message: "supervisor thread panicked".to_string(),
-                });
+            if let Some(worker) = worker {
+                let supervisor_panicked = worker.join().is_err();
+                if supervisor_panicked {
+                    if let Some(slot) = self.plugins.get_mut(&id) {
+                        slot.commands = None;
+                        slot.state = PluginState::Failed(PluginFailure::Supervisor {
+                            message: "supervisor thread panicked".to_string(),
+                        });
+                    }
+                }
             }
         }
     }

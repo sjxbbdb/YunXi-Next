@@ -5,7 +5,11 @@ when it owns a stable responsibility and can state its dependency direction.
 
 | Crate | Responsibility |
 | --- | --- |
+| [`yunxi-cli`](yunxi-cli/README.md) | Terminal chat, conversation history, and model-plugin hosting |
 | [`yunxi-kernel`](yunxi-kernel/README.md) | Process-isolated plugin lifecycle and kernel health |
+| [`yunxi-model-openai`](yunxi-model-openai/README.md) | OpenAI-compatible HTTP capability running as a child process |
+| [`yunxi-protocol`](yunxi-protocol/README.md) | Versioned local messages, bounded transport, and readiness handshake |
 
-Tests that span one crate stay inside that crate. Cross-crate integration tests
-may receive their own workspace package after a second production crate exists.
+Dependency direction is `yunxi-cli -> yunxi-kernel + yunxi-protocol +
+yunxi-model-openai`, and `yunxi-model-openai -> yunxi-protocol`. The kernel does
+not depend on any capability implementation or serialization/HTTP package.
