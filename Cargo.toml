@@ -12,6 +12,8 @@ members = [
     "crates/yunxi-protocol",
     "crates/yunxi-scheduler",
     "crates/yunxi-storage",
+    "crates/yunxi-tool-shell",
+    "crates/yunxi-tool-patch",
 ]
 resolver = "3"
 

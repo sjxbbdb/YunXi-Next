@@ -31,7 +31,9 @@ pub mod capabilities {
     pub const STORAGE_SESSIONS: &str = "storage.sessions";
     pub const STORAGE_SESSIONS_VERSION: u32 = 1;
     pub const TOOL_SHELL: &str = "tool.shell";
+    pub const TOOL_SHELL_VERSION: u32 = 1;
     pub const TOOL_PATCH: &str = "tool.patch";
+    pub const TOOL_PATCH_VERSION: u32 = 1;
     pub const TOOL_MCP: &str = "tool.mcp";
     pub const TOOL_SKILLS: &str = "tool.skills";
     pub const TOOL_MULTI_AGENT: &str = "tool.multi-agent";

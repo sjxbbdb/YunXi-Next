@@ -124,6 +124,89 @@ fn disabled_optional_capabilities_never_launch_or_register_routes() {
 }
 
 #[test]
+fn shell_action_requires_approval_and_crosses_the_plugin_boundary() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind unused API endpoint");
+    let address = listener.local_addr().expect("read API endpoint");
+    drop(listener);
+    let workspace = unique_temp_dir("yunxi-shell-e2e");
+    fs::create_dir_all(&workspace).expect("create workspace");
+
+    let mut child = configured_cli(address)
+        .current_dir(&workspace)
+        .env("YUNXI_NEXT_SHELL_ENABLED", "true")
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch CLI");
+    child
+        .stdin
+        .take()
+        .expect("open CLI stdin")
+        .write_all(b"/shell echo action-ok\n/approve\n/quit\n")
+        .expect("write action commands");
+    let output = wait_for_cli(child);
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 output");
+    assert!(stdout.contains("Approval required for shell action."));
+    assert!(stdout.contains("shell exit: 0"));
+    assert!(stdout.contains("action-ok"));
+    fs::remove_dir_all(workspace).expect("remove workspace");
+}
+
+#[test]
+fn patch_action_requires_approval_and_applies_a_workspace_file() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind unused API endpoint");
+    let address = listener.local_addr().expect("read API endpoint");
+    drop(listener);
+    let workspace = unique_temp_dir("yunxi-patch-e2e");
+    fs::create_dir_all(&workspace).expect("create workspace");
+    fs::write(workspace.join("target.txt"), "before\n").expect("write target");
+    fs::write(
+        workspace.join("change.patch"),
+        "*** Begin Patch\n*** Update File: target.txt\n@@\n-before\n+after\n*** End Patch\n",
+    )
+    .expect("write patch");
+
+    let mut child = configured_cli(address)
+        .current_dir(&workspace)
+        .env("YUNXI_NEXT_PATCH_ENABLED", "true")
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch CLI");
+    child
+        .stdin
+        .take()
+        .expect("open CLI stdin")
+        .write_all(b"/patch change.patch\n/approve\n/quit\n")
+        .expect("write patch commands");
+    let output = wait_for_cli(child);
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 output");
+    assert!(stdout.contains("Approval required for patch action."));
+    assert!(stdout.contains("patch applied: "));
+    assert_eq!(
+        fs::read_to_string(workspace.join("target.txt")).expect("read target"),
+        "after\n"
+    );
+    fs::remove_dir_all(workspace).expect("remove workspace");
+}
+
+#[test]
 fn legacy_memory_is_recalled_through_memory_and_persona_processes() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
     listener

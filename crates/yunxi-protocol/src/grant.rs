@@ -11,6 +11,8 @@ pub struct WorkspaceGrant {
     state_root: Option<PathBuf>,
     legacy_read: bool,
     next_write: bool,
+    #[serde(default)]
+    workspace_write: bool,
 }
 
 impl WorkspaceGrant {
@@ -20,6 +22,7 @@ impl WorkspaceGrant {
             state_root: None,
             legacy_read: true,
             next_write: false,
+            workspace_write: false,
         }
     }
 
@@ -29,11 +32,22 @@ impl WorkspaceGrant {
             state_root: None,
             legacy_read: true,
             next_write: true,
+            workspace_write: false,
         }
     }
 
     pub fn with_state_root(mut self, state_root: impl Into<PathBuf>) -> Self {
         self.state_root = Some(state_root.into());
+        self
+    }
+
+    /// Grants a tool permission to modify files below the workspace root.
+    ///
+    /// This is intentionally separate from `next_write`, which only permits
+    /// Next-owned state such as sessions and memory. Action plugins must still
+    /// require an approved `ActionGrant` before using this permission.
+    pub fn with_workspace_write(mut self) -> Self {
+        self.workspace_write = true;
         self
     }
 
@@ -51,6 +65,10 @@ impl WorkspaceGrant {
 
     pub fn allows_next_write(&self) -> bool {
         self.next_write
+    }
+
+    pub fn allows_workspace_write(&self) -> bool {
+        self.workspace_write
     }
 }
 

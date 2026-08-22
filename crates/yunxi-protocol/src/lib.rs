@@ -12,6 +12,7 @@ mod memory_write;
 mod message;
 mod scheduler;
 mod sessions;
+mod tools;
 mod transport;
 
 pub use capability::{
@@ -57,5 +58,10 @@ pub use sessions::{
     STORAGE_SESSIONS_LOAD_OPERATION, STORAGE_SESSIONS_MUTATE_OPERATION, SessionAppendRequest,
     SessionListRequest, SessionListResult, SessionLoadRequest, SessionLoadResult, SessionMutation,
     SessionMutationRequest, SessionMutationResult, SessionSnapshot, SessionSummary,
+};
+pub use tools::{
+    ActionApproval, ActionGrant, ActionGrantError, PatchApplyRequest, PatchApplyResult,
+    PatchChangeKind, PatchFileChange, ShellExecuteRequest, ShellExecuteResult,
+    TOOL_PATCH_APPLY_OPERATION, TOOL_SHELL_EXECUTE_OPERATION,
 };
 pub use transport::{DEFAULT_MAX_FRAME_BYTES, JsonLineTransport, ProtocolError};

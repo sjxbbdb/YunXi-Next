@@ -17,6 +17,8 @@ yunxi-plugin-host = { path = "../yunxi-plugin-host" }
 yunxi-protocol = { path = "../yunxi-protocol" }
 yunxi-scheduler = { path = "../yunxi-scheduler" }
 yunxi-storage = { path = "../yunxi-storage" }
+yunxi-tool-patch = { path = "../yunxi-tool-patch" }
+yunxi-tool-shell = { path = "../yunxi-tool-shell" }
 
 [[bin]]
 name = "yunxi-next"

@@ -24,6 +24,8 @@ pub const INTERNAL_MEMORY_PLUGIN_ARGUMENT: &str = "__memory-plugin";
 pub const INTERNAL_PERSONA_PLUGIN_ARGUMENT: &str = "__persona-plugin";
 pub const INTERNAL_SCHEDULER_PLUGIN_ARGUMENT: &str = "__scheduler-plugin";
 pub const INTERNAL_STORAGE_PLUGIN_ARGUMENT: &str = "__storage-plugin";
+pub const INTERNAL_SHELL_PLUGIN_ARGUMENT: &str = "__shell-plugin";
+pub const INTERNAL_PATCH_PLUGIN_ARGUMENT: &str = "__patch-plugin";
 
 pub fn run_from_env() -> Result<(), CliError> {
     match args::parse(env::args_os().skip(1))? {

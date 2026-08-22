@@ -1700,6 +1700,8 @@ dependencies = [
  "yunxi-protocol",
  "yunxi-scheduler",
  "yunxi-storage",
+ "yunxi-tool-patch",
+ "yunxi-tool-shell",
 ]
 
 [[package]]
@@ -1790,6 +1792,20 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "yunxi-protocol",
+]
+
+[[package]]
+name = "yunxi-tool-patch"
+version = "0.1.0"
+dependencies = [
+ "yunxi-protocol",
+]
+
+[[package]]
+name = "yunxi-tool-shell"
+version = "0.1.0"
+dependencies = [
  "yunxi-protocol",
 ]
 

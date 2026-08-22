@@ -7,8 +7,9 @@ use std::process::ExitCode;
 use yunxi_cli::{
     INTERNAL_COMPANION_PLUGIN_ARGUMENT, INTERNAL_CONTEXT_PLUGIN_ARGUMENT,
     INTERNAL_MAILBOX_PLUGIN_ARGUMENT, INTERNAL_MEMORY_PLUGIN_ARGUMENT,
-    INTERNAL_MODEL_PLUGIN_ARGUMENT, INTERNAL_PERSONA_PLUGIN_ARGUMENT,
-    INTERNAL_SCHEDULER_PLUGIN_ARGUMENT, INTERNAL_STORAGE_PLUGIN_ARGUMENT,
+    INTERNAL_MODEL_PLUGIN_ARGUMENT, INTERNAL_PATCH_PLUGIN_ARGUMENT,
+    INTERNAL_PERSONA_PLUGIN_ARGUMENT, INTERNAL_SCHEDULER_PLUGIN_ARGUMENT,
+    INTERNAL_SHELL_PLUGIN_ARGUMENT, INTERNAL_STORAGE_PLUGIN_ARGUMENT,
 };
 
 fn main() -> ExitCode {
@@ -36,6 +37,12 @@ fn main() -> ExitCode {
         }
         Some(argument) if argument == OsStr::new(INTERNAL_STORAGE_PLUGIN_ARGUMENT) => {
             return plugin_exit("storage", yunxi_storage::run_storage_plugin());
+        }
+        Some(argument) if argument == OsStr::new(INTERNAL_SHELL_PLUGIN_ARGUMENT) => {
+            return plugin_exit("shell", yunxi_tool_shell::run_shell_plugin());
+        }
+        Some(argument) if argument == OsStr::new(INTERNAL_PATCH_PLUGIN_ARGUMENT) => {
+            return plugin_exit("patch", yunxi_tool_patch::run_patch_plugin());
         }
         _ => {}
     }

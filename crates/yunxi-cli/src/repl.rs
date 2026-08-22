@@ -62,6 +62,13 @@ where
                     output,
                     "/mailbox [read <id>]  list or read companion messages"
                 )?;
+                writeln!(
+                    output,
+                    "/shell <command>  queue a shell action for approval"
+                )?;
+                writeln!(output, "/patch <file>  queue a patch file for approval")?;
+                writeln!(output, "/approve  approve the pending action")?;
+                writeln!(output, "/deny  deny the pending action")?;
                 writeln!(output, "/quit    exit YunXi")?;
             }
             "/status" => {
@@ -128,6 +135,20 @@ where
 }
 
 fn parse_management_command(value: &str) -> Result<Option<ManagementCommand>, String> {
+    if let Some(command) = value
+        .strip_prefix("/shell ")
+        .map(str::trim)
+        .filter(|command| !command.is_empty())
+    {
+        return Ok(Some(ManagementCommand::RequestShell(command.to_string())));
+    }
+    if let Some(path) = value
+        .strip_prefix("/patch ")
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    {
+        return Ok(Some(ManagementCommand::RequestPatch(path.to_string())));
+    }
     let parts = value.split_whitespace().collect::<Vec<_>>();
     match parts.as_slice() {
         ["/sessions"] => Ok(Some(ManagementCommand::ListSessions)),
@@ -146,6 +167,10 @@ fn parse_management_command(value: &str) -> Result<Option<ManagementCommand>, St
         ["/mailbox"] => Ok(Some(ManagementCommand::ListMailbox)),
         ["/mailbox", "read", id] => Ok(Some(ManagementCommand::ReadMailbox((*id).to_string()))),
         ["/mailbox", ..] => Err("usage: /mailbox [read <item-id>]".to_string()),
+        ["/shell"] => Err("usage: /shell <command>".to_string()),
+        ["/patch"] => Err("usage: /patch <patch-file>".to_string()),
+        ["/approve"] => Ok(Some(ManagementCommand::ApproveAction)),
+        ["/deny"] => Ok(Some(ManagementCommand::DenyAction)),
         _ => Ok(None),
     }
 }

@@ -1,19 +1,23 @@
 //! Stateful post-response orchestration and REPL management calls.
 
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
+use std::process;
 
 use yunxi_protocol::{
-    COMPANION_MAILBOX_ENQUEUE_OPERATION, COMPANION_MAILBOX_GET_OPERATION,
+    ActionGrant, COMPANION_MAILBOX_ENQUEUE_OPERATION, COMPANION_MAILBOX_GET_OPERATION,
     COMPANION_MAILBOX_LIST_OPERATION, COMPANION_MAILBOX_MARK_READ_OPERATION,
     MEMORY_WRITE_EXTRACT_OPERATION, MEMORY_WRITE_REVIEW_OPERATION, MailboxEnqueueRequest,
     MailboxGetRequest, MailboxGetResult, MailboxItemKind, MailboxListRequest, MailboxListResult,
     MailboxMarkReadRequest, MailboxMutationResult, MemoryReviewAction, MemoryReviewRequest,
     MemoryReviewResult, MemoryWriteRequest, MemoryWriteResult, MemoryWriteStatus,
-    ProactiveSchedulerRequest, ProactiveSchedulerResult, SCHEDULER_PROACTIVE_EVALUATE_OPERATION,
+    PatchApplyRequest, PatchApplyResult, PatchChangeKind, ProactiveSchedulerRequest,
+    ProactiveSchedulerResult, SCHEDULER_PROACTIVE_EVALUATE_OPERATION,
     STORAGE_SESSIONS_APPEND_OPERATION, STORAGE_SESSIONS_LIST_OPERATION,
     STORAGE_SESSIONS_LOAD_OPERATION, SessionAppendRequest, SessionListRequest, SessionListResult,
-    SessionLoadRequest, SessionLoadResult, WorkspaceGrant,
+    SessionLoadRequest, SessionLoadResult, ShellExecuteRequest, ShellExecuteResult,
+    TOOL_PATCH_APPLY_OPERATION, TOOL_SHELL_EXECUTE_OPERATION, WorkspaceGrant,
 };
 
 use crate::management::{ManagementCommand, ManagementResult};
@@ -143,6 +147,126 @@ impl ChatSession {
             ManagementCommand::ReviewMemory { id, approve } => self.review_memory(&id, approve),
             ManagementCommand::ListMailbox => self.list_mailbox(),
             ManagementCommand::ReadMailbox(id) => self.read_mailbox(&id),
+            ManagementCommand::RequestShell(command) => self.queue_shell(command),
+            ManagementCommand::RequestPatch(path) => self.queue_patch(path),
+            ManagementCommand::ApproveAction => self.approve_action(),
+            ManagementCommand::DenyAction => {
+                if self.pending_action.take().is_some() {
+                    Ok(ManagementResult::lines(vec![
+                        "Pending action denied.".to_string(),
+                    ]))
+                } else {
+                    Err("there is no pending action".to_string())
+                }
+            }
+        }
+    }
+
+    fn queue_shell(&mut self, command: String) -> Result<ManagementResult, String> {
+        if self.shell_capability.is_none() {
+            return Err("shell capability is disabled or unavailable".to_string());
+        }
+        let command = command.trim().to_string();
+        if command.is_empty() {
+            return Err("usage: /shell <command>".to_string());
+        }
+        self.pending_action = Some(super::PendingAction::Shell {
+            command: command.clone(),
+        });
+        Ok(ManagementResult::lines(vec![
+            "Approval required for shell action.".to_string(),
+            format!("command: {command}"),
+            format!("workspace: {}", self.cwd.display()),
+            "Use /approve to run it or /deny to discard it.".to_string(),
+        ]))
+    }
+
+    fn queue_patch(&mut self, value: String) -> Result<ManagementResult, String> {
+        if self.patch_capability.is_none() {
+            return Err("patch capability is disabled or unavailable".to_string());
+        }
+        let value = value.trim();
+        if value.is_empty() {
+            return Err("usage: /patch <patch-file>".to_string());
+        }
+        let path = resolve_patch_file(&self.cwd, value)?;
+        let metadata = fs::metadata(&path)
+            .map_err(|error| format!("patch file {} is unavailable: {error}", path.display()))?;
+        if metadata.len() > 2 * 1024 * 1024 {
+            return Err("patch file exceeds the 2 MiB host limit".to_string());
+        }
+        let content = fs::read_to_string(&path)
+            .map_err(|error| format!("patch file {} is not UTF-8: {error}", path.display()))?;
+        self.pending_action = Some(super::PendingAction::Patch {
+            path: path.clone(),
+            content,
+        });
+        Ok(ManagementResult::lines(vec![
+            "Approval required for patch action.".to_string(),
+            format!("patch file: {}", path.display()),
+            format!("workspace: {}", self.cwd.display()),
+            "Use /approve to apply it or /deny to discard it.".to_string(),
+        ]))
+    }
+
+    fn approve_action(&mut self) -> Result<ManagementResult, String> {
+        let action = self
+            .pending_action
+            .take()
+            .ok_or_else(|| "there is no pending action".to_string())?;
+        let ticket = format!("action-{}-{}", process::id(), self.next_action_ticket);
+        self.next_action_ticket = self.next_action_ticket.saturating_add(1);
+        let grant = ActionGrant::approved(
+            yunxi_protocol::WorkspaceGrant::read_write(&self.cwd).with_workspace_write(),
+            &self.cwd,
+            ticket,
+        )
+        .with_write(true)
+        .with_network(action_network_allowed());
+
+        match action {
+            super::PendingAction::Shell { command } => {
+                let capability = self
+                    .shell_capability
+                    .clone()
+                    .ok_or_else(|| "shell capability is disabled or unavailable".to_string())?;
+                let request = ShellExecuteRequest::new(grant, command);
+                let result = self
+                    .host
+                    .invoke::<_, ShellExecuteResult>(
+                        &capability,
+                        TOOL_SHELL_EXECUTE_OPERATION,
+                        &request,
+                    )
+                    .map_err(|error| {
+                        if call_lost_route(&error) {
+                            self.shell_capability = None;
+                        }
+                        error.to_string()
+                    })?;
+                Ok(ManagementResult::lines(format_shell_result(&result)))
+            }
+            super::PendingAction::Patch { path, content } => {
+                let capability = self
+                    .patch_capability
+                    .clone()
+                    .ok_or_else(|| "patch capability is disabled or unavailable".to_string())?;
+                let request = PatchApplyRequest::new(grant, content);
+                let result = self
+                    .host
+                    .invoke::<_, PatchApplyResult>(
+                        &capability,
+                        TOOL_PATCH_APPLY_OPERATION,
+                        &request,
+                    )
+                    .map_err(|error| {
+                        if call_lost_route(&error) {
+                            self.patch_capability = None;
+                        }
+                        error.to_string()
+                    })?;
+                Ok(ManagementResult::lines(format_patch_result(&path, &result)))
+            }
         }
     }
 
@@ -450,6 +574,80 @@ fn proactive_request(prompt: &str, proactive_in_session: u32) -> ProactiveSchedu
 
 fn compact_for_key(value: &str, maximum: usize) -> String {
     value.chars().take(maximum).collect()
+}
+
+fn resolve_patch_file(workspace: &Path, value: &str) -> Result<PathBuf, String> {
+    let path = PathBuf::from(value);
+    if path.is_absolute() {
+        return Err("patch file must be relative to the current workspace".to_string());
+    }
+    let resolved = fs::canonicalize(workspace.join(path))
+        .map_err(|error| format!("patch file cannot be resolved: {error}"))?;
+    let root = fs::canonicalize(workspace)
+        .map_err(|error| format!("workspace cannot be resolved: {error}"))?;
+    if !resolved.starts_with(&root) || !resolved.is_file() {
+        return Err("patch file must be a regular file inside the current workspace".to_string());
+    }
+    Ok(resolved)
+}
+
+fn action_network_allowed() -> bool {
+    matches!(
+        env::var("YUNXI_NEXT_ACTION_ALLOW_NETWORK")
+            .ok()
+            .as_deref()
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some("1" | "true" | "yes" | "on")
+    )
+}
+
+fn format_shell_result(result: &ShellExecuteResult) -> Vec<String> {
+    let mut lines = vec![format!(
+        "shell exit: {}{}{}",
+        result
+            .exit_code()
+            .map_or_else(|| "unknown".to_string(), |code| code.to_string()),
+        if result.timed_out() {
+            " [timed out]"
+        } else {
+            ""
+        },
+        if result.output_truncated() {
+            " [output truncated]"
+        } else {
+            ""
+        }
+    )];
+    append_output(&mut lines, "stdout", result.stdout());
+    append_output(&mut lines, "stderr", result.stderr());
+    lines
+}
+
+fn append_output(lines: &mut Vec<String>, label: &str, content: &str) {
+    if content.is_empty() {
+        return;
+    }
+    lines.push(format!("{label}:"));
+    lines.extend(content.lines().map(ToString::to_string));
+}
+
+fn format_patch_result(path: &Path, result: &PatchApplyResult) -> Vec<String> {
+    let mut lines = vec![format!("patch applied: {}", path.display())];
+    for change in result.changes() {
+        let kind = match change.kind() {
+            PatchChangeKind::Added => "added",
+            PatchChangeKind::Updated => "updated",
+            PatchChangeKind::Deleted => "deleted",
+        };
+        lines.push(format!(
+            "{kind}: {} (+{} -{})",
+            change.path(),
+            change.added_lines(),
+            change.removed_lines()
+        ));
+    }
+    lines
 }
 
 fn memory_write_grant(cwd: &Path) -> WorkspaceGrant {

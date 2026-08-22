@@ -29,18 +29,22 @@ use yunxi_protocol::{
 };
 use yunxi_scheduler::SCHEDULER_PLUGIN_ID;
 use yunxi_storage::STORAGE_PLUGIN_ID;
+use yunxi_tool_patch::PATCH_PLUGIN_ID;
+use yunxi_tool_shell::SHELL_PLUGIN_ID;
 
 use crate::{
     INTERNAL_COMPANION_PLUGIN_ARGUMENT, INTERNAL_CONTEXT_PLUGIN_ARGUMENT,
     INTERNAL_MAILBOX_PLUGIN_ARGUMENT, INTERNAL_MEMORY_PLUGIN_ARGUMENT,
-    INTERNAL_MODEL_PLUGIN_ARGUMENT, INTERNAL_PERSONA_PLUGIN_ARGUMENT,
-    INTERNAL_SCHEDULER_PLUGIN_ARGUMENT, INTERNAL_STORAGE_PLUGIN_ARGUMENT,
+    INTERNAL_MODEL_PLUGIN_ARGUMENT, INTERNAL_PATCH_PLUGIN_ARGUMENT,
+    INTERNAL_PERSONA_PLUGIN_ARGUMENT, INTERNAL_SCHEDULER_PLUGIN_ARGUMENT,
+    INTERNAL_SHELL_PLUGIN_ARGUMENT, INTERNAL_STORAGE_PLUGIN_ARGUMENT,
     management::{ManagementCommand, ManagementResult},
 };
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const READ_ONLY_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
+const ACTION_RESPONSE_TIMEOUT: Duration = Duration::from_secs(125);
 const RESPONSE_TIMEOUT_MARGIN: Duration = Duration::from_secs(5);
 
 const CONTEXT_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_CONTEXT_PLUGIN";
@@ -50,6 +54,8 @@ const MEMORY_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_MEMORY_PLUGIN";
 const PERSONA_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_PERSONA_PLUGIN";
 const SCHEDULER_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_SCHEDULER_PLUGIN";
 const STORAGE_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_STORAGE_PLUGIN";
+const SHELL_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_SHELL_PLUGIN";
+const PATCH_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_PATCH_PLUGIN";
 
 pub(crate) trait ChatBackend {
     fn complete(&mut self, messages: &[ChatMessage]) -> Result<String, ChatFailure>;
@@ -82,6 +88,8 @@ pub(crate) struct ChatSession {
     storage_capability: Option<CapabilityDescriptor>,
     mailbox_capability: Option<CapabilityDescriptor>,
     scheduler_capability: Option<CapabilityDescriptor>,
+    shell_capability: Option<CapabilityDescriptor>,
+    patch_capability: Option<CapabilityDescriptor>,
     cwd: PathBuf,
     provider: String,
     model: String,
@@ -90,6 +98,14 @@ pub(crate) struct ChatSession {
     proactive_in_session: u32,
     notices: Vec<String>,
     reported_notices: BTreeSet<String>,
+    pending_action: Option<PendingAction>,
+    next_action_ticket: u64,
+}
+
+#[derive(Clone, Debug)]
+enum PendingAction {
+    Shell { command: String },
+    Patch { path: PathBuf, content: String },
 }
 
 impl ChatSession {
@@ -307,6 +323,48 @@ impl ChatSession {
             None
         };
 
+        let shell_capability = if switches.shell {
+            let id = PluginId::new(SHELL_PLUGIN_ID)?;
+            let capability =
+                descriptor(capabilities::TOOL_SHELL, capabilities::TOOL_SHELL_VERSION)?;
+            launch_action_optional(
+                &mut host,
+                id,
+                "Host-approved shell execution",
+                optional_command(
+                    &executable,
+                    INTERNAL_SHELL_PLUGIN_ARGUMENT,
+                    SHELL_PLUGIN_PATH_ENV,
+                ),
+                &capability,
+                &mut notices,
+            )
+            .then_some(capability)
+        } else {
+            None
+        };
+
+        let patch_capability = if switches.patch {
+            let id = PluginId::new(PATCH_PLUGIN_ID)?;
+            let capability =
+                descriptor(capabilities::TOOL_PATCH, capabilities::TOOL_PATCH_VERSION)?;
+            launch_action_optional(
+                &mut host,
+                id,
+                "Host-approved patch application",
+                optional_command(
+                    &executable,
+                    INTERNAL_PATCH_PLUGIN_ARGUMENT,
+                    PATCH_PLUGIN_PATH_ENV,
+                ),
+                &capability,
+                &mut notices,
+            )
+            .then_some(capability)
+        } else {
+            None
+        };
+
         let reported_notices = notices.iter().cloned().collect();
         Ok(Self {
             host,
@@ -320,6 +378,8 @@ impl ChatSession {
             storage_capability,
             mailbox_capability,
             scheduler_capability,
+            shell_capability,
+            patch_capability,
             cwd,
             provider,
             model,
@@ -328,6 +388,8 @@ impl ChatSession {
             proactive_in_session: 0,
             notices,
             reported_notices,
+            pending_action: None,
+            next_action_ticket: 1,
         })
     }
 
@@ -572,10 +634,49 @@ fn launch_optional(
     capability: &CapabilityDescriptor,
     notices: &mut Vec<String>,
 ) -> bool {
+    launch_optional_with_timeout(
+        host,
+        id,
+        display_name,
+        command,
+        capability,
+        notices,
+        READ_ONLY_RESPONSE_TIMEOUT,
+    )
+}
+
+fn launch_action_optional(
+    host: &mut ProcessPluginHost,
+    id: PluginId,
+    display_name: &str,
+    command: PluginCommand,
+    capability: &CapabilityDescriptor,
+    notices: &mut Vec<String>,
+) -> bool {
+    launch_optional_with_timeout(
+        host,
+        id,
+        display_name,
+        command,
+        capability,
+        notices,
+        ACTION_RESPONSE_TIMEOUT,
+    )
+}
+
+fn launch_optional_with_timeout(
+    host: &mut ProcessPluginHost,
+    id: PluginId,
+    display_name: &str,
+    command: PluginCommand,
+    capability: &CapabilityDescriptor,
+    notices: &mut Vec<String>,
+    read_timeout: Duration,
+) -> bool {
     let launch = PluginLaunch::new(id.clone(), command)
         .with_display_name(display_name)
         .with_handshake_timeout(HANDSHAKE_TIMEOUT)
-        .with_io_timeouts(Some(READ_ONLY_RESPONSE_TIMEOUT), Some(WRITE_TIMEOUT));
+        .with_io_timeouts(Some(read_timeout), Some(WRITE_TIMEOUT));
     if let Err(error) = host.launch(launch) {
         notices.push(format!("optional plugin `{id}` failed to start: {error}"));
         return false;
@@ -722,6 +823,8 @@ struct CapabilitySwitches {
     storage: bool,
     mailbox: bool,
     scheduler: bool,
+    shell: bool,
+    patch: bool,
 }
 
 impl CapabilitySwitches {
@@ -748,6 +851,8 @@ impl CapabilitySwitches {
             storage: read_bool(&read, "YUNXI_NEXT_STORAGE_ENABLED").unwrap_or(true),
             mailbox: read_bool(&read, "YUNXI_NEXT_MAILBOX_ENABLED").unwrap_or(companion),
             scheduler: read_bool(&read, "YUNXI_NEXT_SCHEDULER_ENABLED").unwrap_or(companion),
+            shell: read_bool(&read, "YUNXI_NEXT_SHELL_ENABLED").unwrap_or(false),
+            patch: read_bool(&read, "YUNXI_NEXT_PATCH_ENABLED").unwrap_or(false),
         }
     }
 }
@@ -913,6 +1018,8 @@ mod tests {
                 storage: true,
                 mailbox: false,
                 scheduler: false,
+                shell: false,
+                patch: false,
             }
         );
     }

@@ -10,6 +10,10 @@ pub(crate) enum ManagementCommand {
     ReviewMemory { id: String, approve: bool },
     ListMailbox,
     ReadMailbox(String),
+    RequestShell(String),
+    RequestPatch(String),
+    ApproveAction,
+    DenyAction,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
