@@ -1,11 +1,12 @@
 <#
 .SYNOPSIS
-Installs the standalone `yunxi-next` command without replacing legacy YunXi.
+Installs `yunxi-next` beside Cargo without replacing legacy YunXi.
 #>
 
 [CmdletBinding()]
 param(
-    [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA 'YunXi Next'),
+    [string]$InstallBin,
+    [string]$PreviousInstallRoot = (Join-Path $env:LOCALAPPDATA 'YunXi Next'),
     [string]$ObsoleteRouterRoot = (Join-Path $env:LOCALAPPDATA 'YunXi')
 )
 
@@ -16,10 +17,19 @@ if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) {
 }
 
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$installBin = [IO.Path]::GetFullPath((Join-Path $InstallRoot 'bin'))
+$cargoExecutable = Get-Command cargo.exe -CommandType Application -ErrorAction Stop |
+    Select-Object -First 1 -ExpandProperty Source
+$commandBin = if ([string]::IsNullOrWhiteSpace($InstallBin)) {
+    [IO.Path]::GetFullPath((Split-Path -Parent $cargoExecutable))
+}
+else {
+    [IO.Path]::GetFullPath($InstallBin)
+}
+$previousInstallBin = [IO.Path]::GetFullPath((Join-Path $PreviousInstallRoot 'bin'))
 $obsoleteRouterBin = [IO.Path]::GetFullPath((Join-Path $ObsoleteRouterRoot 'bin'))
 $sourceNext = Join-Path $repositoryRoot 'target\release\yunxi-next.exe'
-$installedNext = Join-Path $installBin 'yunxi-next.exe'
+$installedNext = Join-Path $commandBin 'yunxi-next.exe'
+$previousInstalledNext = Join-Path $previousInstallBin 'yunxi-next.exe'
 $obsoleteNextRouteFile = Join-Path $obsoleteRouterBin 'yunxi-next.path'
 $obsoleteRouterDetected = Test-Path -LiteralPath $obsoleteNextRouteFile -PathType Leaf
 $obsoleteRouterFiles = @(
@@ -31,7 +41,7 @@ $obsoleteRouterFiles = @(
 
 Push-Location $repositoryRoot
 try {
-    & cargo build -p yunxi-cli --bin yunxi-next --release
+    & $cargoExecutable build -p yunxi-cli --bin yunxi-next --release
     if ($LASTEXITCODE -ne 0) {
         throw "Release build failed with exit code $LASTEXITCODE."
     }
@@ -45,11 +55,18 @@ if ($LASTEXITCODE -ne 0) {
     throw 'The release `yunxi-next` executable failed its version check.'
 }
 
-New-Item -ItemType Directory -Path $installBin -Force | Out-Null
+New-Item -ItemType Directory -Path $commandBin -Force | Out-Null
 Copy-Item -LiteralPath $sourceNext -Destination $installedNext -Force
 
 if ((Get-FileHash $sourceNext).Hash -ne (Get-FileHash $installedNext).Hash) {
     throw 'Installed YunXi Next hash does not match the release build.'
+}
+
+if (
+    -not $commandBin.Equals($previousInstallBin, [StringComparison]::OrdinalIgnoreCase) -and
+    (Test-Path -LiteralPath $previousInstalledNext -PathType Leaf)
+) {
+    Remove-Item -LiteralPath $previousInstalledNext -Force
 }
 
 if ($obsoleteRouterDetected) {
@@ -112,13 +129,13 @@ public static class YunXiEnvironmentBroadcast
 }
 
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-$pathsToReplace = @($installBin)
+$pathsToReplace = @($commandBin, $previousInstallBin)
 if ($obsoleteRouterDetected) {
     $pathsToReplace += $obsoleteRouterBin
 }
-$newUserPath = Set-PathPrefix $userPath $installBin $pathsToReplace
+$newUserPath = Set-PathPrefix $userPath $commandBin $pathsToReplace
 [Environment]::SetEnvironmentVariable('Path', $newUserPath, 'User')
-$env:Path = Set-PathPrefix $env:Path $installBin $pathsToReplace
+$env:Path = Set-PathPrefix $env:Path $commandBin $pathsToReplace
 Publish-EnvironmentChange
 
 & $installedNext --version
@@ -128,4 +145,4 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "Installed YunXi Next: $installedNext"
 Write-Host 'Legacy YunXi was not modified.'
-Write-Host 'Open a new terminal, then run: yunxi-next'
+Write-Host 'Run: yunxi-next'

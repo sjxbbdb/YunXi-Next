@@ -13,7 +13,7 @@ YunXi Next/
 |-- README.md                          project purpose, setup, and entry points
 |-- scripts/                           explicit build and installation operations
 |   |-- README.md                      script index and ownership
-|   `-- install-windows.ps1            standalone `yunxi-next` PATH installer
+|   `-- install-windows.ps1            `yunxi-next` Cargo command-bin installer
 |-- docs/                              repository-wide design documents
 |   |-- README.md                      documentation index
 |   |-- chat-runtime.md                end-to-end chat process and failure flow

@@ -41,8 +41,8 @@ filesystem, network, or resource-usage sandbox.
 
 ## Run
 
-Install the independent `yunxi-next` command without replacing an existing
-legacy YunXi binary:
+Install the independent `yunxi-next` command beside Cargo without replacing an
+existing legacy YunXi binary:
 
 ```powershell
 .\scripts\install-windows.ps1
@@ -55,12 +55,13 @@ $env:DEEPSEEK_API_KEY = "your-key"
 yunxi-next
 ```
 
-An already-open terminal may still hold the old PATH. Refresh that process once
-before running `yunxi-next`:
+The installer uses the command directory that already contains `cargo.exe`, so
+terminals with Cargo available can resolve `yunxi-next` immediately. If needed,
+refresh that directory in the current process once:
 
 ```powershell
-$nextBin = Join-Path $env:LOCALAPPDATA 'YunXi Next\bin'
-$env:Path = "$nextBin;$env:Path"
+$commandBin = Split-Path (Get-Command cargo.exe).Source
+$env:Path = "$commandBin;$env:Path"
 ```
 
 Send one prompt without entering interactive mode:
