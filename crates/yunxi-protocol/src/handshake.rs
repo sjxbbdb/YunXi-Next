@@ -1,5 +1,6 @@
 //! Loopback connection setup and readiness negotiation.
 
+use std::collections::BTreeSet;
 use std::env;
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::process;
@@ -7,20 +8,25 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use crate::{HostMessage, JsonLineTransport, PROTOCOL_VERSION, PluginMessage, ProtocolError};
+use crate::{
+    CapabilityDescriptor, HostMessage, JsonLineTransport, PROTOCOL_VERSION, PluginMessage,
+    ProtocolError,
+};
 
 pub const CONNECT_ADDRESS_ENV: &str = "YUNXI_PLUGIN_CONNECT_ADDRESS";
 pub const CONNECT_TOKEN_ENV: &str = "YUNXI_PLUGIN_CONNECT_TOKEN";
 
 static CONNECTION_COUNTER: AtomicU64 = AtomicU64::new(1);
 const ACCEPT_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const MAX_PLUGIN_METADATA_BYTES: usize = 128;
+const MAX_PLUGIN_CAPABILITIES: usize = 64;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PluginConnectionInfo {
     plugin_id: String,
-    provider: String,
-    model: String,
-    capabilities: Vec<String>,
+    display_name: String,
+    plugin_version: String,
+    capabilities: Vec<CapabilityDescriptor>,
 }
 
 impl PluginConnectionInfo {
@@ -28,16 +34,22 @@ impl PluginConnectionInfo {
         &self.plugin_id
     }
 
-    pub fn provider(&self) -> &str {
-        &self.provider
+    pub fn display_name(&self) -> &str {
+        &self.display_name
     }
 
-    pub fn model(&self) -> &str {
-        &self.model
+    pub fn plugin_version(&self) -> &str {
+        &self.plugin_version
     }
 
-    pub fn capabilities(&self) -> &[String] {
+    pub fn capabilities(&self) -> &[CapabilityDescriptor] {
         &self.capabilities
+    }
+
+    pub fn supports(&self, capability: &str, version: u32) -> bool {
+        self.capabilities.iter().any(|descriptor| {
+            descriptor.id().as_str() == capability && descriptor.version() == version
+        })
     }
 }
 
@@ -98,8 +110,8 @@ impl PluginAcceptor {
                 protocol_version,
                 plugin_id,
                 connection_token,
-                provider,
-                model,
+                display_name,
+                plugin_version,
                 capabilities,
             } => {
                 if protocol_version != PROTOCOL_VERSION {
@@ -117,10 +129,11 @@ impl PluginAcceptor {
                         "connection token did not match the launched plugin".to_string(),
                     ));
                 }
+                validate_declaration(&display_name, &plugin_version, &capabilities)?;
                 PluginConnectionInfo {
                     plugin_id,
-                    provider,
-                    model,
+                    display_name,
+                    plugin_version,
                     capabilities,
                 }
             }
@@ -190,11 +203,14 @@ impl PluginSession {
 
 pub fn connect_plugin(
     plugin_id: impl Into<String>,
-    provider: impl Into<String>,
-    model: impl Into<String>,
-    capabilities: Vec<String>,
+    display_name: impl Into<String>,
+    plugin_version: impl Into<String>,
+    capabilities: Vec<CapabilityDescriptor>,
     timeout: Duration,
 ) -> Result<PluginSession, ProtocolError> {
+    let display_name = display_name.into();
+    let plugin_version = plugin_version.into();
+    validate_declaration(&display_name, &plugin_version, &capabilities)?;
     let address = env::var(CONNECT_ADDRESS_ENV).map_err(|_| {
         ProtocolError::Handshake(format!(
             "environment variable {CONNECT_ADDRESS_ENV} is missing"
@@ -216,8 +232,8 @@ pub fn connect_plugin(
         protocol_version: PROTOCOL_VERSION,
         plugin_id: plugin_id.into(),
         connection_token,
-        provider: provider.into(),
-        model: model.into(),
+        display_name,
+        plugin_version,
         capabilities,
     })?;
     match transport.receive::<HostMessage>()? {
@@ -238,6 +254,48 @@ pub fn connect_plugin(
     Ok(PluginSession { transport })
 }
 
+fn validate_declaration(
+    display_name: &str,
+    plugin_version: &str,
+    capabilities: &[CapabilityDescriptor],
+) -> Result<(), ProtocolError> {
+    for (field, value) in [
+        ("display name", display_name),
+        ("plugin version", plugin_version),
+    ] {
+        if value.trim().is_empty() {
+            return Err(ProtocolError::Handshake(format!(
+                "plugin {field} cannot be empty"
+            )));
+        }
+        if value.len() > MAX_PLUGIN_METADATA_BYTES {
+            return Err(ProtocolError::Handshake(format!(
+                "plugin {field} exceeds {MAX_PLUGIN_METADATA_BYTES} bytes"
+            )));
+        }
+    }
+    if capabilities.is_empty() {
+        return Err(ProtocolError::Handshake(
+            "plugin must announce at least one capability".to_string(),
+        ));
+    }
+    if capabilities.len() > MAX_PLUGIN_CAPABILITIES {
+        return Err(ProtocolError::Handshake(format!(
+            "plugin announces more than {MAX_PLUGIN_CAPABILITIES} capabilities"
+        )));
+    }
+    let mut seen = BTreeSet::new();
+    for descriptor in capabilities {
+        if !seen.insert(descriptor.id().as_str()) {
+            return Err(ProtocolError::Handshake(format!(
+                "plugin announces capability `{}` more than once",
+                descriptor.id()
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn new_connection_token() -> String {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -250,7 +308,7 @@ fn new_connection_token() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::CHAT_CAPABILITY;
+    use crate::capabilities;
 
     #[test]
     fn host_and_plugin_complete_readiness_handshake() {
@@ -265,9 +323,15 @@ mod tests {
                     protocol_version: PROTOCOL_VERSION,
                     plugin_id: "yunxi.test".to_string(),
                     connection_token: token,
-                    provider: "fixture".to_string(),
-                    model: "fixture-model".to_string(),
-                    capabilities: vec![CHAT_CAPABILITY.to_string()],
+                    display_name: "Fixture plugin".to_string(),
+                    plugin_version: "1.0.0".to_string(),
+                    capabilities: vec![
+                        CapabilityDescriptor::new(
+                            capabilities::MODEL_CHAT,
+                            capabilities::MODEL_CHAT_VERSION,
+                        )
+                        .expect("valid capability"),
+                    ],
                 })
                 .expect("send hello");
             assert!(matches!(
@@ -288,10 +352,27 @@ mod tests {
         let mut session = acceptor
             .accept("yunxi.test", Duration::from_secs(2))
             .expect("accept ready plugin");
-        assert_eq!(session.info().provider(), "fixture");
-        assert_eq!(session.info().model(), "fixture-model");
-        assert_eq!(session.info().capabilities(), [CHAT_CAPABILITY]);
+        assert_eq!(session.info().display_name(), "Fixture plugin");
+        assert_eq!(session.info().plugin_version(), "1.0.0");
+        assert!(
+            session
+                .info()
+                .supports(capabilities::MODEL_CHAT, capabilities::MODEL_CHAT_VERSION)
+        );
         session.send(&HostMessage::Shutdown).expect("send shutdown");
         plugin.join().expect("join plugin thread");
+    }
+
+    #[test]
+    fn duplicate_capability_declarations_are_rejected() {
+        let capability =
+            CapabilityDescriptor::new(capabilities::MODEL_CHAT, capabilities::MODEL_CHAT_VERSION)
+                .expect("valid capability");
+
+        let error =
+            validate_declaration("Fixture plugin", "1.0.0", &[capability.clone(), capability])
+                .expect_err("duplicate capability must fail");
+
+        assert!(error.to_string().contains("more than once"));
     }
 }

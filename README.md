@@ -13,7 +13,7 @@ runnable fallback while the new architecture is developed and verified.
 
 ## Current Baseline
 
-The repository now has two explicit layers.
+The repository now has three explicit layers.
 
 The L0 kernel owns only the minimum lifecycle needed to run plugins safely:
 
@@ -23,10 +23,16 @@ The L0 kernel owns only the minimum lifecycle needed to run plugins safely:
 - keep the kernel and sibling plugins running;
 - stop supervised processes during shutdown.
 
-The L1 chat surface adds:
+The L1 capability platform adds:
 
-- a versioned, size-bounded loopback plugin protocol;
-- an isolated OpenAI-compatible Chat Completions plugin;
+- validated, versioned capability declarations;
+- generic typed invocations over a size-bounded loopback protocol;
+- a provider catalog outside the trusted kernel;
+- deterministic rejection of missing or ambiguous capability routes.
+
+The first connected capability and CLI surface add:
+
+- an isolated OpenAI-compatible Chat Completions plugin using `model.chat@1`;
 - inherited YunXi/DeepSeek/OpenAI environment configuration;
 - an interactive CLI with rolling in-memory history;
 - `/help`, `/status`, `/clear`, and `/quit` commands;
@@ -38,6 +44,12 @@ does not automatically restart a crashing plugin.
 
 Process isolation protects the kernel from plugin crashes. It is not yet a
 filesystem, network, or resource-usage sandbox.
+
+The inheritance plan for persona, memory, companion behavior, tools, Weixin,
+voice, and storage is tracked in
+[`docs/capability-migration.md`](docs/capability-migration.md). A capability is
+counted as migrated only after it has a real process boundary, versioned
+contract, explicit grants, and failure-containment tests.
 
 ## Run
 

@@ -16,6 +16,7 @@ YunXi Next/
 |   `-- install-windows.ps1            `yunxi-next` Cargo command-bin installer
 |-- docs/                              repository-wide design documents
 |   |-- README.md                      documentation index
+|   |-- capability-migration.md        legacy capability ledger and acceptance gates
 |   |-- chat-runtime.md                end-to-end chat process and failure flow
 |   |-- kernel-architecture.md         kernel trust and lifecycle design
 |   |-- project-structure.md           this ownership map
@@ -31,7 +32,7 @@ YunXi Next/
     |   |   |-- lib.rs                 CLI coordinator and public entry point
     |   |   |-- main.rs                executable and private child mode switch
     |   |   |-- repl.rs                commands and bounded chat history
-    |   |   |-- session.rs             kernel and model-plugin host session
+    |   |   |-- session.rs             kernel, catalog, and model-plugin host session
     |   |   `-- ui.rs                  ANSI-aware compact presentation
     |   `-- tests/                     complete process-path tests
     |       |-- README.md              integration test purpose
@@ -77,12 +78,21 @@ YunXi Next/
     |       `-- bin/                    standalone plugin entry points
     |           |-- README.md           binary purpose
     |           `-- yunxi-model-openai.rs standalone plugin executable
+    |-- yunxi-plugin-host/              capability provider catalog
+    |   |-- Cargo.toml                  kernel and protocol dependencies
+    |   |-- README.md                   crate scope and exclusions
+    |   `-- src/                        host catalog implementation
+    |       |-- README.md               source file index
+    |       |-- catalog.rs              provider indexing and route resolution
+    |       `-- lib.rs                  stable plugin-host facade
     `-- yunxi-protocol/                 local host/plugin wire contract
         |-- Cargo.toml                  serialization-only dependencies
         |-- README.md                   crate scope and layout
         `-- src/                        protocol implementation
             |-- README.md               source file index
+            |-- capability.rs           capability ids, versions, and built-in names
             |-- handshake.rs            loopback setup and readiness exchange
+            |-- invocation.rs           generic typed-payload call envelopes
             |-- lib.rs                  stable protocol facade
             |-- message.rs              versioned host/plugin messages
             `-- transport.rs            bounded JSONL TCP transport

@@ -1,5 +1,5 @@
 [package]
-name = "yunxi-cli"
+name = "yunxi-plugin-host"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,13 +7,7 @@ publish = false
 
 [dependencies]
 yunxi-kernel = { path = "../yunxi-kernel" }
-yunxi-model-openai = { path = "../yunxi-model-openai" }
-yunxi-plugin-host = { path = "../yunxi-plugin-host" }
 yunxi-protocol = { path = "../yunxi-protocol" }
-
-[[bin]]
-name = "yunxi-next"
-path = "src/main.rs"
 
 [lints]
 workspace = true

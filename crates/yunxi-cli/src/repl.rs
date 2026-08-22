@@ -58,14 +58,16 @@ where
                 let status = backend.status();
                 writeln!(
                     output,
-                    "kernel: {} | plugin: {} | protocol: {}",
+                    "kernel: {} | plugin: {} | protocol: {} | plugins: {} | capabilities: {}",
                     status.kernel,
                     status.plugin,
                     if status.protocol_ready {
                         "ready"
                     } else {
                         "unavailable"
-                    }
+                    },
+                    status.plugins,
+                    status.capabilities
                 )?;
             }
             "/clear" => {
@@ -136,6 +138,8 @@ mod tests {
                 kernel: "running".to_string(),
                 plugin: "running".to_string(),
                 protocol_ready: true,
+                plugins: 1,
+                capabilities: 1,
             }
         }
     }

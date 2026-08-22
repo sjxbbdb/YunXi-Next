@@ -9,9 +9,11 @@ use std::time::Duration;
 
 use yunxi_kernel::{KernelError, PluginCommand, PluginId, PluginIdError, PluginSpec, YunxiKernel};
 use yunxi_model_openai::{MODEL_PLUGIN_ID, ProviderConfig, ProviderConfigError};
+use yunxi_plugin_host::{CapabilityCatalog, CatalogError};
 use yunxi_protocol::{
-    CHAT_CAPABILITY, CONNECT_ADDRESS_ENV, CONNECT_TOKEN_ENV, ChatMessage, HostMessage,
-    HostPluginSession, PluginAcceptor, PluginMessage, ProtocolError,
+    CONNECT_ADDRESS_ENV, CONNECT_TOKEN_ENV, CapabilityDescriptor, CapabilityError, ChatMessage,
+    ChatRequest, ChatResult, HostMessage, HostPluginSession, InvocationRequest,
+    MODEL_CHAT_COMPLETE_OPERATION, PluginAcceptor, PluginMessage, ProtocolError, capabilities,
 };
 
 use crate::INTERNAL_MODEL_PLUGIN_ARGUMENT;
@@ -32,11 +34,15 @@ pub(crate) struct BackendStatus {
     pub kernel: String,
     pub plugin: String,
     pub protocol_ready: bool,
+    pub plugins: usize,
+    pub capabilities: usize,
 }
 
 pub(crate) struct ChatSession {
     kernel: YunxiKernel,
+    catalog: CapabilityCatalog,
     plugin_id: PluginId,
+    chat_capability: CapabilityDescriptor,
     connection: Option<HostPluginSession>,
     provider: String,
     model: String,
@@ -52,6 +58,8 @@ impl ChatSession {
             .timeout()
             .checked_add(RESPONSE_TIMEOUT_MARGIN)
             .unwrap_or(config.timeout());
+        let provider = config.provider().to_string();
+        let model = config.model().to_string();
         drop(config);
 
         let acceptor = PluginAcceptor::bind()?;
@@ -78,22 +86,26 @@ impl ChatSession {
                 return Err(SessionError::Protocol(error));
             }
         };
-        if !connection
-            .info()
-            .capabilities()
-            .iter()
-            .any(|capability| capability == CHAT_CAPABILITY)
-        {
+        let mut catalog = CapabilityCatalog::new();
+        catalog.register_connection(connection.info())?;
+        let chat_capability =
+            CapabilityDescriptor::new(capabilities::MODEL_CHAT, capabilities::MODEL_CHAT_VERSION)?;
+        let chat_provider =
+            catalog.resolve_unique(capabilities::MODEL_CHAT, capabilities::MODEL_CHAT_VERSION)?;
+        if chat_provider.id() != &plugin_id {
             kernel.shutdown();
-            return Err(SessionError::MissingCapability(CHAT_CAPABILITY));
+            return Err(SessionError::Catalog(CatalogError::MissingCapability {
+                capability: capabilities::MODEL_CHAT.to_string(),
+                version: capabilities::MODEL_CHAT_VERSION,
+            }));
         }
         connection.set_timeouts(Some(response_timeout), Some(WRITE_TIMEOUT))?;
-        let provider = connection.info().provider().to_string();
-        let model = connection.info().model().to_string();
 
         Ok(Self {
             kernel,
+            catalog,
             plugin_id,
+            chat_capability,
             connection: Some(connection),
             provider,
             model,
@@ -103,6 +115,7 @@ impl ChatSession {
 
     fn mark_unavailable(&mut self) {
         self.connection = None;
+        self.catalog.unregister(&self.plugin_id);
         let _ignored = self.kernel.stop(&self.plugin_id);
         self.kernel.refresh();
     }
@@ -118,10 +131,14 @@ impl ChatBackend for ChatSession {
                 "model plugin connection is not available".to_string(),
             ));
         };
-        if let Err(error) = connection.send(&HostMessage::Chat {
+        let request = InvocationRequest::encode(
             request_id,
-            messages: messages.to_vec(),
-        }) {
+            self.chat_capability.clone(),
+            MODEL_CHAT_COMPLETE_OPERATION,
+            &ChatRequest::new(messages.to_vec()),
+        )
+        .map_err(|error| ChatFailure::ProtocolViolation(error.to_string()))?;
+        if let Err(error) = connection.send(&HostMessage::Invoke { request }) {
             let message = error.to_string();
             self.mark_unavailable();
             return Err(ChatFailure::Unavailable(message));
@@ -142,12 +159,18 @@ impl ChatBackend for ChatSession {
         };
 
         match response {
-            PluginMessage::ChatCompleted {
-                request_id: response_id,
-                content,
-                ..
-            } if response_id == request_id => Ok(content),
-            PluginMessage::RequestFailed {
+            PluginMessage::InvocationCompleted { response }
+                if response.request_id() == request_id =>
+            {
+                match response.decode_payload::<ChatResult>() {
+                    Ok(result) => Ok(result.content().to_string()),
+                    Err(error) => {
+                        self.mark_unavailable();
+                        Err(ChatFailure::ProtocolViolation(error.to_string()))
+                    }
+                }
+            }
+            PluginMessage::InvocationFailed {
                 request_id: response_id,
                 code,
                 message,
@@ -185,6 +208,8 @@ impl ChatBackend for ChatSession {
             kernel: self.kernel.state().to_string(),
             plugin,
             protocol_ready: self.connection.is_some(),
+            plugins: self.catalog.plugin_count(),
+            capabilities: self.catalog.capability_count(),
         }
     }
 }
@@ -204,9 +229,10 @@ pub(crate) enum SessionError {
     Config(ProviderConfigError),
     Executable(io::Error),
     PluginId(PluginIdError),
+    Capability(CapabilityError),
+    Catalog(CatalogError),
     Kernel(KernelError),
     Protocol(ProtocolError),
-    MissingCapability(&'static str),
 }
 
 impl fmt::Display for SessionError {
@@ -217,11 +243,12 @@ impl fmt::Display for SessionError {
                 write!(formatter, "failed to locate the YunXi executable: {error}")
             }
             Self::PluginId(error) => write!(formatter, "model plugin id is invalid: {error}"),
+            Self::Capability(error) => {
+                write!(formatter, "capability declaration is invalid: {error}")
+            }
+            Self::Catalog(error) => write!(formatter, "plugin catalog failed: {error}"),
             Self::Kernel(error) => write!(formatter, "kernel operation failed: {error}"),
             Self::Protocol(error) => write!(formatter, "model plugin startup failed: {error}"),
-            Self::MissingCapability(capability) => {
-                write!(formatter, "model plugin does not provide `{capability}`")
-            }
         }
     }
 }
@@ -232,9 +259,10 @@ impl Error for SessionError {
             Self::Config(error) => Some(error),
             Self::Executable(error) => Some(error),
             Self::PluginId(error) => Some(error),
+            Self::Capability(error) => Some(error),
+            Self::Catalog(error) => Some(error),
             Self::Kernel(error) => Some(error),
             Self::Protocol(error) => Some(error),
-            Self::MissingCapability(_) => None,
         }
     }
 }
@@ -254,6 +282,18 @@ impl From<io::Error> for SessionError {
 impl From<PluginIdError> for SessionError {
     fn from(error: PluginIdError) -> Self {
         Self::PluginId(error)
+    }
+}
+
+impl From<CapabilityError> for SessionError {
+    fn from(error: CapabilityError) -> Self {
+        Self::Capability(error)
+    }
+}
+
+impl From<CatalogError> for SessionError {
+    fn from(error: CatalogError) -> Self {
+        Self::Catalog(error)
     }
 }
 

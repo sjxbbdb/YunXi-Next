@@ -22,7 +22,8 @@ isolated plugin child process
 
 The kernel has no serialization, HTTP, model, or terminal dependencies. The
 CLI embeds the kernel as its lifecycle coordinator, while capability code runs
-in child processes.
+in child processes. `yunxi-plugin-host` owns the capability catalog and routing
+checks above this kernel boundary.
 
 ## State Ownership
 

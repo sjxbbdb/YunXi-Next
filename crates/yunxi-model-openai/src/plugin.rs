@@ -4,7 +4,11 @@ use std::error::Error;
 use std::fmt;
 use std::time::Duration;
 
-use yunxi_protocol::{CHAT_CAPABILITY, HostMessage, PluginMessage, ProtocolError, connect_plugin};
+use yunxi_protocol::{
+    CapabilityDescriptor, CapabilityError, ChatRequest, ChatResult, HostMessage,
+    InvocationCodecError, InvocationResponse, MODEL_CHAT_COMPLETE_OPERATION, PluginMessage,
+    ProtocolError, capabilities, connect_plugin,
+};
 
 use crate::{ApiError, OpenAiChatClient, ProviderConfig, ProviderConfigError};
 
@@ -18,32 +22,67 @@ pub fn run_model_plugin_from_env() -> Result<(), ModelPluginError> {
 
 pub fn run_model_plugin(config: ProviderConfig) -> Result<(), ModelPluginError> {
     let client = OpenAiChatClient::new(config)?;
+    let model_chat =
+        CapabilityDescriptor::new(capabilities::MODEL_CHAT, capabilities::MODEL_CHAT_VERSION)?;
     let mut session = connect_plugin(
         MODEL_PLUGIN_ID,
-        client.config().provider(),
-        client.config().model(),
-        vec![CHAT_CAPABILITY.to_string()],
+        "OpenAI-compatible chat model",
+        env!("CARGO_PKG_VERSION"),
+        vec![model_chat],
         CONNECT_TIMEOUT,
     )?;
 
     loop {
         match session.receive()? {
-            HostMessage::Chat {
-                request_id,
-                messages,
-            } => match client.complete(&messages) {
-                Ok(completion) => session.send(&PluginMessage::ChatCompleted {
-                    request_id,
-                    content: completion.content().to_string(),
-                    finish_reason: completion.finish_reason().map(str::to_string),
-                })?,
-                Err(error) => session.send(&PluginMessage::RequestFailed {
-                    request_id,
-                    code: error.code().to_string(),
-                    message: error.to_string(),
-                    retryable: error.retryable(),
-                })?,
-            },
+            HostMessage::Invoke { request } => {
+                let request_id = request.request_id();
+                if request.capability().id().as_str() != capabilities::MODEL_CHAT
+                    || request.capability().version() != capabilities::MODEL_CHAT_VERSION
+                    || request.operation() != MODEL_CHAT_COMPLETE_OPERATION
+                {
+                    session.send(&PluginMessage::InvocationFailed {
+                        request_id,
+                        code: "unsupported_operation".to_string(),
+                        message: format!(
+                            "plugin does not support {}@{}:{}",
+                            request.capability().id(),
+                            request.capability().version(),
+                            request.operation()
+                        ),
+                        retryable: false,
+                    })?;
+                    continue;
+                }
+
+                let chat = match request.decode_payload::<ChatRequest>() {
+                    Ok(chat) => chat,
+                    Err(error) => {
+                        session.send(&PluginMessage::InvocationFailed {
+                            request_id,
+                            code: "invalid_request".to_string(),
+                            message: error.to_string(),
+                            retryable: false,
+                        })?;
+                        continue;
+                    }
+                };
+                match client.complete(chat.messages()) {
+                    Ok(completion) => {
+                        let result = ChatResult::new(
+                            completion.content(),
+                            completion.finish_reason().map(str::to_string),
+                        );
+                        let response = InvocationResponse::encode(request_id, &result)?;
+                        session.send(&PluginMessage::InvocationCompleted { response })?;
+                    }
+                    Err(error) => session.send(&PluginMessage::InvocationFailed {
+                        request_id,
+                        code: error.code().to_string(),
+                        message: error.to_string(),
+                        retryable: error.retryable(),
+                    })?,
+                }
+            }
             HostMessage::Shutdown => return Ok(()),
             HostMessage::Welcome { .. } => {
                 return Err(ModelPluginError::UnexpectedHostMessage(
@@ -58,6 +97,8 @@ pub fn run_model_plugin(config: ProviderConfig) -> Result<(), ModelPluginError> 
 pub enum ModelPluginError {
     Config(ProviderConfigError),
     Api(ApiError),
+    Capability(CapabilityError),
+    Invocation(InvocationCodecError),
     Protocol(ProtocolError),
     UnexpectedHostMessage(String),
 }
@@ -67,6 +108,13 @@ impl fmt::Display for ModelPluginError {
         match self {
             Self::Config(error) => write!(formatter, "model plugin configuration failed: {error}"),
             Self::Api(error) => write!(formatter, "model plugin HTTP client failed: {error}"),
+            Self::Capability(error) => {
+                write!(
+                    formatter,
+                    "model plugin capability declaration failed: {error}"
+                )
+            }
+            Self::Invocation(error) => write!(formatter, "model plugin invocation failed: {error}"),
             Self::Protocol(error) => write!(formatter, "model plugin protocol failed: {error}"),
             Self::UnexpectedHostMessage(message) => {
                 write!(
@@ -83,6 +131,8 @@ impl Error for ModelPluginError {
         match self {
             Self::Config(error) => Some(error),
             Self::Api(error) => Some(error),
+            Self::Capability(error) => Some(error),
+            Self::Invocation(error) => Some(error),
             Self::Protocol(error) => Some(error),
             Self::UnexpectedHostMessage(_) => None,
         }
@@ -98,6 +148,18 @@ impl From<ProviderConfigError> for ModelPluginError {
 impl From<ApiError> for ModelPluginError {
     fn from(error: ApiError) -> Self {
         Self::Api(error)
+    }
+}
+
+impl From<CapabilityError> for ModelPluginError {
+    fn from(error: CapabilityError) -> Self {
+        Self::Capability(error)
+    }
+}
+
+impl From<InvocationCodecError> for ModelPluginError {
+    fn from(error: InvocationCodecError) -> Self {
+        Self::Invocation(error)
     }
 }
 

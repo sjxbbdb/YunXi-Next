@@ -8,9 +8,11 @@ when it owns a stable responsibility and can state its dependency direction.
 | [`yunxi-cli`](yunxi-cli/README.md) | Terminal chat, conversation history, and model-plugin hosting |
 | [`yunxi-kernel`](yunxi-kernel/README.md) | Process-isolated plugin lifecycle and kernel health |
 | [`yunxi-model-openai`](yunxi-model-openai/README.md) | OpenAI-compatible HTTP capability running as a child process |
+| [`yunxi-plugin-host`](yunxi-plugin-host/README.md) | Capability provider catalog and deterministic routing checks |
 | [`yunxi-protocol`](yunxi-protocol/README.md) | Versioned local messages, bounded transport, and readiness handshake |
 
-Dependency direction is `yunxi-cli -> yunxi-kernel + yunxi-protocol +
-yunxi-model-openai`, and `yunxi-model-openai -> yunxi-protocol`. The kernel has
-no third-party dependencies and does not depend on any capability implementation
-or serialization/HTTP package.
+Dependency direction is `yunxi-cli -> yunxi-plugin-host + yunxi-kernel +
+yunxi-protocol + yunxi-model-openai`, `yunxi-plugin-host -> yunxi-kernel +
+yunxi-protocol`, and `yunxi-model-openai -> yunxi-protocol`. The kernel has no
+third-party dependencies and does not depend on any capability implementation,
+catalog, serialization, or HTTP package.

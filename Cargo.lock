@@ -1525,6 +1525,7 @@ version = "0.1.0"
 dependencies = [
  "yunxi-kernel",
  "yunxi-model-openai",
+ "yunxi-plugin-host",
  "yunxi-protocol",
 ]
 
@@ -1539,6 +1540,14 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "yunxi-protocol",
+]
+
+[[package]]
+name = "yunxi-plugin-host"
+version = "0.1.0"
+dependencies = [
+ "yunxi-kernel",
  "yunxi-protocol",
 ]
 

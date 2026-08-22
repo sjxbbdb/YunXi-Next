@@ -9,6 +9,7 @@ terminal user
 yunxi-next CLI process
   - rolling conversation history
   - YunxiKernel lifecycle coordinator
+  - capability provider catalog
   - host side of yunxi-protocol
     |
     | loopback TCP, newline-delimited JSON
@@ -32,9 +33,10 @@ the existing legacy `yunxi` command untouched.
 ## Readiness
 
 1. The host binds an ephemeral IPv4 loopback port and launches the child.
-2. The child sends its protocol version, stable plugin id, provider, model,
-   capabilities, and a launch-correlation token.
-3. The host validates the id, token, version, and required `chat` capability.
+2. The child sends its protocol version, stable plugin id, display metadata,
+   versioned capabilities, and a launch-correlation token.
+3. The host validates the id, token, version, declarations, and required
+   `model.chat@1` capability.
 4. `Welcome` and `Ready` complete the handshake before the CLI accepts input.
 
 The correlation token prevents accidental attachment to the wrong launched
@@ -43,10 +45,12 @@ MiB, and model HTTP responses are limited to 32 MiB.
 
 ## Chat Requests
 
-The CLI sends the current bounded conversation plus the new user message. The
-first implementation uses complete responses rather than token streaming. On
-success, the user and assistant messages enter a rolling 32-turn in-memory
-history. `/clear` discards it, and process exit discards it permanently.
+The CLI sends a protocol-v2 `Invoke` request for `model.chat@1:complete`. The
+generic envelope carries a typed chat payload; it is also the call path future
+memory, persona, tools, voice, and channel plugins use. The first implementation
+uses complete responses rather than token streaming. On success, the user and
+assistant messages enter a rolling 32-turn in-memory history. `/clear` discards
+it, and process exit discards it permanently.
 
 API credentials are read from inherited environment variables. The CLI
 preflights configuration for useful startup errors, but credentials are never
@@ -54,7 +58,7 @@ serialized into local protocol frames or diagnostic output.
 
 ## Failure Semantics
 
-- An HTTP/API failure becomes `RequestFailed`; the model process stays alive
+- An HTTP/API failure becomes `InvocationFailed`; the model process stays alive
   and can serve the next request.
 - A malformed or mismatched protocol response invalidates the session and the
   kernel stops that plugin process.

@@ -3,7 +3,9 @@
 | File | Responsibility |
 | --- | --- |
 | `lib.rs` | Stable protocol facade and version constants |
-| `message.rs` | Host, plugin, and chat wire messages |
+| `capability.rs` | Validated capability ids, contract versions, and built-in names |
+| `invocation.rs` | Generic request/response envelopes and typed payload codecs |
+| `message.rs` | Host, plugin, handshake, and model-chat payload messages |
 | `transport.rs` | Size-bounded JSONL over an established TCP stream |
 | `handshake.rs` | Loopback listener, version negotiation, and readiness |
 

@@ -2,7 +2,8 @@
 
 This crate is YunXi Next's first user-facing surface. It owns the terminal
 conversation loop, in-memory chat history, and the host side of the model
-plugin connection.
+plugin connection. It registers the model declaration with
+`yunxi-plugin-host` before routing `model.chat` calls.
 
 It intentionally does not contain provider HTTP code. The OpenAI-compatible
 client runs in a separately supervised process supplied by

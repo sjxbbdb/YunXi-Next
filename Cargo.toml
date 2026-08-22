@@ -3,6 +3,7 @@ members = [
     "crates/yunxi-cli",
     "crates/yunxi-kernel",
     "crates/yunxi-model-openai",
+    "crates/yunxi-plugin-host",
     "crates/yunxi-protocol",
 ]
 resolver = "3"

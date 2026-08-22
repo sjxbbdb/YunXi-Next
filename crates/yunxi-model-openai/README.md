@@ -2,7 +2,7 @@
 
 `yunxi-model-openai` is the first process-isolated YunXi capability plugin. It
 calls an OpenAI-compatible Chat Completions endpoint and returns chat results
-through `yunxi-protocol`.
+through the generic `model.chat@1:complete` invocation in `yunxi-protocol`.
 
 The host never calls its HTTP client directly. The library entry point exists
 so a distribution can package the plugin inside a child-process mode while
