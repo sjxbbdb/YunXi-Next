@@ -18,10 +18,29 @@ YunXi Next/
 |   |-- README.md                      documentation index
 |   |-- capability-migration.md        legacy capability ledger and acceptance gates
 |   |-- chat-runtime.md                end-to-end chat process and failure flow
+|   |-- development-roadmap.md         ordered implementation phases and exit gates
 |   |-- dsh-web-compatibility.md       dsh source record and Web wire boundary
 |   |-- kernel-architecture.md         kernel trust and lifecycle design
 |   |-- project-structure.md           this ownership map
 |   `-- provider-configuration.md      provider environment resolution
+|-- web/                               pinned dsh browser compatibility fork
+|   |-- README.md                      Web ownership and rebuild entry point
+|   |-- UPSTREAM.md                    reviewed repository, commit, and version
+|   |-- LICENSE.deepseek-harness       retained upstream MIT license
+|   |-- THIRD_PARTY_NOTICES.deepseek-harness.md upstream dependency notices
+|   |-- adapter/                       YunXi-owned browser compatibility overlays
+|   |   |-- README.md                  adapter scope and exclusions
+|   |   |-- web-api-client.ts          bounded SSE polling carrier
+|   |   `-- plugin-inventory/          capability-switch Plugins tab overlay
+|   |       |-- README.md              settings binding and restart semantics
+|   |       |-- index.ts               plugin-inventory client entry point
+|   |       |-- locales.ts             overlay locale strings
+|   |       |-- PluginInventorySettingsTab.module.css switch layout and states
+|   |       `-- PluginInventorySettingsTab.tsx inventory list and capability switches
+|   |-- scripts/                       reproducible upstream import operation
+|   |   |-- README.md                  import requirements and isolation policy
+|   |   `-- import-dsh-web.ps1         isolated build and atomic dist replacement
+|   `-- dist/                          generated embedded shell and 42 client bundles
 `-- crates/                            production Rust packages
     |-- README.md                      workspace crate and dependency index
     |-- yunxi-companion/               deterministic response-policy plugin
@@ -68,13 +87,16 @@ YunXi Next/
     |   |   |-- main.rs                executable and built-in child mode switch
     |   |   |-- repl.rs                commands and bounded chat history
     |   |   |-- session.rs             capability launch, composition, and model routing
+    |   |   |-- web.rs                 reusable Web Host facade over ChatSession
     |   |   |-- session/               stateful orchestration split from model routing
     |   |   |   |-- README.md          session module ownership
-    |   |   |   `-- stateful.rs        storage, memory-write, scheduler, and mailbox calls
+    |   |   |   |-- stateful.rs        storage, memory-write, scheduler, and mailbox calls
+    |   |   |   `-- tool_loop.rs       bounded model-tool catalog and argument decoding
     |   |   `-- ui.rs                  ANSI-aware compact presentation
     |   `-- tests/                     complete process-path tests
     |       |-- README.md              integration test purpose
-    |       `-- chat_stack.rs          CLI-to-plugin-to-HTTP verification
+    |       |-- chat_stack.rs          CLI-to-plugin-to-HTTP verification
+    |       `-- web_host.rs            Web session, settings, restart, and approval verification
     |-- yunxi-context/                 AGENTS.md context capability plugin
     |   |-- Cargo.toml                 protocol-only context package
     |   |-- README.md                  capability scope, limits, and layout
@@ -176,6 +198,14 @@ YunXi Next/
     |       `-- bin/                    standalone plugin entry point
     |           |-- README.md           binary purpose
     |           `-- yunxi-scheduler.rs  scheduler plugin executable
+    |-- yunxi-settings/                 bounded restart-scoped capability settings
+    |   |-- Cargo.toml                  serde-only settings dependencies
+    |   |-- README.md                   persistence, precedence, and exclusions
+    |   `-- src/                        settings implementation
+    |       |-- README.md               source file ownership index
+    |       |-- capabilities.rs         known keys, defaults, and environment overrides
+    |       |-- lib.rs                  stable settings facade
+    |       `-- store.rs                versioned loading and atomic revisioned writes
     |-- yunxi-storage/                  persistent session capability plugin
     |   |-- Cargo.toml                 serde, JSON, and protocol dependencies
     |   |-- README.md                  session ownership and legacy boundary
@@ -188,24 +218,112 @@ YunXi Next/
     |       `-- bin/                    standalone plugin entry point
     |           |-- README.md           binary purpose
     |           `-- yunxi-storage.rs    storage plugin executable
+    |-- yunxi-tool-files/              read-only workspace file tools plugin
+    |   |-- Cargo.toml                  protocol-only file tool dependencies
+    |   |-- README.md                   read-only scope and grant boundary
+    |   `-- src/                        file tool implementation
+    |       |-- README.md               source file index
+    |       |-- executor.rs             bounded path traversal and UTF-8 reads
+    |       |-- lib.rs                  stable file-tool plugin facade
+    |       |-- plugin.rs               manifest handshake and operation dispatch
+    |       `-- bin/                    standalone plugin entry point
+    |           |-- README.md           binary purpose
+    |           `-- yunxi-tool-files.rs file tool plugin executable
+    |-- yunxi-tool-mcp/                isolated stdio/HTTP MCP bridge plugin
+    |   |-- Cargo.toml                 reqwest, serde, JSON, and protocol dependencies
+    |   |-- README.md                  MCP process, HTTP, and authority boundary
+    |   `-- src/                        MCP bridge implementation
+    |       |-- README.md              source file index
+    |       |-- client.rs              bounded MCP JSON-RPC client and cancellation
+    |       |-- config.rs              explicit command and environment config
+    |       |-- fixture.rs              deterministic integration-test server
+    |       |-- http.rs                 bounded HTTP/HTTPS JSON/SSE transport
+    |       |-- lib.rs                 stable MCP-plugin facade
+    |       |-- plugin.rs              YunXi handshake and typed dispatch
+    |       `-- bin/                   plugin and fixture entry points
+    |   `-- tests/                     external-process MCP client tests
+    |       |-- README.md              integration test ownership
+    |       |-- http.rs                HTTP/SSE, session, grant, and timeout fixtures
+    |       `-- stdio.rs               normal, malformed, and crash fixtures
+    |-- yunxi-tool-skills/             isolated read-only Skills capability
+    |   |-- Cargo.toml                 serde and protocol dependencies
+    |   |-- README.md                  discovery and execution boundary
+    |   |-- src/                       Skills implementation
+    |   |   |-- README.md              source file index
+    |   |   |-- config.rs              root and disabled-id configuration
+    |   |   |-- discovery.rs           bounded SKILL.md and tools.json loading
+    |   |   |-- lib.rs                 stable Skills-plugin facade
+    |   |   |-- plugin.rs              typed list/context/status request loop
+    |   |   `-- bin/                   standalone plugin entry point
+    |   |       |-- README.md           binary purpose
+    |   |       `-- yunxi-tool-skills.rs Skills plugin executable
+    |   `-- tests/                     process-boundary Skills tests
+    |       |-- README.md              integration test ownership
+    |       `-- process.rs             minimal Skill discovery fixture
+    |-- yunxi-tool-patch/              Host-approved workspace patch plugin
+    |   |-- Cargo.toml                  protocol and patch dependencies
+    |   |-- README.md                   patch scope and approval boundary
+    |   `-- src/                        patch implementation
+    |       |-- README.md               source file index
+    |       |-- applier.rs              bounded patch validation and application
+    |       |-- lib.rs                  stable patch-plugin facade
+    |       |-- plugin.rs               manifest handshake and operation dispatch
+    |       `-- bin/                    standalone plugin entry point
+    |           |-- README.md           binary purpose
+    |           `-- yunxi-tool-patch.rs patch plugin executable
+    |-- yunxi-tool-shell/              Host-approved shell plugin
+    |   |-- Cargo.toml                  protocol and process-execution dependencies
+    |   |-- README.md                   shell scope and approval boundary
+    |   `-- src/                        shell implementation
+    |       |-- README.md               source file index
+    |       |-- executor.rs             bounded child-process execution
+    |       |-- lib.rs                  stable shell-plugin facade
+    |       |-- plugin.rs               manifest handshake and operation dispatch
+    |       `-- bin/                    standalone plugin entry point
+    |           |-- README.md           binary purpose
+    |           `-- yunxi-tool-shell.rs shell plugin executable
     |-- yunxi-protocol/                 local host/plugin wire contract
     |   |-- Cargo.toml                  serialization-only dependencies
     |   |-- README.md                   crate scope and layout
     |   `-- src/                        protocol implementation
     |       |-- README.md               source file index
+    |       |-- authority.rs             exact network and Secret grant contracts
     |       |-- capability.rs           capability ids, versions, and built-in names
     |       |-- companion.rs            companion policy payload contracts
+    |       |-- files.rs                bounded file search and viewing payloads
     |       |-- grant.rs                explicit workspace-access contract
     |       |-- handshake.rs            loopback setup and readiness exchange
     |       |-- identity.rs             context, memory, and persona payload contracts
     |       |-- invocation.rs           generic typed-payload call envelopes
+    |       |-- manifest.rs             plugin identity, capability, and grant declarations
     |       |-- lib.rs                  stable protocol facade
     |       |-- mailbox.rs              encrypted mailbox payload contracts
     |       |-- memory_write.rs         memory extraction and review contracts
     |       |-- message.rs              versioned host/plugin messages
+    |       |-- mcp.rs                  bounded MCP list/call/status contracts
     |       |-- scheduler.rs            proactive scheduling payload contracts
     |       |-- sessions.rs             persistent-session payload contracts
+    |       |-- skills.rs               bounded Skill metadata/context contracts
+    |       |-- tool_calls.rs           versioned model tool orchestration contracts
     |       `-- transport.rs            bounded JSONL TCP transport
+    |-- yunxi-web-gateway/              dsh-compatible Web dispatcher and HTTP/SSE carrier
+    |   |-- Cargo.toml                  gateway metadata and inward dependencies
+    |   |-- build.rs                    bounded `web/dist` static table generator
+    |   |-- README.md                   gateway scope and transport boundary
+    |   |-- src/                        gateway implementation
+    |   |   |-- README.md               source file ownership index
+    |   |   |-- assets.rs               exact embedded asset lookup and cache policy
+    |   |   |-- dispatch.rs             unary method registry and dispatch
+    |   |   |-- error.rs                gateway and event-buffer errors
+    |   |   |-- events.rs               bounded mux/host event queues
+    |   |   |-- http.rs                 bounded HTTP/1.1 parser and `/api` routes
+    |   |   |-- lib.rs                  public gateway facade
+    |   |   |-- projection.rs           health, inventory, and session projections
+    |   |   `-- sse.rs                  bounded mux/host SSE framing
+    |   `-- tests/                      bounded gateway and carrier integration tests
+    |       |-- README.md              integration test purpose
+    |       |-- gateway.rs             dispatcher, projection, and event tests
+    |       `-- http.rs                HTTP framing, settings routes, SSE, and TCP tests
     `-- yunxi-web-contract/             dsh-compatible browser wire contract
         |-- Cargo.toml                  bounded serde contract dependencies
         |-- README.md                   Web contract scope and transport boundary

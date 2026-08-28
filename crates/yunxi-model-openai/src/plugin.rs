@@ -5,9 +5,9 @@ use std::fmt;
 use std::time::Duration;
 
 use yunxi_protocol::{
-    CapabilityDescriptor, CapabilityError, ChatRequest, ChatResult, HostMessage,
-    InvocationCodecError, InvocationResponse, MODEL_CHAT_COMPLETE_OPERATION, PluginMessage,
-    ProtocolError, capabilities, connect_plugin,
+    CapabilityDescriptor, CapabilityError, ChatRequest, ChatResult, GrantKind, GrantRequirement,
+    HostMessage, InvocationCodecError, InvocationResponse, MODEL_CHAT_COMPLETE_OPERATION,
+    PluginMessage, ProtocolError, capabilities, connect_plugin_with_grants,
 };
 
 use crate::{ApiError, OpenAiChatClient, ProviderConfig, ProviderConfigError};
@@ -24,11 +24,15 @@ pub fn run_model_plugin(config: ProviderConfig) -> Result<(), ModelPluginError> 
     let client = OpenAiChatClient::new(config)?;
     let model_chat =
         CapabilityDescriptor::new(capabilities::MODEL_CHAT, capabilities::MODEL_CHAT_VERSION)?;
-    let mut session = connect_plugin(
+    let mut session = connect_plugin_with_grants(
         MODEL_PLUGIN_ID,
         "OpenAI-compatible chat model",
         env!("CARGO_PKG_VERSION"),
         vec![model_chat],
+        vec![
+            GrantRequirement::required(GrantKind::Network),
+            GrantRequirement::required(GrantKind::ProviderCredential),
+        ],
         CONNECT_TIMEOUT,
     )?;
 
@@ -66,12 +70,13 @@ pub fn run_model_plugin(config: ProviderConfig) -> Result<(), ModelPluginError> 
                         continue;
                     }
                 };
-                match client.complete(chat.messages()) {
+                match client.complete_with_tools(chat.messages(), chat.tools()) {
                     Ok(completion) => {
                         let result = ChatResult::new(
                             completion.content(),
                             completion.finish_reason().map(str::to_string),
-                        );
+                        )
+                        .with_tool_calls(completion.tool_calls().to_vec());
                         let response = InvocationResponse::encode(request_id, &result)?;
                         session.send(&PluginMessage::InvocationCompleted { response })?;
                     }

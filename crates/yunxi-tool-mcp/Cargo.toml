@@ -1,0 +1,23 @@
+[package]
+name = "yunxi-tool-mcp"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+yunxi-protocol = { path = "../yunxi-protocol" }
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "yunxi-tool-mcp"
+path = "src/bin/yunxi-tool-mcp.rs"
+
+[[bin]]
+name = "yunxi-mcp-fixture"
+path = "src/bin/yunxi-mcp-fixture.rs"

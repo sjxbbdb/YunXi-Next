@@ -15,12 +15,15 @@ pub(crate) enum ManagementCommand {
     RequestPatch(String),
     ApproveAction,
     DenyAction,
+    CancelAction,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct ManagementResult {
     pub lines: Vec<String>,
     pub replacement_history: Option<Vec<ChatMessage>>,
+    pub append_history: Vec<ChatMessage>,
+    pub assistant_reply: Option<String>,
 }
 
 impl ManagementResult {
@@ -28,6 +31,8 @@ impl ManagementResult {
         Self {
             lines,
             replacement_history: None,
+            append_history: Vec::new(),
+            assistant_reply: None,
         }
     }
 
@@ -35,6 +40,17 @@ impl ManagementResult {
         Self {
             lines,
             replacement_history: Some(history),
+            append_history: Vec::new(),
+            assistant_reply: None,
+        }
+    }
+
+    pub fn assistant_reply(reply: impl Into<String>, history: Vec<ChatMessage>) -> Self {
+        Self {
+            lines: Vec::new(),
+            replacement_history: None,
+            append_history: history,
+            assistant_reply: Some(reply.into()),
         }
     }
 }

@@ -9,9 +9,9 @@ use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use yunxi_protocol::{
-    SessionAppendRequest, SessionListRequest, SessionListResult, SessionLoadRequest,
-    SessionLoadResult, SessionMutation, SessionMutationRequest, SessionMutationResult,
-    SessionSnapshot, SessionSummary, WorkspaceGrant,
+    SessionAppendRequest, SessionCreateRequest, SessionCreateResult, SessionListRequest,
+    SessionListResult, SessionLoadRequest, SessionLoadResult, SessionMutation,
+    SessionMutationRequest, SessionMutationResult, SessionSnapshot, SessionSummary, WorkspaceGrant,
 };
 
 use crate::record::{StoredSession, validate_session_id};
@@ -78,6 +78,17 @@ impl SessionStore {
         }
         self.save(&session)?;
         Ok(session.snapshot(false))
+    }
+
+    pub fn create(
+        &self,
+        _request: &SessionCreateRequest,
+    ) -> Result<SessionCreateResult, StorageError> {
+        self.require_write()?;
+        let session = StoredSession::empty(self.workspace_root.clone())
+            .map_err(StorageError::InvalidRecord)?;
+        self.save(&session)?;
+        Ok(SessionCreateResult::new(session.snapshot(false)))
     }
 
     pub fn load(&self, request: &SessionLoadRequest) -> Result<SessionLoadResult, StorageError> {

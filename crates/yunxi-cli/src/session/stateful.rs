@@ -17,17 +17,87 @@ use yunxi_protocol::{
     MemoryReviewResult, MemoryWriteRequest, MemoryWriteResult, MemoryWriteStatus,
     PatchApplyRequest, PatchApplyResult, PatchChangeKind, ProactiveSchedulerRequest,
     ProactiveSchedulerResult, SCHEDULER_PROACTIVE_EVALUATE_OPERATION,
-    STORAGE_SESSIONS_APPEND_OPERATION, STORAGE_SESSIONS_LIST_OPERATION,
-    STORAGE_SESSIONS_LOAD_OPERATION, SessionAppendRequest, SessionListRequest, SessionListResult,
+    STORAGE_SESSIONS_APPEND_OPERATION, STORAGE_SESSIONS_CREATE_OPERATION,
+    STORAGE_SESSIONS_LIST_OPERATION, STORAGE_SESSIONS_LOAD_OPERATION, SessionAppendRequest,
+    SessionCreateRequest, SessionCreateResult, SessionListRequest, SessionListResult,
     SessionLoadRequest, SessionLoadResult, ShellExecuteRequest, ShellExecuteResult,
     TOOL_PATCH_APPLY_OPERATION, TOOL_SHELL_EXECUTE_OPERATION, WorkspaceGrant,
 };
+use yunxi_web_gateway::GatewaySessionSummary;
 
 use crate::management::{ManagementCommand, ManagementResult};
 
 use super::{ChatSession, call_lost_route};
 
 impl ChatSession {
+    pub(crate) fn create_web_session(&mut self) -> Result<yunxi_protocol::SessionSnapshot, String> {
+        let capability = self
+            .storage_capability
+            .clone()
+            .ok_or_else(|| "session storage capability is disabled or unavailable".to_string())?;
+        let request = SessionCreateRequest::new(WorkspaceGrant::read_write(&self.cwd));
+        let result = self
+            .host
+            .invoke::<_, SessionCreateResult>(
+                &capability,
+                STORAGE_SESSIONS_CREATE_OPERATION,
+                &request,
+            )
+            .map_err(|error| {
+                if call_lost_route(&error) {
+                    self.storage_capability = None;
+                }
+                error.to_string()
+            })?;
+        let session = result.into_session();
+        self.active_session_id = Some(session.id().to_string());
+        self.first_turn = true;
+        self.proactive_in_session = 0;
+        self.pending_action = None;
+        self.tool_continuation = None;
+        Ok(session)
+    }
+
+    pub(crate) fn load_web_session(
+        &mut self,
+        id: &str,
+    ) -> Result<yunxi_protocol::SessionSnapshot, String> {
+        let capability = self
+            .storage_capability
+            .clone()
+            .ok_or_else(|| "session storage capability is disabled or unavailable".to_string())?;
+        let request = SessionLoadRequest::new(WorkspaceGrant::read_only(&self.cwd), id);
+        let result = self
+            .host
+            .invoke::<_, SessionLoadResult>(&capability, STORAGE_SESSIONS_LOAD_OPERATION, &request)
+            .map_err(|error| {
+                if call_lost_route(&error) {
+                    self.storage_capability = None;
+                }
+                error.to_string()
+            })?;
+        for warning in result.warnings() {
+            self.push_notice(format!("session data warning: {warning}"));
+        }
+        result
+            .into_session()
+            .ok_or_else(|| format!("session `{id}` was not found"))
+    }
+
+    pub(crate) fn activate_web_session(
+        &mut self,
+        id: &str,
+    ) -> Result<Vec<yunxi_protocol::ChatMessage>, String> {
+        let session = self.load_web_session(id)?;
+        let messages = session.messages().to_vec();
+        self.active_session_id = Some(session.id().to_string());
+        self.first_turn = true;
+        self.proactive_in_session = 0;
+        self.pending_action = None;
+        self.tool_continuation = None;
+        Ok(messages)
+    }
+
     pub(super) fn persist_turn(&mut self, prompt: &str, reply: &str) {
         let Some(capability) = self.storage_capability.clone() else {
             return;
@@ -143,6 +213,8 @@ impl ChatSession {
                 self.active_session_id = None;
                 self.first_turn = true;
                 self.proactive_in_session = 0;
+                self.pending_action = None;
+                self.tool_continuation = None;
                 Ok(ManagementResult::replace_history(
                     vec!["Started a new session.".to_string()],
                     Vec::new(),
@@ -154,15 +226,8 @@ impl ChatSession {
             ManagementCommand::RequestShell(command) => self.queue_shell(command),
             ManagementCommand::RequestPatch(path) => self.queue_patch(path),
             ManagementCommand::ApproveAction => self.approve_action(),
-            ManagementCommand::DenyAction => {
-                if self.pending_action.take().is_some() {
-                    Ok(ManagementResult::lines(vec![
-                        "Pending action denied.".to_string(),
-                    ]))
-                } else {
-                    Err("there is no pending action".to_string())
-                }
-            }
+            ManagementCommand::DenyAction => self.deny_action(),
+            ManagementCommand::CancelAction => self.cancel_action(),
         }
     }
 
@@ -191,7 +256,7 @@ impl ChatSession {
         Ok(ManagementResult::lines(lines))
     }
 
-    fn plugin_inventory(&mut self) -> PluginInventorySnapshot {
+    pub(super) fn plugin_inventory(&mut self) -> PluginInventorySnapshot {
         let snapshot = self.host.snapshot();
         let phases = snapshot
             .plugins()
@@ -212,7 +277,55 @@ impl ChatSession {
         PluginInventorySnapshot::with_phases(&self.composition, &phases)
     }
 
+    pub(super) fn web_session_summaries(&mut self) -> Vec<GatewaySessionSummary> {
+        let Some(capability) = self.storage_capability.clone() else {
+            return Vec::new();
+        };
+        let request = SessionListRequest::new(WorkspaceGrant::read_only(&self.cwd));
+        let result = match self.host.invoke::<_, SessionListResult>(
+            &capability,
+            STORAGE_SESSIONS_LIST_OPERATION,
+            &request,
+        ) {
+            Ok(result) => result,
+            Err(error) => {
+                if call_lost_route(&error) {
+                    self.storage_capability = None;
+                }
+                self.push_notice(format!("Web session projection degraded: {error}"));
+                return Vec::new();
+            }
+        };
+        for warning in result.warnings() {
+            self.push_notice(format!("session data warning: {warning}"));
+        }
+
+        let mut sessions = Vec::with_capacity(result.sessions().len());
+        for session in result.sessions() {
+            let Ok(updated_at) = u64::try_from(session.updated_at_millis()) else {
+                self.push_notice(format!(
+                    "session `{}` has an unsupported timestamp and was omitted from Web list",
+                    session.id()
+                ));
+                continue;
+            };
+            sessions.push(
+                GatewaySessionSummary::new(
+                    session.id(),
+                    updated_at,
+                    false,
+                    session.message_count() == 0,
+                )
+                .with_cwd(self.cwd.to_string_lossy()),
+            );
+        }
+        sessions
+    }
+
     fn queue_shell(&mut self, command: String) -> Result<ManagementResult, String> {
+        if self.pending_action.is_some() || self.tool_continuation.is_some() {
+            return Err("resolve the pending action before queueing another one".to_string());
+        }
         if self.shell_capability.is_none() {
             return Err("shell capability is disabled or unavailable".to_string());
         }
@@ -232,6 +345,9 @@ impl ChatSession {
     }
 
     fn queue_patch(&mut self, value: String) -> Result<ManagementResult, String> {
+        if self.pending_action.is_some() || self.tool_continuation.is_some() {
+            return Err("resolve the pending action before queueing another one".to_string());
+        }
         if self.patch_capability.is_none() {
             return Err("patch capability is disabled or unavailable".to_string());
         }
@@ -260,6 +376,12 @@ impl ChatSession {
     }
 
     fn approve_action(&mut self) -> Result<ManagementResult, String> {
+        if matches!(
+            self.pending_action,
+            Some(super::PendingAction::ModelTool { .. })
+        ) {
+            return self.approve_pending_model_tool();
+        }
         let action = self
             .pending_action
             .take()
@@ -317,6 +439,41 @@ impl ChatSession {
                     })?;
                 Ok(ManagementResult::lines(format_patch_result(&path, &result)))
             }
+            super::PendingAction::ModelTool { .. } => {
+                unreachable!("model tool actions are handled before manual actions")
+            }
+        }
+    }
+
+    fn deny_action(&mut self) -> Result<ManagementResult, String> {
+        if matches!(
+            self.pending_action,
+            Some(super::PendingAction::ModelTool { .. })
+        ) {
+            return self.deny_pending_model_tool();
+        }
+        if self.pending_action.take().is_some() {
+            Ok(ManagementResult::lines(vec![
+                "Pending action denied.".to_string(),
+            ]))
+        } else {
+            Err("there is no pending action".to_string())
+        }
+    }
+
+    fn cancel_action(&mut self) -> Result<ManagementResult, String> {
+        if matches!(
+            self.pending_action,
+            Some(super::PendingAction::ModelTool { .. })
+        ) {
+            return self.cancel_pending_model_tool();
+        }
+        if self.pending_action.take().is_some() {
+            Ok(ManagementResult::lines(vec![
+                "Pending action cancelled.".to_string(),
+            ]))
+        } else {
+            Err("there is no pending action".to_string())
         }
     }
 
@@ -428,6 +585,8 @@ impl ChatSession {
         self.active_session_id = Some(session.id().to_string());
         self.first_turn = true;
         self.proactive_in_session = 0;
+        self.pending_action = None;
+        self.tool_continuation = None;
         Ok(ManagementResult::replace_history(
             vec![format!(
                 "Resumed session `{}` with {} messages{}.",

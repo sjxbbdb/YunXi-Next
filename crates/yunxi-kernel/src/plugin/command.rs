@@ -11,6 +11,7 @@ pub struct PluginCommand {
     arguments: Vec<OsString>,
     environment: BTreeMap<OsString, OsString>,
     current_dir: Option<PathBuf>,
+    clear_environment: bool,
 }
 
 impl PluginCommand {
@@ -20,6 +21,7 @@ impl PluginCommand {
             arguments: Vec::new(),
             environment: BTreeMap::new(),
             current_dir: None,
+            clear_environment: false,
         }
     }
 
@@ -47,6 +49,12 @@ impl PluginCommand {
         self
     }
 
+    /// Starts the child with only the explicitly configured environment.
+    pub fn clear_environment(mut self) -> Self {
+        self.clear_environment = true;
+        self
+    }
+
     pub fn program(&self) -> &Path {
         &self.program
     }
@@ -70,6 +78,9 @@ impl PluginCommand {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
+        if self.clear_environment {
+            command.env_clear();
+        }
         if let Some(current_dir) = &self.current_dir {
             command.current_dir(current_dir);
         }

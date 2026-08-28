@@ -5,9 +5,9 @@ use std::fmt;
 use std::time::Duration;
 
 use yunxi_protocol::{
-    ActionGrantError, CapabilityDescriptor, CapabilityError, HostMessage, InvocationCodecError,
-    InvocationResponse, PatchApplyRequest, PluginMessage, ProtocolError,
-    TOOL_PATCH_APPLY_OPERATION, capabilities, connect_plugin,
+    ActionGrantError, CapabilityDescriptor, CapabilityError, GrantKind, GrantRequirement,
+    HostMessage, InvocationCodecError, InvocationResponse, PatchApplyRequest, PluginMessage,
+    ProtocolError, TOOL_PATCH_APPLY_OPERATION, capabilities, connect_plugin_with_grants,
 };
 
 use crate::{PatchError, apply_patch};
@@ -18,11 +18,16 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 pub fn run_patch_plugin() -> Result<(), PatchPluginError> {
     let capability =
         CapabilityDescriptor::new(capabilities::TOOL_PATCH, capabilities::TOOL_PATCH_VERSION)?;
-    let mut session = connect_plugin(
+    let mut session = connect_plugin_with_grants(
         PATCH_PLUGIN_ID,
         "Host-approved patch application",
         env!("CARGO_PKG_VERSION"),
         vec![capability],
+        vec![
+            GrantRequirement::required(GrantKind::Approval),
+            GrantRequirement::required(GrantKind::WorkspaceRead),
+            GrantRequirement::required(GrantKind::WorkspaceWrite),
+        ],
         CONNECT_TIMEOUT,
     )?;
     loop {

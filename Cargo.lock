@@ -1700,9 +1700,15 @@ dependencies = [
  "yunxi-plugin-host",
  "yunxi-protocol",
  "yunxi-scheduler",
+ "yunxi-settings",
  "yunxi-storage",
+ "yunxi-tool-files",
+ "yunxi-tool-mcp",
  "yunxi-tool-patch",
  "yunxi-tool-shell",
+ "yunxi-tool-skills",
+ "yunxi-web-contract",
+ "yunxi-web-gateway",
 ]
 
 [[package]]
@@ -1796,9 +1802,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "yunxi-settings"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "yunxi-storage"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
+ "yunxi-protocol",
+]
+
+[[package]]
+name = "yunxi-tool-files"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "yunxi-protocol",
+]
+
+[[package]]
+name = "yunxi-tool-mcp"
+version = "0.1.0"
+dependencies = [
+ "reqwest",
  "serde",
  "serde_json",
  "yunxi-protocol",
@@ -1819,11 +1851,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "yunxi-tool-skills"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "yunxi-kernel",
+ "yunxi-plugin-host",
+ "yunxi-protocol",
+]
+
+[[package]]
 name = "yunxi-web-contract"
 version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "yunxi-web-gateway"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "yunxi-composition",
+ "yunxi-web-contract",
 ]
 
 [[package]]

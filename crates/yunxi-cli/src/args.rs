@@ -1,13 +1,18 @@
 //! Parsing for the small, stable public command-line surface.
 
 use std::error::Error;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fmt;
+use std::net::SocketAddr;
 use std::path::PathBuf;
+
+const DEFAULT_WEB_BIND: SocketAddr =
+    SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 8787);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum CliAction {
     Run(CliOptions),
+    Web(WebOptions),
     Help,
     Version,
 }
@@ -19,12 +24,40 @@ pub(crate) struct CliOptions {
     pub no_color: bool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct WebOptions {
+    pub bind: SocketAddr,
+    pub plugin_path: Option<PathBuf>,
+}
+
+impl Default for WebOptions {
+    fn default() -> Self {
+        Self {
+            bind: DEFAULT_WEB_BIND,
+            plugin_path: None,
+        }
+    }
+}
+
 pub(crate) fn parse<I, S>(arguments: I) -> Result<CliAction, ArgumentError>
 where
     I: IntoIterator<Item = S>,
     S: Into<OsString>,
 {
     let mut arguments = arguments.into_iter().map(Into::into);
+    let first = arguments.next();
+    if first.as_deref() == Some(OsStr::new("web")) {
+        return parse_web(arguments);
+    }
+
+    parse_run(first.into_iter().chain(arguments))
+}
+
+fn parse_run<I>(arguments: I) -> Result<CliAction, ArgumentError>
+where
+    I: IntoIterator<Item = OsString>,
+{
+    let mut arguments = arguments.into_iter();
     let mut options = CliOptions::default();
 
     while let Some(argument) = arguments.next() {
@@ -69,6 +102,58 @@ where
     Ok(CliAction::Run(options))
 }
 
+fn parse_web<I>(arguments: I) -> Result<CliAction, ArgumentError>
+where
+    I: IntoIterator<Item = OsString>,
+{
+    let mut arguments = arguments.into_iter();
+    let mut options = WebOptions::default();
+    let mut bind_seen = false;
+
+    while let Some(argument) = arguments.next() {
+        match argument.to_str() {
+            Some("-h" | "--help") => return Ok(CliAction::Help),
+            Some("-V" | "--version") => return Ok(CliAction::Version),
+            Some("--bind") => {
+                let value = arguments
+                    .next()
+                    .ok_or(ArgumentError::MissingValue("--bind"))?
+                    .into_string()
+                    .map_err(|_| ArgumentError::NonUnicodeValue("--bind"))?;
+                if value.trim().is_empty() {
+                    return Err(ArgumentError::EmptyValue("--bind"));
+                }
+                if bind_seen {
+                    return Err(ArgumentError::DuplicateOption("--bind"));
+                }
+                bind_seen = true;
+                options.bind = value
+                    .parse()
+                    .map_err(|_| ArgumentError::InvalidValue("--bind", value.clone()))?;
+            }
+            Some("--plugin") => {
+                if options.plugin_path.is_some() {
+                    return Err(ArgumentError::DuplicateOption("--plugin"));
+                }
+                let value = arguments
+                    .next()
+                    .ok_or(ArgumentError::MissingValue("--plugin"))?;
+                if value.is_empty() {
+                    return Err(ArgumentError::EmptyValue("--plugin"));
+                }
+                options.plugin_path = Some(PathBuf::from(value));
+            }
+            _ => {
+                return Err(ArgumentError::UnknownOption(
+                    argument.to_string_lossy().into_owned(),
+                ));
+            }
+        }
+    }
+
+    Ok(CliAction::Web(options))
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ArgumentError {
     UnknownOption(String),
@@ -76,6 +161,7 @@ pub(crate) enum ArgumentError {
     EmptyValue(&'static str),
     NonUnicodeValue(&'static str),
     DuplicateOption(&'static str),
+    InvalidValue(&'static str, String),
 }
 
 impl fmt::Display for ArgumentError {
@@ -88,6 +174,9 @@ impl fmt::Display for ArgumentError {
                 write!(formatter, "{option} must be valid Unicode text")
             }
             Self::DuplicateOption(option) => write!(formatter, "{option} was provided twice"),
+            Self::InvalidValue(option, value) => {
+                write!(formatter, "{option} has invalid value `{value}`")
+            }
         }
     }
 }
@@ -136,6 +225,28 @@ mod tests {
         assert_eq!(
             parse(["next"]),
             Err(ArgumentError::UnknownOption("next".to_string()))
+        );
+    }
+
+    #[test]
+    fn parses_web_server_options_without_changing_the_cli_defaults() {
+        assert_eq!(
+            parse(["web", "--bind", "127.0.0.1:0", "--plugin", "model.exe"]),
+            Ok(CliAction::Web(WebOptions {
+                bind: "127.0.0.1:0".parse().expect("socket address"),
+                plugin_path: Some(PathBuf::from("model.exe")),
+            }))
+        );
+        assert_eq!(
+            parse(std::iter::empty::<&str>()),
+            Ok(CliAction::Run(CliOptions::default()))
+        );
+        assert_eq!(
+            parse(["web", "--bind", "not-an-address"]),
+            Err(ArgumentError::InvalidValue(
+                "--bind",
+                "not-an-address".to_string()
+            ))
         );
     }
 }

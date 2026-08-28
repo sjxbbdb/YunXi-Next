@@ -31,7 +31,7 @@ surfaces. They are not allowed to bypass the trusted approval or routing layer.
 
 | Domain | Legacy owner | YunXi Next contract | Target process | Status |
 | --- | --- | --- | --- | --- |
-| Model completion | `yunxi-agent-provider` | `model.chat@1:complete` | `yunxi-model-openai` | Transport integrated; manifest and grants pending |
+| Model completion | `yunxi-agent-provider` | `model.chat@1:complete` | `yunxi-model-openai` | Baseline integrated: isolated request loop, required network/provider-credential manifest grants, API failure containment, and optional bounded tool-call response; token streaming and credential brokering still pending |
 | Prompt and AGENTS context | `yunxi-agent-context` | `context.compose@1:compose` | `yunxi-context` | Integrated: bounded root-to-cwd read path |
 | Persona and soul | `yunxi-agent-persona` | `persona.context@1:compile` | `yunxi-persona` | Integrated: default/custom profile and soul read path |
 | Memory recall | `yunxi-agent-persona`, `yunxi-agent-storage` | `memory.recall@1:recall` | `yunxi-memory` | Integrated: bounded legacy + Next JSONL recall |
@@ -40,10 +40,11 @@ surfaces. They are not allowed to bypass the trusted approval or routing layer.
 | Relationship mailbox | `yunxi-agent-companion`, `yunxi-agent-storage` | `companion.mailbox@1` | `yunxi-companion-mailbox` | Baseline integrated: encrypted Next mailbox, idempotency, list/get/read; legacy credential-store mailbox import pending |
 | Proactive scheduling | `yunxi-agent-runtime`, `yunxi-agent-companion` | `scheduler.proactive@1:evaluate` | `yunxi-scheduler` | Baseline integrated: explicit signals, quiet hours, limits, mailbox enqueue; background daemon and love-letter generation pending |
 | Session history and resume | `yunxi-agent-storage` | `storage.sessions@1` | `yunxi-storage` | Baseline integrated: append/list/load/resume and read-only legacy projection; full legacy event replay pending |
-| Shell execution | `yunxi-agent-tools`, `yunxi-agent-exec`, `yunxi-agent-sandbox` | `tool.shell@1` | `yunxi-tool-shell` | Planned after host grants |
-| Patch application | `yunxi-agent-tools`, `yunxi-agent-patch` | `tool.patch@1` | `yunxi-tool-patch` | Planned after host grants |
-| MCP bridge | `yunxi-agent-mcp`, `yunxi-agent-tools` | `tool.mcp@1` | `yunxi-tool-mcp` | Planned: inheritance wave 3 |
-| Skills and dynamic tools | `yunxi-agent-skills`, `yunxi-agent-tools` | `tool.skills@1` | `yunxi-tool-skills` | Planned: inheritance wave 3 |
+| Shell execution | `yunxi-agent-tools`, `yunxi-agent-exec`, `yunxi-agent-sandbox` | `tool.shell@1` | `yunxi-tool-shell` | Baseline integrated: isolated execution, required approval/workspace-read manifest grants, bounded output/timeout, and Host-controlled model loop; OS sandbox and optional write/network policy expansion pending |
+| Patch application | `yunxi-agent-tools`, `yunxi-agent-patch` | `tool.patch@1` | `yunxi-tool-patch` | Baseline integrated: isolated apply, required approval/workspace-read/workspace-write manifest grants, path validation, rollback, and Host-controlled model loop |
+| File search and viewing | `yunxi-agent-tools`, `yunxi-agent-context` | `tool.files@1:search/read` | `yunxi-tool-files` | Baseline integrated: isolated name search and bounded UTF-8 reads under a required read-only workspace grant; write, rename, indexing, and richer ignore policy remain out of scope |
+| MCP bridge | `yunxi-agent-mcp`, `yunxi-agent-tools` | `tool.mcp@1:list/call/cancel/status` | `yunxi-tool-mcp` | Baseline integrated: one explicit stdio or opt-in HTTP Server, bounded JSON-RPC initialize/list/call/cancel, JSON/SSE responses, session reuse, dynamic model projection, Host Approval, exact network scopes, reference-only Secret grants, redaction, and isolated crash recovery |
+| Skills and dynamic tools | `yunxi-agent-skills`, `yunxi-agent-tools` | `tool.skills@1:list/context/status` | `yunxi-tool-skills` | Baseline integrated: isolated workspace-bounded discovery, validated metadata, bounded instruction injection, disabled filtering, and metadata-only model tool projection; executable Skill tools and richer lifecycle management remain pending |
 | Multi-agent coordination | `yunxi-agent-multi-agent` | `tool.multi-agent@1` | `yunxi-multi-agent` | Planned: inheritance wave 3 |
 | Weixin channel | `yunxi-agent-weixin` | `channel.weixin@1` | `yunxi-channel-weixin` | Planned: inheritance wave 4 |
 | Voice input (speech recognition) | `yunxi-agent-voice` | `voice.transcribe@1` | `yunxi-voice` | Planned: inheritance wave 4 |
@@ -72,9 +73,10 @@ cross-plugin acceptance fixtures instead of a runtime capability.
 3. **Stateful companion path (baseline complete):** memory writes, storage,
    companion policy, mailbox, and scheduler use process boundaries and explicit
    workspace-scoped grants. Remaining parity items are recorded in the ledger.
-4. **Action path:** shell, patch, MCP, skills, and multi-agent run only after
-   host-issued approval and resource grants. A plugin result never upgrades its
-   own authority.
+4. **Action path:** shell, patch, MCP, future executable Skill tools, and
+   multi-agent run only after host-issued approval and resource grants. Current
+   Skill declarations are metadata-only and cannot execute. A plugin result
+   never upgrades its own authority.
 5. **Channel and media path:** Weixin and voice become optional adapters over
    the same runtime calls. Their failure cannot stop terminal chat.
 6. **Management surface:** Web settings reads manifests, changes persisted
@@ -125,3 +127,71 @@ default persistent state.
 
 The migration ledger status changes only after these gates pass; source copied
 into the new repository but still called in-process remains `planned`.
+
+## Phase 0 Evidence
+
+The current baseline records plugin grant declarations in the versioned
+handshake manifest. `yunxi-plugin-host` rejects a launch before route
+registration when a host-required grant is absent, while per-call `ActionGrant`
+validation remains the authority for approval, workspace scope, write, network,
+timeout, and output limits. A manifest declaration is not a secret broker or an
+OS sandbox; the built-in model still reads its provider credential from its
+child-process environment until the later credential-broker work.
+
+The process acceptance fixture covers accepted manifests, missing required
+grants, malformed frames, crashes, and read timeouts. The CLI fixture disables
+every optional capability and verifies that only the required Model plugin and
+its route are launched.
+
+## Phase 1 Evidence
+
+The model-tool fixture covers Shell/Patch approval, denial, cancellation,
+bounded timeout, plugin rejection, and loop-round recovery. Automatic Shell
+calls receive read-only/no-network grants; Patch calls receive the separate
+workspace-write grant.
+
+The read-only file-tool fixture covers `file.search` and `file.read` across the
+plugin boundary, confirms that the model receives both tools only when the
+Files switch is enabled, and verifies that a file result is returned without
+an approval prompt or write grant. Executor unit tests cover workspace escape,
+UTF-8 validation, and bounded reads. `YUNXI_NEXT_FILES_ENABLED=false` is also
+included in the disabled-no-launch matrix.
+
+## Phase 2 Evidence
+
+`yunxi-tool-mcp` owns a second process boundary around one external MCP Server.
+For stdio, its command is executed without a shell, its environment is cleared
+except for `PATH` and an explicit JSON allowlist, and stdout is consumed through
+a bounded newline-delimited JSON-RPC reader. `initialize`,
+`notifications/initialized`, `tools/list`, and `tools/call` require matching
+request ids and bounded responses; malformed JSON, oversized frames, timeout,
+or child exit are fatal to the MCP route only.
+
+The CLI projects discovered tools as `mcp.<server>.<tool>`. These calls are
+always paused at the existing Host approval boundary and carry a Host-issued
+`ActionGrant`; an MCP child failure is returned as a tool result and clears only
+the MCP route. `YUNXI_NEXT_MCP_ENABLED=false` prevents launch and model tool
+exposure. Stdio remains the default transport. HTTP is opt-in and requires an
+exact scheme/host/port network scope. Header credentials use `secret://reference`
+and a Secret grant contains references only; the configured value is injected
+inside the MCP bridge only after the Host grant permits that reference. HTTP
+responses support JSON and bounded SSE, cache `Mcp-Session-Id`, and send
+`notifications/cancelled` after a transport timeout on a best-effort basis.
+
+P2-04 is complete at the bridge boundary. The scope is an authority check in
+the Host/plugin path, not an operating-system network sandbox. It does not
+claim to stop a remote server that has already received a request, and an
+external Secret broker is still future work.
+
+`yunxi-tool-skills` scans only immediate directories beneath a Host-approved
+workspace root. It accepts bounded UTF-8 `SKILL.md` instructions and optional
+metadata-only `tools.json` declarations, validates paths and schemas, and
+provides typed list/context/status responses through `tool.skills@1`. The child
+environment is cleared and receives no Provider credential.
+
+The CLI injects available Skill instruction blocks as system messages and
+projects declarations as `skill.<skill-id>.<tool>`. These declarations do not
+carry executable fields: a model call receives `skill_tool_unavailable` without
+an approval prompt or side effect. Disabled Skills are omitted, and a discovery
+or context-process failure removes only the Skills route while model chat
+continues.

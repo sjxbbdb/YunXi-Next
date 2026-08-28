@@ -1,0 +1,29 @@
+#![doc = "Bounded in-memory Web Gateway facade for YunXi Next."]
+#![forbid(unsafe_code)]
+
+mod assets;
+mod dispatch;
+mod error;
+mod events;
+mod http;
+mod projection;
+mod sse;
+
+pub use dispatch::{
+    AGENT_PRESET_LIST_METHOD, COMMANDS_LIST_METHOD, CREDENTIALS_DESCRIBE_METHOD,
+    DYNAMIC_CORDIS_INVENTORY_METHOD, DYNAMIC_CORDIS_SYNC_INSPECT_METHOD, Gateway, GatewayBackend,
+    HEALTH_STATUS_METHOD, HOST_DESCRIBE_METHOD, LLM_PROVIDERS_METHOD, PLUGIN_INVENTORY_LIST_METHOD,
+    SESSION_CREATE_METHOD, SESSION_HISTORY_METHOD, SESSION_LIST_METHOD, SESSION_MODELS_METHOD,
+    SESSION_PROMPT_METHOD, SETTINGS_DESCRIBE_METHOD, SETTINGS_MUTATE_METHOD,
+    SETTINGS_REPLACE_METHOD, SETTINGS_UPDATE_METHOD, SKILL_LIST_METHOD, SUBAGENT_LIST_METHOD,
+    WORKSPACE_LIST_METHOD,
+};
+pub use error::GatewayError;
+pub use events::MAX_PENDING_EVENTS;
+pub use http::{
+    DEFAULT_HTTP_READ_TIMEOUT, HttpCarrier, HttpParseError, HttpRequest, HttpResponse,
+    MAX_HTTP_BODY_BYTES, MAX_HTTP_HEADER_BYTES, MAX_HTTP_RESPONSE_BYTES, MAX_WEB_ASSET_BYTES,
+    ShutdownToken,
+};
+pub use projection::{GatewayProjection, GatewaySessionSummary, GatewayStatus};
+pub use sse::{MAX_SSE_EVENTS, MAX_SSE_RESPONSE_BYTES};

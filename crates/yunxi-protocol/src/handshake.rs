@@ -9,8 +9,8 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::{
-    CapabilityDescriptor, HostMessage, JsonLineTransport, PROTOCOL_VERSION, PluginMessage,
-    ProtocolError,
+    CapabilityDescriptor, GrantRequirement, HostMessage, JsonLineTransport, PROTOCOL_VERSION,
+    PluginManifest, PluginMessage, ProtocolError,
 };
 
 pub const CONNECT_ADDRESS_ENV: &str = "YUNXI_PLUGIN_CONNECT_ADDRESS";
@@ -27,6 +27,7 @@ pub struct PluginConnectionInfo {
     display_name: String,
     plugin_version: String,
     capabilities: Vec<CapabilityDescriptor>,
+    manifest: Option<PluginManifest>,
 }
 
 impl PluginConnectionInfo {
@@ -44,6 +45,10 @@ impl PluginConnectionInfo {
 
     pub fn capabilities(&self) -> &[CapabilityDescriptor] {
         &self.capabilities
+    }
+
+    pub fn manifest(&self) -> Option<&PluginManifest> {
+        self.manifest.as_ref()
     }
 
     pub fn supports(&self, capability: &str, version: u32) -> bool {
@@ -113,6 +118,7 @@ impl PluginAcceptor {
                 display_name,
                 plugin_version,
                 capabilities,
+                manifest,
             } => {
                 if protocol_version != PROTOCOL_VERSION {
                     return Err(ProtocolError::Handshake(format!(
@@ -130,11 +136,24 @@ impl PluginAcceptor {
                     ));
                 }
                 validate_declaration(&display_name, &plugin_version, &capabilities)?;
+                if let Some(manifest) = &manifest {
+                    manifest
+                        .validate()
+                        .map_err(|error| ProtocolError::Handshake(error.to_string()))?;
+                    validate_manifest_identity(
+                        manifest,
+                        &plugin_id,
+                        &display_name,
+                        &plugin_version,
+                        &capabilities,
+                    )?;
+                }
                 PluginConnectionInfo {
                     plugin_id,
                     display_name,
                     plugin_version,
                     capabilities,
+                    manifest,
                 }
             }
             message => {
@@ -208,9 +227,53 @@ pub fn connect_plugin(
     capabilities: Vec<CapabilityDescriptor>,
     timeout: Duration,
 ) -> Result<PluginSession, ProtocolError> {
+    connect_plugin_with_grants(
+        plugin_id,
+        display_name,
+        plugin_version,
+        capabilities,
+        Vec::new(),
+        timeout,
+    )
+}
+
+pub fn connect_plugin_with_grants(
+    plugin_id: impl Into<String>,
+    display_name: impl Into<String>,
+    plugin_version: impl Into<String>,
+    capabilities: Vec<CapabilityDescriptor>,
+    grants: Vec<GrantRequirement>,
+    timeout: Duration,
+) -> Result<PluginSession, ProtocolError> {
+    let plugin_id = plugin_id.into();
     let display_name = display_name.into();
     let plugin_version = plugin_version.into();
-    validate_declaration(&display_name, &plugin_version, &capabilities)?;
+    let manifest = PluginManifest::new(
+        &plugin_id,
+        &display_name,
+        &plugin_version,
+        capabilities.clone(),
+    )
+    .with_grants(grants);
+    connect_plugin_with_manifest(manifest, timeout)
+}
+
+pub fn connect_plugin_with_manifest(
+    manifest: PluginManifest,
+    timeout: Duration,
+) -> Result<PluginSession, ProtocolError> {
+    manifest
+        .validate()
+        .map_err(|error| ProtocolError::Handshake(error.to_string()))?;
+    validate_declaration(
+        manifest.display_name(),
+        manifest.plugin_version(),
+        manifest.capabilities(),
+    )?;
+    let plugin_id = manifest.plugin_id().to_string();
+    let display_name = manifest.display_name().to_string();
+    let plugin_version = manifest.plugin_version().to_string();
+    let capabilities = manifest.capabilities().to_vec();
     let address = env::var(CONNECT_ADDRESS_ENV).map_err(|_| {
         ProtocolError::Handshake(format!(
             "environment variable {CONNECT_ADDRESS_ENV} is missing"
@@ -230,11 +293,12 @@ pub fn connect_plugin(
     transport.set_timeouts(Some(timeout), Some(timeout))?;
     transport.send(&PluginMessage::Hello {
         protocol_version: PROTOCOL_VERSION,
-        plugin_id: plugin_id.into(),
+        plugin_id,
         connection_token,
         display_name,
         plugin_version,
         capabilities,
+        manifest: Some(manifest),
     })?;
     match transport.receive::<HostMessage>()? {
         HostMessage::Welcome { protocol_version } if protocol_version == PROTOCOL_VERSION => {}
@@ -252,6 +316,42 @@ pub fn connect_plugin(
     transport.send(&PluginMessage::Ready)?;
     transport.set_timeouts(None, None)?;
     Ok(PluginSession { transport })
+}
+
+fn validate_manifest_identity(
+    manifest: &PluginManifest,
+    plugin_id: &str,
+    display_name: &str,
+    plugin_version: &str,
+    capabilities: &[CapabilityDescriptor],
+) -> Result<(), ProtocolError> {
+    for (field, expected, received) in [
+        ("plugin id", plugin_id, manifest.plugin_id()),
+        ("display name", display_name, manifest.display_name()),
+        ("plugin version", plugin_version, manifest.plugin_version()),
+    ] {
+        if expected != received {
+            return Err(ProtocolError::Handshake(format!(
+                "manifest {field} `{received}` does not match hello `{expected}`"
+            )));
+        }
+    }
+
+    let hello_capabilities = capabilities
+        .iter()
+        .map(|capability| (capability.id().as_str(), capability.version()))
+        .collect::<BTreeSet<_>>();
+    let manifest_capabilities = manifest
+        .capabilities()
+        .iter()
+        .map(|capability| (capability.id().as_str(), capability.version()))
+        .collect::<BTreeSet<_>>();
+    if hello_capabilities != manifest_capabilities {
+        return Err(ProtocolError::Handshake(
+            "manifest capabilities do not match hello capabilities".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_declaration(
@@ -332,6 +432,7 @@ mod tests {
                         )
                         .expect("valid capability"),
                     ],
+                    manifest: None,
                 })
                 .expect("send hello");
             assert!(matches!(

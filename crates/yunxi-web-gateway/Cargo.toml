@@ -1,0 +1,15 @@
+[package]
+name = "yunxi-web-gateway"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+yunxi-composition = { path = "../yunxi-composition" }
+yunxi-web-contract = { path = "../yunxi-web-contract" }
+
+[lints]
+workspace = true

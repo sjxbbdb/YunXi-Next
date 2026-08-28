@@ -34,8 +34,12 @@ pub mod capabilities {
     pub const TOOL_SHELL_VERSION: u32 = 1;
     pub const TOOL_PATCH: &str = "tool.patch";
     pub const TOOL_PATCH_VERSION: u32 = 1;
+    pub const TOOL_FILES: &str = "tool.files";
+    pub const TOOL_FILES_VERSION: u32 = 1;
     pub const TOOL_MCP: &str = "tool.mcp";
+    pub const TOOL_MCP_VERSION: u32 = 1;
     pub const TOOL_SKILLS: &str = "tool.skills";
+    pub const TOOL_SKILLS_VERSION: u32 = 1;
     pub const TOOL_MULTI_AGENT: &str = "tool.multi-agent";
     pub const CHANNEL_WEIXIN: &str = "channel.weixin";
     pub const VOICE_TRANSCRIBE: &str = "voice.transcribe";
@@ -53,6 +57,7 @@ pub mod capabilities {
         STORAGE_SESSIONS,
         TOOL_SHELL,
         TOOL_PATCH,
+        TOOL_FILES,
         TOOL_MCP,
         TOOL_SKILLS,
         TOOL_MULTI_AGENT,

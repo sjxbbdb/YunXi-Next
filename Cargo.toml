@@ -12,9 +12,14 @@ members = [
     "crates/yunxi-plugin-host",
     "crates/yunxi-protocol",
     "crates/yunxi-scheduler",
+    "crates/yunxi-settings",
     "crates/yunxi-storage",
     "crates/yunxi-tool-shell",
     "crates/yunxi-tool-patch",
+    "crates/yunxi-tool-files",
+    "crates/yunxi-tool-mcp",
+    "crates/yunxi-tool-skills",
+    "crates/yunxi-web-gateway",
     "crates/yunxi-web-contract",
 ]
 resolver = "3"

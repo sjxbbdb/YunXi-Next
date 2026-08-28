@@ -45,13 +45,26 @@ The connected identity and stateful paths add:
 - `companion.decide@1`, `scheduler.proactive@1`, and an encrypted
   `companion.mailbox@1` path;
 - optional capability launch switches, with context and persona enabled by
-  default and memory disabled by default;
+  default and memory disabled by default, including a read-only Files tool;
 - inherited YunXi/DeepSeek/OpenAI environment configuration;
 - an interactive CLI with bounded working history backed by persistent
   sessions;
 - session list/resume/new, memory review, mailbox, status, clear, and quit
   commands;
-- `--once` mode for scripts and health checks.
+- `--once` mode for scripts and health checks;
+- the pinned DeepSeek Harness Web client, served from the Rust binary with a
+  bounded HTTP/SSE adapter, real session chat, and restart-scoped capability
+  switches.
+
+When enabled, the Files tool exposes bounded `file.search` and `file.read`
+model calls under a read-only workspace grant. Shell and Patch model calls
+remain behind the Host approval boundary; any tool failure is visible in the
+CLI and returned to the model for recovery.
+
+The optional MCP bridge discovers one external stdio Server and projects its
+tools behind Host approval. The optional Skills process discovers bounded
+workspace-local `SKILL.md` files, injects their instructions, and projects
+`tools.json` entries as metadata-only declarations that cannot execute yet.
 
 API failures are returned per request and do not terminate the model plugin.
 An optional capability failure produces a visible warning and falls back to
@@ -73,6 +86,10 @@ bundle/profile/overlay configuration separate from process supervision and
 projects the current plugin set into the inventory shape needed by the dsh Web
 client. The upstream record and reuse boundary are documented in
 [`docs/dsh-web-compatibility.md`](docs/dsh-web-compatibility.md).
+User capability choices are stored by
+[`yunxi-settings`](crates/yunxi-settings/README.md) in a bounded, versioned
+document. Explicit environment variables remain the highest-precedence
+operator override.
 
 ## Run
 
@@ -105,6 +122,22 @@ Send one prompt without entering interactive mode:
 yunxi-next --once "你好"
 ```
 
+Start the bounded Web HTTP/SSE carrier on loopback:
+
+```powershell
+yunxi-next web
+```
+
+The default listener is `127.0.0.1:8787`. Use `yunxi-next web --bind
+127.0.0.1:0` for an available port during local testing. Closing the Web
+command's standard input performs an explicit Host shutdown. Open
+`http://127.0.0.1:8787` to use the embedded dsh workbench. The current Web
+surface supports text sessions, model selection projection, history, real
+chat replies, Host approvals, plugin inventory, and capability switches in
+Settings > Plugins. Switch changes are persisted immediately and applied when
+the Host is restarted; provider credentials stay in the Host process
+environment.
+
 See [`docs/provider-configuration.md`](docs/provider-configuration.md) for
 custom OpenAI-compatible endpoints and the complete resolution order. The
 runtime does not load `.env` files automatically and never writes credentials
@@ -113,6 +146,8 @@ to repository files or local protocol messages.
 ## Repository Map
 
 - [`crates/`](crates/README.md) contains production Rust packages.
+- [`web/`](web/README.md) contains the pinned dsh Web import, YunXi adapter,
+  licenses, and generated browser distribution.
 - [`docs/`](docs/README.md) contains architecture and repository maps.
 - [`AGENTS.md`](AGENTS.md) defines repository boundaries and verification rules.
 - [`docs/project-structure.md`](docs/project-structure.md) explains every tracked

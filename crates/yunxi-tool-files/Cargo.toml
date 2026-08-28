@@ -1,0 +1,17 @@
+[package]
+name = "yunxi-tool-files"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+serde_json.workspace = true
+yunxi-protocol = { path = "../yunxi-protocol" }
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "yunxi-tool-files"
+path = "src/bin/yunxi-tool-files.rs"

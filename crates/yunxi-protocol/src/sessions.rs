@@ -7,9 +7,44 @@ use serde::{Deserialize, Serialize};
 use crate::{ChatMessage, WorkspaceGrant};
 
 pub const STORAGE_SESSIONS_APPEND_OPERATION: &str = "append";
+pub const STORAGE_SESSIONS_CREATE_OPERATION: &str = "create";
 pub const STORAGE_SESSIONS_LOAD_OPERATION: &str = "load";
 pub const STORAGE_SESSIONS_LIST_OPERATION: &str = "list";
 pub const STORAGE_SESSIONS_MUTATE_OPERATION: &str = "mutate";
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SessionCreateRequest {
+    grant: WorkspaceGrant,
+}
+
+impl SessionCreateRequest {
+    pub fn new(grant: WorkspaceGrant) -> Self {
+        Self { grant }
+    }
+
+    pub fn grant(&self) -> &WorkspaceGrant {
+        &self.grant
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SessionCreateResult {
+    session: SessionSnapshot,
+}
+
+impl SessionCreateResult {
+    pub fn new(session: SessionSnapshot) -> Self {
+        Self { session }
+    }
+
+    pub fn session(&self) -> &SessionSnapshot {
+        &self.session
+    }
+
+    pub fn into_session(self) -> SessionSnapshot {
+        self.session
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SessionAppendRequest {

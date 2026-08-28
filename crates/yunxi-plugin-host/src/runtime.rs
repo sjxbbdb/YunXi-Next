@@ -12,8 +12,9 @@ use yunxi_kernel::{
     PluginSnapshot, PluginSpec, YunxiKernel,
 };
 use yunxi_protocol::{
-    CONNECT_ADDRESS_ENV, CONNECT_TOKEN_ENV, CapabilityDescriptor, HostMessage, HostPluginSession,
-    InvocationCodecError, InvocationRequest, PluginAcceptor, PluginMessage, ProtocolError,
+    CONNECT_ADDRESS_ENV, CONNECT_TOKEN_ENV, CapabilityDescriptor, GrantKind, HostMessage,
+    HostPluginSession, InvocationCodecError, InvocationRequest, PluginAcceptor,
+    PluginConnectionInfo, PluginMessage, ProtocolError,
 };
 
 use crate::{CapabilityCatalog, CatalogError};
@@ -29,6 +30,7 @@ pub struct PluginLaunch {
     handshake_timeout: Duration,
     read_timeout: Option<Duration>,
     write_timeout: Option<Duration>,
+    required_grants: Vec<GrantKind>,
 }
 
 impl PluginLaunch {
@@ -41,6 +43,7 @@ impl PluginLaunch {
             handshake_timeout: DEFAULT_HANDSHAKE_TIMEOUT,
             read_timeout: None,
             write_timeout: Some(DEFAULT_WRITE_TIMEOUT),
+            required_grants: Vec::new(),
         }
     }
 
@@ -66,6 +69,13 @@ impl PluginLaunch {
         self.write_timeout = write_timeout;
         self
     }
+
+    pub fn with_required_grants(mut self, grants: impl IntoIterator<Item = GrantKind>) -> Self {
+        self.required_grants = grants.into_iter().collect();
+        self.required_grants.sort_unstable();
+        self.required_grants.dedup();
+        self
+    }
 }
 
 pub struct ProcessPluginHost {
@@ -86,24 +96,35 @@ impl ProcessPluginHost {
     }
 
     pub fn launch(&mut self, launch: PluginLaunch) -> Result<PluginId, PluginHostError> {
+        let PluginLaunch {
+            id,
+            display_name,
+            command,
+            handshake_timeout,
+            read_timeout,
+            write_timeout,
+            required_grants,
+        } = launch;
         let acceptor = PluginAcceptor::bind()?;
-        let command = launch
-            .command
+        let command = command
             .env(CONNECT_ADDRESS_ENV, acceptor.address()?.to_string())
             .env(CONNECT_TOKEN_ENV, acceptor.connection_token());
-        let id = launch.id;
-        let spec = PluginSpec::new(id.clone(), command).with_display_name(launch.display_name);
+        let spec = PluginSpec::new(id.clone(), command).with_display_name(display_name);
         self.kernel.register(spec)?;
         self.kernel.start(&id)?;
 
-        let connection = match acceptor.accept(id.as_str(), launch.handshake_timeout) {
+        let connection = match acceptor.accept(id.as_str(), handshake_timeout) {
             Ok(connection) => connection,
             Err(error) => {
                 self.fail_connection(&id, error.to_string());
                 return Err(PluginHostError::Protocol(error));
             }
         };
-        if let Err(error) = connection.set_timeouts(launch.read_timeout, launch.write_timeout) {
+        if let Err(error) = validate_required_grants(connection.info(), &required_grants) {
+            self.fail_connection(&id, error.to_string());
+            return Err(PluginHostError::Protocol(error));
+        }
+        if let Err(error) = connection.set_timeouts(read_timeout, write_timeout) {
             self.fail_connection(&id, error.to_string());
             return Err(PluginHostError::Protocol(error));
         }
@@ -278,6 +299,35 @@ impl ProcessPluginHost {
         }
         self.kernel.refresh();
     }
+}
+
+fn validate_required_grants(
+    connection: &PluginConnectionInfo,
+    required_grants: &[GrantKind],
+) -> Result<(), ProtocolError> {
+    if required_grants.is_empty() {
+        return Ok(());
+    }
+    let Some(manifest) = connection.manifest() else {
+        return Err(ProtocolError::Handshake(format!(
+            "plugin `{}` must provide a manifest declaring required grants: {}",
+            connection.plugin_id(),
+            required_grants
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        )));
+    };
+    for grant in required_grants {
+        if !manifest.declares_required_grant(*grant) {
+            return Err(ProtocolError::Handshake(format!(
+                "plugin `{}` manifest does not declare required grant `{grant}`",
+                connection.plugin_id()
+            )));
+        }
+    }
+    Ok(())
 }
 
 impl Default for ProcessPluginHost {

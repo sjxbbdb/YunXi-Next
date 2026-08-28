@@ -6,6 +6,7 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+serde_json.workspace = true
 yunxi-companion = { path = "../yunxi-companion" }
 yunxi-companion-mailbox = { path = "../yunxi-companion-mailbox" }
 yunxi-composition = { path = "../yunxi-composition" }
@@ -17,9 +18,15 @@ yunxi-persona = { path = "../yunxi-persona" }
 yunxi-plugin-host = { path = "../yunxi-plugin-host" }
 yunxi-protocol = { path = "../yunxi-protocol" }
 yunxi-scheduler = { path = "../yunxi-scheduler" }
+yunxi-settings = { path = "../yunxi-settings" }
 yunxi-storage = { path = "../yunxi-storage" }
 yunxi-tool-patch = { path = "../yunxi-tool-patch" }
+yunxi-tool-files = { path = "../yunxi-tool-files" }
+yunxi-tool-mcp = { path = "../yunxi-tool-mcp" }
+yunxi-tool-skills = { path = "../yunxi-tool-skills" }
 yunxi-tool-shell = { path = "../yunxi-tool-shell" }
+yunxi-web-contract = { path = "../yunxi-web-contract" }
+yunxi-web-gateway = { path = "../yunxi-web-gateway" }
 
 [[bin]]
 name = "yunxi-next"

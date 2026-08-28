@@ -1,0 +1,22 @@
+[package]
+name = "yunxi-tool-skills"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+yunxi-protocol = { path = "../yunxi-protocol" }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+yunxi-kernel = { path = "../yunxi-kernel" }
+yunxi-plugin-host = { path = "../yunxi-plugin-host" }
+
+[[bin]]
+name = "yunxi-tool-skills"
+path = "src/bin/yunxi-tool-skills.rs"

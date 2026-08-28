@@ -5,7 +5,7 @@ use std::error::Error;
 use std::fmt;
 
 use yunxi_kernel::{PluginId, PluginIdError};
-use yunxi_protocol::{CapabilityDescriptor, CapabilityId, PluginConnectionInfo};
+use yunxi_protocol::{CapabilityDescriptor, CapabilityId, PluginConnectionInfo, PluginManifest};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PluginRecord {
@@ -13,6 +13,7 @@ pub struct PluginRecord {
     display_name: String,
     version: String,
     capabilities: Vec<CapabilityDescriptor>,
+    manifest: Option<PluginManifest>,
 }
 
 impl PluginRecord {
@@ -30,6 +31,10 @@ impl PluginRecord {
 
     pub fn capabilities(&self) -> &[CapabilityDescriptor] {
         &self.capabilities
+    }
+
+    pub fn manifest(&self) -> Option<&PluginManifest> {
+        self.manifest.as_ref()
     }
 }
 
@@ -50,11 +55,12 @@ impl CapabilityCatalog {
     ) -> Result<PluginId, CatalogError> {
         let id = PluginId::new(connection.plugin_id().to_string())
             .map_err(CatalogError::InvalidPluginId)?;
-        self.register(
+        self.register_with_manifest(
             id.clone(),
             connection.display_name(),
             connection.plugin_version(),
             connection.capabilities().to_vec(),
+            connection.manifest().cloned(),
         )?;
         Ok(id)
     }
@@ -65,6 +71,17 @@ impl CapabilityCatalog {
         display_name: impl Into<String>,
         version: impl Into<String>,
         capabilities: Vec<CapabilityDescriptor>,
+    ) -> Result<(), CatalogError> {
+        self.register_with_manifest(id, display_name, version, capabilities, None)
+    }
+
+    pub(crate) fn register_with_manifest(
+        &mut self,
+        id: PluginId,
+        display_name: impl Into<String>,
+        version: impl Into<String>,
+        capabilities: Vec<CapabilityDescriptor>,
+        manifest: Option<PluginManifest>,
     ) -> Result<(), CatalogError> {
         if self.plugins.contains_key(&id) {
             return Err(CatalogError::DuplicatePlugin { id });
@@ -85,6 +102,7 @@ impl CapabilityCatalog {
             display_name: display_name.into(),
             version: version.into(),
             capabilities,
+            manifest,
         };
         for capability in &record.capabilities {
             self.providers

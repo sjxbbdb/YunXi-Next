@@ -5,9 +5,9 @@ use std::fmt;
 use std::time::Duration;
 
 use yunxi_protocol::{
-    ActionGrantError, CapabilityDescriptor, CapabilityError, HostMessage, InvocationCodecError,
-    InvocationResponse, PluginMessage, ProtocolError, ShellExecuteRequest,
-    TOOL_SHELL_EXECUTE_OPERATION, capabilities, connect_plugin,
+    ActionGrantError, CapabilityDescriptor, CapabilityError, GrantKind, GrantRequirement,
+    HostMessage, InvocationCodecError, InvocationResponse, PluginMessage, ProtocolError,
+    ShellExecuteRequest, TOOL_SHELL_EXECUTE_OPERATION, capabilities, connect_plugin_with_grants,
 };
 
 use crate::{ShellError, execute};
@@ -18,11 +18,17 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 pub fn run_shell_plugin() -> Result<(), ShellPluginError> {
     let capability =
         CapabilityDescriptor::new(capabilities::TOOL_SHELL, capabilities::TOOL_SHELL_VERSION)?;
-    let mut session = connect_plugin(
+    let mut session = connect_plugin_with_grants(
         SHELL_PLUGIN_ID,
         "Host-approved shell execution",
         env!("CARGO_PKG_VERSION"),
         vec![capability],
+        vec![
+            GrantRequirement::required(GrantKind::Approval),
+            GrantRequirement::required(GrantKind::WorkspaceRead),
+            GrantRequirement::optional(GrantKind::WorkspaceWrite),
+            GrantRequirement::optional(GrantKind::Network),
+        ],
         CONNECT_TIMEOUT,
     )?;
     loop {

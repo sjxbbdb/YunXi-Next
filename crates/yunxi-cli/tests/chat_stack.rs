@@ -43,6 +43,229 @@ fn once_mode_crosses_the_isolated_plugin_boundary() {
 }
 
 #[test]
+fn enabled_skills_inject_bounded_context_and_dynamic_metadata_tools() {
+    let workspace = unique_temp_dir("yunxi-skills-context");
+    let skill_dir = workspace.join("skills").join("review");
+    fs::create_dir_all(&skill_dir).expect("create Skill directory");
+    fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: Code Review\ndescription: Review source\n---\nInspect the changed lines before answering.\n",
+    )
+    .expect("write Skill instructions");
+    fs::write(
+        skill_dir.join("tools.json"),
+        r#"[{"name":"check","description":"Inspect metadata","input_schema":{"type":"object"}}]"#,
+    )
+    .expect("write Skill tool metadata");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let server = thread::spawn(move || {
+        let (stream, body) = accept_request(&listener);
+        assert!(body.contains("Inspect the changed lines"), "body: {body}");
+        assert!(body.contains("skill.review.check"), "body: {body}");
+        write_response(
+            stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"skills are active"},"finish_reason":"stop"}]}"#,
+        );
+    });
+
+    let child = configured_cli(address)
+        .current_dir(&workspace)
+        .args(["--once", "review this change"])
+        .env("YUNXI_NEXT_SKILLS_ENABLED", "true")
+        .env("YUNXI_NEXT_SKILLS_ROOT", workspace.join("skills"))
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch CLI with Skills");
+    let output = wait_for_cli(child);
+    server.join().expect("join mock API");
+
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .expect("UTF-8 output")
+            .trim(),
+        "skills are active"
+    );
+    let _ignored = fs::remove_dir_all(workspace);
+}
+
+#[test]
+fn metadata_only_skill_tool_call_is_rejected_without_approval() {
+    let workspace = unique_temp_dir("yunxi-skills-tool-call");
+    let skill_dir = workspace.join("skills").join("review");
+    fs::create_dir_all(&skill_dir).expect("create Skill directory");
+    fs::write(skill_dir.join("SKILL.md"), "review instructions\n").expect("write Skill");
+    fs::write(
+        skill_dir.join("tools.json"),
+        r#"[{"name":"check","description":"Inspect metadata","input_schema":{"type":"object"}}]"#,
+    )
+    .expect("write Skill tool metadata");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let server = thread::spawn(move || {
+        let (first_stream, first_body) = accept_request(&listener);
+        assert!(
+            first_body.contains("skill.review.check"),
+            "body: {first_body}"
+        );
+        write_response(
+            first_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":null,"tool_calls":[{"id":"skill-call-1","type":"function","function":{"name":"skill.review.check","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}"#,
+        );
+        let (second_stream, second_body) = accept_request(&listener);
+        assert!(
+            second_body.contains("skill_tool_unavailable"),
+            "body: {second_body}"
+        );
+        write_response(
+            second_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"metadata tool stayed isolated"},"finish_reason":"stop"}]}"#,
+        );
+    });
+
+    let mut child = configured_cli(address)
+        .current_dir(&workspace)
+        .env("YUNXI_NEXT_SKILLS_ENABLED", "true")
+        .env("YUNXI_NEXT_SKILLS_ROOT", workspace.join("skills"))
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch CLI with Skill tool metadata");
+    child
+        .stdin
+        .take()
+        .expect("open CLI stdin")
+        .write_all(b"invoke the declared Skill tool\n/quit\n")
+        .expect("write Skill tool prompt");
+    let output = wait_for_cli(child);
+    server.join().expect("join mock API");
+
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("metadata tool stayed isolated"));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("Approval required"));
+    let _ignored = fs::remove_dir_all(workspace);
+}
+
+#[test]
+fn disabled_skill_is_not_injected_or_projected_to_the_model() {
+    let workspace = unique_temp_dir("yunxi-skills-disabled");
+    let skill_dir = workspace.join("skills").join("review");
+    fs::create_dir_all(&skill_dir).expect("create Skill directory");
+    fs::write(
+        skill_dir.join("SKILL.md"),
+        "---\nname: Code Review\ndescription: Review source\n---\nDo not appear in this request.\n",
+    )
+    .expect("write Skill instructions");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let server = thread::spawn(move || {
+        let (stream, body) = accept_request(&listener);
+        assert!(!body.contains("Do not appear"), "body: {body}");
+        assert!(!body.contains("skill.review"), "body: {body}");
+        write_response(
+            stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"disabled is isolated"},"finish_reason":"stop"}]}"#,
+        );
+    });
+
+    let child = configured_cli(address)
+        .current_dir(&workspace)
+        .args(["--once", "check disabled behavior"])
+        .env("YUNXI_NEXT_SKILLS_ENABLED", "true")
+        .env("YUNXI_NEXT_SKILLS_DISABLED", "review")
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch CLI with disabled Skill");
+    let output = wait_for_cli(child);
+    server.join().expect("join mock API");
+
+    assert!(output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("disabled is isolated"));
+    let _ignored = fs::remove_dir_all(workspace);
+}
+
+#[test]
+fn crashed_skills_context_route_does_not_stop_model_chat() {
+    let workspace = unique_temp_dir("yunxi-skills-crash");
+    let skill_dir = workspace.join("skills").join("review");
+    fs::create_dir_all(&skill_dir).expect("create Skill directory");
+    fs::write(skill_dir.join("SKILL.md"), "instructions before crash\n")
+        .expect("write Skill instructions");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let server = thread::spawn(move || {
+        let (stream, body) = accept_request(&listener);
+        assert!(!body.contains("instructions before crash"), "body: {body}");
+        write_response(
+            stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"model survives Skills"},"finish_reason":"stop"}]}"#,
+        );
+    });
+
+    let child = configured_cli(address)
+        .current_dir(&workspace)
+        .args(["--once", "continue after Skill failure"])
+        .env("YUNXI_NEXT_SKILLS_ENABLED", "true")
+        .env("YUNXI_NEXT_SKILLS_MODE", "crash-context")
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch CLI with crashing Skill");
+    let output = wait_for_cli(child);
+    server.join().expect("join mock API");
+
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("model survives Skills"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Skills capability degraded"));
+    let _ignored = fs::remove_dir_all(workspace);
+}
+
+#[test]
 fn api_failure_is_contained_and_the_plugin_serves_the_next_turn() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
     listener
@@ -93,6 +316,664 @@ fn api_failure_is_contained_and_the_plugin_serves_the_next_turn() {
 }
 
 #[test]
+fn model_tool_call_waits_for_approval_then_resumes_with_tool_result() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let server = thread::spawn(move || {
+        let (first_stream, first_body) = accept_request(&listener);
+        assert!(first_body.contains("\"tools\":["));
+        assert!(first_body.contains("shell.execute"));
+        write_response(
+            first_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":null,"tool_calls":[{"id":"call-1","type":"function","function":{"name":"shell.execute","arguments":"{\"command\":\"echo auto-ok\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+        );
+
+        let (second_stream, second_body) = accept_request(&listener);
+        assert!(second_body.contains("\"role\":\"assistant\""));
+        assert!(second_body.contains("\"tool_calls\""));
+        assert!(second_body.contains("\"role\":\"tool\""));
+        assert!(second_body.contains("auto-ok"));
+        write_response(
+            second_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"tool loop complete"},"finish_reason":"stop"}]}"#,
+        );
+    });
+
+    let mut child = configured_cli(address)
+        .env("YUNXI_NEXT_SHELL_ENABLED", "true")
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch CLI");
+    child
+        .stdin
+        .take()
+        .expect("open CLI stdin")
+        .write_all(b"run the command\n/approve\n/quit\n")
+        .expect("write tool loop input");
+    let output = wait_for_cli(child);
+    server.join().expect("join mock API");
+
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 output");
+    assert!(
+        stdout.contains("Approval required for model tool action"),
+        "stdout: {stdout}"
+    );
+    assert!(stdout.contains("tool: shell.execute"), "stdout: {stdout}");
+    assert!(stdout.contains("tool loop complete"), "stdout: {stdout}");
+}
+
+#[test]
+fn mcp_stdio_tools_are_discovered_and_require_host_approval() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let server = thread::spawn(move || {
+        let (first_stream, first_body) = accept_request(&listener);
+        assert!(
+            first_body.contains("mcp.fixture.echo"),
+            "MCP tool catalog missing from request: {first_body}"
+        );
+        write_response(
+            first_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":null,"tool_calls":[{"id":"mcp-1","type":"function","function":{"name":"mcp.fixture.echo","arguments":"{\"text\":\"hello\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+        );
+
+        let (second_stream, second_body) = accept_request(&listener);
+        assert!(second_body.contains("mcp.fixture.echo"));
+        assert!(second_body.contains("fixture"));
+        assert!(second_body.contains("hello"));
+        write_response(
+            second_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"mcp loop complete"},"finish_reason":"stop"}]}"#,
+        );
+    });
+
+    let mcp_command = env!("CARGO_BIN_EXE_yunxi-next");
+    let mut child = configured_cli(address)
+        .env("YUNXI_NEXT_MCP_ENABLED", "true")
+        .env("YUNXI_NEXT_MCP_COMMAND", mcp_command)
+        .env("YUNXI_NEXT_MCP_ARGS_JSON", r#"["__mcp-fixture"]"#)
+        .env(
+            "YUNXI_NEXT_MCP_ENV_JSON",
+            r#"{"YUNXI_MCP_FIXTURE_MODE":"normal"}"#,
+        )
+        .env("YUNXI_NEXT_MCP_NAME", "fixture")
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch YunXi CLI with MCP");
+    child
+        .stdin
+        .take()
+        .expect("open CLI stdin")
+        .write_all(b"call the MCP tool\n/approve\n/quit\n")
+        .expect("write MCP tool input");
+    let output = wait_for_cli(child);
+    server.join().expect("join mock API");
+
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 output");
+    assert!(
+        stdout.contains("tool: mcp.fixture.echo"),
+        "stdout: {stdout}"
+    );
+    assert!(stdout.contains("mcp loop complete"), "stdout: {stdout}");
+}
+
+#[test]
+fn crashed_mcp_server_isolated_from_model_route_and_returns_tool_failure() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let server = thread::spawn(move || {
+        let (first_stream, first_body) = accept_request(&listener);
+        assert!(first_body.contains("mcp.fixture.echo"));
+        write_response(
+            first_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":null,"tool_calls":[{"id":"mcp-crash-1","type":"function","function":{"name":"mcp.fixture.echo","arguments":"{\"text\":\"crash\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+        );
+
+        let (second_stream, second_body) = accept_request(&listener);
+        assert!(second_body.contains("mcp_unavailable"));
+        write_response(
+            second_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"model recovered after MCP crash"},"finish_reason":"stop"}]}"#,
+        );
+    });
+
+    let mcp_command = env!("CARGO_BIN_EXE_yunxi-next");
+    let mut child = configured_cli(address)
+        .env("YUNXI_NEXT_MCP_ENABLED", "true")
+        .env("YUNXI_NEXT_MCP_COMMAND", mcp_command)
+        .env("YUNXI_NEXT_MCP_ARGS_JSON", r#"["__mcp-fixture"]"#)
+        .env(
+            "YUNXI_NEXT_MCP_ENV_JSON",
+            r#"{"YUNXI_MCP_FIXTURE_MODE":"call-crash"}"#,
+        )
+        .env("YUNXI_NEXT_MCP_NAME", "fixture")
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch YunXi CLI with crashing MCP");
+    child
+        .stdin
+        .take()
+        .expect("open CLI stdin")
+        .write_all(b"call the crashing MCP tool\n/approve\n/quit\n")
+        .expect("write crashing MCP input");
+    let output = wait_for_cli(child);
+    server.join().expect("join mock API");
+
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 output");
+    assert!(stdout.contains("mcp_unavailable"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("model recovered after MCP crash"),
+        "stdout: {stdout}"
+    );
+}
+
+#[test]
+fn model_patch_tool_uses_workspace_write_grant_after_approval() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let workspace = unique_temp_dir("yunxi-model-patch-tool");
+    fs::create_dir_all(&workspace).expect("create workspace");
+    fs::write(workspace.join("target.txt"), "before\n").expect("write target");
+    let server = thread::spawn(move || {
+        let (first_stream, first_body) = accept_request(&listener);
+        assert!(first_body.contains("patch.apply"));
+        write_response(
+            first_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":null,"tool_calls":[{"id":"patch-1","type":"function","function":{"name":"patch.apply","arguments":"{\"patch\":\"*** Begin Patch\\n*** Update File: target.txt\\n@@\\n-before\\n+after\\n*** End Patch\\n\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+        );
+        let (second_stream, second_body) = accept_request(&listener);
+        assert!(second_body.contains("\"role\":\"tool\""));
+        assert!(second_body.contains("target.txt"));
+        write_response(
+            second_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"patch loop complete"},"finish_reason":"stop"}]}"#,
+        );
+    });
+
+    let mut child = configured_cli(address)
+        .current_dir(&workspace)
+        .env("YUNXI_NEXT_PATCH_ENABLED", "true")
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch CLI");
+    child
+        .stdin
+        .take()
+        .expect("open CLI stdin")
+        .write_all(b"apply the patch\n/approve\n/quit\n")
+        .expect("write patch tool input");
+    let output = wait_for_cli(child);
+    server.join().expect("join mock API");
+
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(workspace.join("target.txt")).expect("read patched target"),
+        "after\n"
+    );
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 output");
+    assert!(stdout.contains("tool: patch.apply"), "stdout: {stdout}");
+    assert!(stdout.contains("patch loop complete"), "stdout: {stdout}");
+    fs::remove_dir_all(workspace).expect("remove workspace");
+}
+
+#[test]
+fn denied_model_tool_has_no_side_effect_and_returns_rejection_to_model() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let workspace = unique_temp_dir("yunxi-model-denied-tool");
+    fs::create_dir_all(&workspace).expect("create workspace");
+    let marker = workspace.join("marker.txt");
+    let server = thread::spawn(move || {
+        let (first_stream, _first_body) = accept_request(&listener);
+        write_response(
+            first_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":null,"tool_calls":[{"id":"deny-1","type":"function","function":{"name":"shell.execute","arguments":"{\"command\":\"echo should-not-run > marker.txt\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+        );
+        let (second_stream, second_body) = accept_request(&listener);
+        assert!(second_body.contains("user_denied"));
+        write_response(
+            second_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"denial handled"},"finish_reason":"stop"}]}"#,
+        );
+    });
+
+    let mut child = configured_cli(address)
+        .current_dir(&workspace)
+        .env("YUNXI_NEXT_SHELL_ENABLED", "true")
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch CLI");
+    child
+        .stdin
+        .take()
+        .expect("open CLI stdin")
+        .write_all(b"do not run it\n/deny\n/quit\n")
+        .expect("write denial input");
+    let output = wait_for_cli(child);
+    server.join().expect("join mock API");
+
+    assert!(output.status.success());
+    assert!(!marker.exists());
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 output");
+    assert!(stdout.contains("denial handled"), "stdout: {stdout}");
+    fs::remove_dir_all(workspace).expect("remove workspace");
+}
+
+#[test]
+fn cancelled_model_tool_has_no_side_effect_and_returns_cancellation_to_model() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let workspace = unique_temp_dir("yunxi-model-cancelled-tool");
+    fs::create_dir_all(&workspace).expect("create workspace");
+    let marker = workspace.join("marker.txt");
+    let server = thread::spawn(move || {
+        let (first_stream, _first_body) = accept_request(&listener);
+        write_response(
+            first_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":null,"tool_calls":[{"id":"cancel-1","type":"function","function":{"name":"shell.execute","arguments":"{\"command\":\"echo should-not-run > marker.txt\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+        );
+        let (second_stream, second_body) = accept_request(&listener);
+        assert!(second_body.contains("cancelled"));
+        write_response(
+            second_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"cancellation handled"},"finish_reason":"stop"}]}"#,
+        );
+    });
+
+    let mut child = configured_cli(address)
+        .current_dir(&workspace)
+        .env("YUNXI_NEXT_SHELL_ENABLED", "true")
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch CLI");
+    child
+        .stdin
+        .take()
+        .expect("open CLI stdin")
+        .write_all(b"do not run it\n/cancel\n/quit\n")
+        .expect("write cancellation input");
+    let output = wait_for_cli(child);
+    server.join().expect("join mock API");
+
+    assert!(output.status.success());
+    assert!(!marker.exists());
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 output");
+    assert!(stdout.contains("cancellation handled"), "stdout: {stdout}");
+    fs::remove_dir_all(workspace).expect("remove workspace");
+}
+
+#[test]
+fn model_tool_timeout_is_bounded_and_recoverable() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let command = if cfg!(windows) {
+        "ping -n 5 127.0.0.1"
+    } else {
+        "sleep 2"
+    };
+    let server = thread::spawn(move || {
+        let (first_stream, _first_body) = accept_request(&listener);
+        let arguments = serde_json::json!({
+            "command": command,
+            "timeout_millis": 50
+        })
+        .to_string();
+        let response = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": serde_json::Value::Null,
+                    "tool_calls": [{
+                        "id": "timeout-1",
+                        "type": "function",
+                        "function": {
+                            "name": "shell.execute",
+                            "arguments": arguments
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        })
+        .to_string();
+        write_response(first_stream, "200 OK", &response);
+        let (second_stream, second_body) = accept_request(&listener);
+        assert!(
+            second_body.contains("timed_out"),
+            "second body: {second_body}"
+        );
+        write_response(
+            second_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"timeout handled"},"finish_reason":"stop"}]}"#,
+        );
+    });
+
+    let mut child = configured_cli(address)
+        .env("YUNXI_NEXT_SHELL_ENABLED", "true")
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch CLI");
+    child
+        .stdin
+        .take()
+        .expect("open CLI stdin")
+        .write_all(b"run briefly\n/approve\n/quit\n")
+        .expect("write timeout input");
+    let output = wait_for_cli(child);
+    server.join().expect("join mock API");
+
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 output");
+    assert!(stdout.contains("timeout handled"), "stdout: {stdout}");
+}
+
+#[test]
+fn tool_rejection_is_returned_to_the_model_without_writing_files() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let workspace = unique_temp_dir("yunxi-model-rejected-tool");
+    fs::create_dir_all(&workspace).expect("create workspace");
+    let marker = workspace.join("marker.txt");
+    let server = thread::spawn(move || {
+        let (first_stream, _first_body) = accept_request(&listener);
+        write_response(
+            first_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":null,"tool_calls":[{"id":"reject-1","type":"function","function":{"name":"shell.execute","arguments":"{\"command\":\"echo should-not-write > marker.txt\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+        );
+        let (second_stream, second_body) = accept_request(&listener);
+        assert!(second_body.contains("write_not_granted"));
+        write_response(
+            second_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"rejection handled"},"finish_reason":"stop"}]}"#,
+        );
+    });
+
+    let mut child = configured_cli(address)
+        .current_dir(&workspace)
+        .env("YUNXI_NEXT_SHELL_ENABLED", "true")
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch CLI");
+    child
+        .stdin
+        .take()
+        .expect("open CLI stdin")
+        .write_all(b"try a write\n/approve\n/quit\n")
+        .expect("write rejection input");
+    let output = wait_for_cli(child);
+    server.join().expect("join mock API");
+
+    assert!(output.status.success());
+    assert!(!marker.exists());
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 output");
+    assert!(stdout.contains("rejection handled"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("warning: model tool `shell.execute` failed"),
+        "stdout: {stdout}"
+    );
+    fs::remove_dir_all(workspace).expect("remove workspace");
+}
+
+#[test]
+fn tool_loop_round_limit_is_visible_and_a_later_turn_recovers() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let server = thread::spawn(move || {
+        for round in 1..=8 {
+            let (stream, body) = accept_request(&listener);
+            assert!(body.contains("shell.execute"));
+            let response = serde_json::json!({
+                "choices": [{
+                    "message": {
+                        "content": serde_json::Value::Null,
+                        "tool_calls": [{
+                            "id": format!("limit-{round}"),
+                            "type": "function",
+                            "function": {
+                                "name": "shell.execute",
+                                "arguments": serde_json::json!({"command": "echo bounded"}).to_string()
+                            }
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            })
+            .to_string();
+            write_response(stream, "200 OK", &response);
+        }
+        let (stream, body) = accept_request(&listener);
+        assert!(body.contains("after limit"));
+        write_response(
+            stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"recovered after limit"},"finish_reason":"stop"}]}"#,
+        );
+    });
+
+    let mut child = configured_cli(address)
+        .env("YUNXI_NEXT_SHELL_ENABLED", "true")
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch CLI");
+    child
+        .stdin
+        .take()
+        .expect("open CLI stdin")
+        .write_all(
+            b"reach the limit\n/approve\n/approve\n/approve\n/approve\n/approve\n/approve\n/approve\n/approve\nafter limit\n/quit\n",
+        )
+        .expect("write round-limit input");
+    let output = wait_for_cli(child);
+    server.join().expect("join mock API");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 output");
+    assert!(
+        stdout.contains("model tool loop stopped"),
+        "stdout: {stdout}"
+    );
+    assert!(stdout.contains("recovered after limit"), "stdout: {stdout}");
+}
+
+#[test]
+fn read_only_file_tools_search_and_view_without_approval_or_write_access() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let workspace = unique_temp_dir("yunxi-file-tools-e2e");
+    fs::create_dir_all(workspace.join("src")).expect("create workspace");
+    fs::write(workspace.join("src/main.rs"), "fn main() {}\n").expect("write source");
+    let server = thread::spawn(move || {
+        let (first_stream, first_body) = accept_request(&listener);
+        assert!(first_body.contains("file.search"));
+        assert!(first_body.contains("file.read"));
+        let first_response = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": serde_json::Value::Null,
+                    "tool_calls": [{
+                        "id": "search-1",
+                        "type": "function",
+                        "function": {
+                            "name": "file.search",
+                            "arguments": "{\"query\":\"main\",\"path\":\"src\"}"
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        })
+        .to_string();
+        write_response(first_stream, "200 OK", &first_response);
+
+        let (second_stream, second_body) = accept_request(&listener);
+        assert!(
+            second_body.contains("src/main.rs"),
+            "second body: {second_body}"
+        );
+        let second_response = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "content": serde_json::Value::Null,
+                    "tool_calls": [{
+                        "id": "read-1",
+                        "type": "function",
+                        "function": {
+                            "name": "file.read",
+                            "arguments": "{\"path\":\"src/main.rs\"}"
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        })
+        .to_string();
+        write_response(second_stream, "200 OK", &second_response);
+
+        let (third_stream, third_body) = accept_request(&listener);
+        assert!(third_body.contains("fn main"));
+        write_response(
+            third_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"read-only file tools complete"},"finish_reason":"stop"}]}"#,
+        );
+    });
+
+    let mut child = configured_cli(address)
+        .current_dir(&workspace)
+        .env("YUNXI_NEXT_FILES_ENABLED", "true")
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch CLI");
+    child
+        .stdin
+        .take()
+        .expect("open CLI stdin")
+        .write_all(b"inspect the source\n/quit\n")
+        .expect("write file tool input");
+    let output = wait_for_cli(child);
+    server.join().expect("join mock API");
+
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 output");
+    assert!(
+        stdout.contains("read-only file tools complete"),
+        "stdout: {stdout}"
+    );
+    fs::remove_dir_all(workspace).expect("remove workspace");
+}
+
+#[test]
 fn disabled_optional_capabilities_never_launch_or_register_routes() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind unused API endpoint");
     let address = listener.local_addr().expect("read API endpoint");
@@ -100,6 +981,17 @@ fn disabled_optional_capabilities_never_launch_or_register_routes() {
         .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
         .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
         .env("YUNXI_NEXT_MEMORY_ENABLED", "false")
+        .env("YUNXI_NEXT_STORAGE_ENABLED", "false")
+        .env("YUNXI_NEXT_COMPANION_ENABLED", "false")
+        .env("YUNXI_NEXT_MAILBOX_ENABLED", "false")
+        .env("YUNXI_NEXT_SCHEDULER_ENABLED", "false")
+        .env("YUNXI_NEXT_SHELL_ENABLED", "false")
+        .env("YUNXI_NEXT_PATCH_ENABLED", "false")
+        .env("YUNXI_NEXT_FILES_ENABLED", "false")
+        .env("YUNXI_NEXT_MCP_ENABLED", "false")
+        .env("YUNXI_NEXT_SKILLS_ENABLED", "false")
+        .env("YUNXI_NEXT_MCP_COMMAND", "this-command-must-not-launch")
+        .env("YUNXI_NEXT_SKILLS_PLUGIN", "this-plugin-must-not-launch")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

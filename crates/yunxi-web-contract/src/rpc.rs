@@ -712,11 +712,8 @@ mod tests {
             request
         );
 
-        let response = ServerResponse::new(
-            rpc_id(),
-            RpcResult::success(json!({ "items": [] })),
-        )
-        .expect("response");
+        let response = ServerResponse::new(rpc_id(), RpcResult::success(json!({ "items": [] })))
+            .expect("response");
         let encoded = serde_json::to_value(&response).expect("serialize response");
         assert_eq!(encoded["type"], "server-response");
         assert_eq!(

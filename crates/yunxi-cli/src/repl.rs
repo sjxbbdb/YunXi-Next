@@ -70,6 +70,7 @@ where
                 writeln!(output, "/patch <file>  queue a patch file for approval")?;
                 writeln!(output, "/approve  approve the pending action")?;
                 writeln!(output, "/deny  deny the pending action")?;
+                writeln!(output, "/cancel  cancel the pending model action")?;
                 writeln!(output, "/quit    exit YunXi")?;
             }
             "/status" => {
@@ -173,6 +174,7 @@ fn parse_management_command(value: &str) -> Result<Option<ManagementCommand>, St
         ["/patch"] => Err("usage: /patch <patch-file>".to_string()),
         ["/approve"] => Ok(Some(ManagementCommand::ApproveAction)),
         ["/deny"] => Ok(Some(ManagementCommand::DenyAction)),
+        ["/cancel"] => Ok(Some(ManagementCommand::CancelAction)),
         _ => Ok(None),
     }
 }
@@ -186,8 +188,13 @@ fn apply_management_result<W: Write>(
         *history = replacement;
         trim_history(history);
     }
+    history.extend(result.append_history);
+    trim_history(history);
     for line in result.lines {
         writeln!(output, "{line}")?;
+    }
+    if let Some(reply) = result.assistant_reply {
+        writeln!(output, "\nyunxi> {reply}")?;
     }
     Ok(())
 }

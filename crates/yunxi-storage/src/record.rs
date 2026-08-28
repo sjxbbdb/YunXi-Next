@@ -31,6 +31,26 @@ pub(crate) struct StoredSession {
 }
 
 impl StoredSession {
+    pub(crate) fn empty(cwd: PathBuf) -> Result<Self, String> {
+        let now = now_millis();
+        let session = Self {
+            schema_version: SESSION_SCHEMA_VERSION,
+            id: generate_id(now),
+            cwd,
+            messages: Vec::new(),
+            provider: None,
+            model: None,
+            parent_id: None,
+            title: "untitled session".to_string(),
+            archived: false,
+            pinned: false,
+            created_at_millis: now,
+            updated_at_millis: now,
+        };
+        session.validate()?;
+        Ok(session)
+    }
+
     pub(crate) fn new(cwd: PathBuf, user: &str, assistant: &str) -> Result<Self, String> {
         let now = now_millis();
         let session = Self {

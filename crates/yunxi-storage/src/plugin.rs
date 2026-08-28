@@ -7,9 +7,10 @@ use std::time::Duration;
 use yunxi_protocol::{
     CapabilityDescriptor, CapabilityError, HostMessage, InvocationCodecError, InvocationResponse,
     PluginMessage, ProtocolError, STORAGE_SESSIONS_APPEND_OPERATION,
-    STORAGE_SESSIONS_LIST_OPERATION, STORAGE_SESSIONS_LOAD_OPERATION,
-    STORAGE_SESSIONS_MUTATE_OPERATION, SessionAppendRequest, SessionListRequest,
-    SessionLoadRequest, SessionMutationRequest, capabilities, connect_plugin,
+    STORAGE_SESSIONS_CREATE_OPERATION, STORAGE_SESSIONS_LIST_OPERATION,
+    STORAGE_SESSIONS_LOAD_OPERATION, STORAGE_SESSIONS_MUTATE_OPERATION, SessionAppendRequest,
+    SessionCreateRequest, SessionListRequest, SessionLoadRequest, SessionMutationRequest,
+    capabilities, connect_plugin,
 };
 
 use crate::{SessionStore, StorageError};
@@ -46,6 +47,18 @@ pub fn run_storage_plugin() -> Result<(), StoragePluginError> {
                     continue;
                 }
                 let response = match request.operation() {
+                    STORAGE_SESSIONS_CREATE_OPERATION => request
+                        .decode_payload::<SessionCreateRequest>()
+                        .map_err(StoragePluginError::Invocation)
+                        .and_then(|payload| {
+                            SessionStore::from_grant(payload.grant())
+                                .and_then(|store| store.create(&payload))
+                                .map_err(StoragePluginError::Storage)
+                        })
+                        .and_then(|result| {
+                            InvocationResponse::encode(request_id, &result)
+                                .map_err(StoragePluginError::Invocation)
+                        }),
                     STORAGE_SESSIONS_APPEND_OPERATION => request
                         .decode_payload::<SessionAppendRequest>()
                         .map_err(StoragePluginError::Invocation)

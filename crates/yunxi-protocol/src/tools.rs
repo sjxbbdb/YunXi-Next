@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::WorkspaceGrant;
+use crate::{NetworkGrant, SecretGrant, WorkspaceGrant};
 
 pub const TOOL_SHELL_EXECUTE_OPERATION: &str = "execute";
 pub const TOOL_PATCH_APPLY_OPERATION: &str = "apply";
@@ -21,6 +21,10 @@ pub struct ActionGrant {
     approval: ActionApproval,
     allow_write: bool,
     allow_network: bool,
+    #[serde(default, skip_serializing_if = "NetworkGrant::is_empty")]
+    network: NetworkGrant,
+    #[serde(default, skip_serializing_if = "SecretGrant::is_empty")]
+    secrets: SecretGrant,
     timeout_millis: u64,
     max_output_bytes: usize,
 }
@@ -35,6 +39,8 @@ impl ActionGrant {
             },
             allow_write: false,
             allow_network: false,
+            network: NetworkGrant::none(),
+            secrets: SecretGrant::empty(),
             timeout_millis: DEFAULT_ACTION_TIMEOUT_MILLIS,
             max_output_bytes: DEFAULT_ACTION_OUTPUT_BYTES,
         }
@@ -53,6 +59,8 @@ impl ActionGrant {
             },
             allow_write: false,
             allow_network: false,
+            network: NetworkGrant::none(),
+            secrets: SecretGrant::empty(),
             timeout_millis: DEFAULT_ACTION_TIMEOUT_MILLIS,
             max_output_bytes: DEFAULT_ACTION_OUTPUT_BYTES,
         }
@@ -65,6 +73,25 @@ impl ActionGrant {
 
     pub fn with_network(mut self, allow: bool) -> Self {
         self.allow_network = allow;
+        if !allow {
+            self.network = NetworkGrant::none();
+        }
+        self
+    }
+
+    /// Adds an exact network authority to this action.
+    ///
+    /// The old `with_network(true)` API remains available for legacy tools,
+    /// but MCP HTTP calls use this scoped form.
+    pub fn with_network_grant(mut self, grant: NetworkGrant) -> Self {
+        self.allow_network = !grant.is_empty();
+        self.network = grant;
+        self
+    }
+
+    /// Adds secret references without carrying any secret values.
+    pub fn with_secret_grant(mut self, grant: SecretGrant) -> Self {
+        self.secrets = grant;
         self
     }
 
@@ -103,6 +130,18 @@ impl ActionGrant {
 
     pub fn allow_network(&self) -> bool {
         self.allow_network
+    }
+
+    pub fn network_grant(&self) -> &NetworkGrant {
+        &self.network
+    }
+
+    pub fn secret_grant(&self) -> &SecretGrant {
+        &self.secrets
+    }
+
+    pub fn allows_network_url(&self, url: &str) -> bool {
+        self.allow_network && self.network.allows_url(url)
     }
 
     pub fn timeout_millis(&self) -> u64 {
@@ -144,6 +183,15 @@ impl ActionGrant {
         if self.allow_write && !self.workspace.allows_workspace_write() {
             return Err(ActionGrantError::WorkspaceWriteNotGranted);
         }
+        self.network
+            .validate()
+            .map_err(|error| ActionGrantError::InvalidNetworkGrant(error.to_string()))?;
+        self.secrets
+            .validate()
+            .map_err(|error| ActionGrantError::InvalidSecretGrant(error.to_string()))?;
+        if !self.allow_network && !self.network.is_empty() {
+            return Err(ActionGrantError::NetworkGrantNotEnabled);
+        }
         Ok(())
     }
 }
@@ -157,6 +205,9 @@ pub enum ActionGrantError {
     InvalidTimeout { value: u64, maximum: u64 },
     InvalidOutputLimit { value: usize, maximum: usize },
     WorkspaceWriteNotGranted,
+    InvalidNetworkGrant(String),
+    InvalidSecretGrant(String),
+    NetworkGrantNotEnabled,
 }
 
 impl std::fmt::Display for ActionGrantError {
@@ -178,6 +229,15 @@ impl std::fmt::Display for ActionGrantError {
             ),
             Self::WorkspaceWriteNotGranted => {
                 formatter.write_str("workspace write permission was not granted")
+            }
+            Self::InvalidNetworkGrant(message) => {
+                write!(formatter, "network grant is invalid: {message}")
+            }
+            Self::InvalidSecretGrant(message) => {
+                write!(formatter, "secret grant is invalid: {message}")
+            }
+            Self::NetworkGrantNotEnabled => {
+                formatter.write_str("network scope was supplied without network permission")
             }
         }
     }
@@ -384,5 +444,27 @@ mod tests {
         assert!(grant.workspace().allows_workspace_write());
         assert_eq!(grant.timeout_millis(), 5000);
         assert_eq!(grant.max_output_bytes(), 1024);
+    }
+
+    #[test]
+    fn action_grant_keeps_network_and_secret_authority_scoped() {
+        let network = NetworkGrant::for_url("https://api.example.test/mcp").expect("network");
+        let secrets = SecretGrant::one("mcp/provider-token").expect("secret");
+        let grant = ActionGrant::approved(
+            WorkspaceGrant::read_only("C:\\workspace"),
+            "C:\\workspace",
+            "ticket-1",
+        )
+        .with_network_grant(network.clone())
+        .with_secret_grant(secrets.clone());
+
+        grant.validate().expect("scoped grant is valid");
+        assert!(grant.allows_network_url("https://api.example.test/mcp"));
+        assert!(!grant.allows_network_url("https://other.example.test/mcp"));
+        assert_eq!(grant.network_grant(), &network);
+        assert_eq!(grant.secret_grant(), &secrets);
+        let wire = serde_json::to_string(&grant).expect("serialize scoped grant");
+        assert!(wire.contains("mcp/provider-token"));
+        assert!(!wire.contains("secret-value"));
     }
 }
