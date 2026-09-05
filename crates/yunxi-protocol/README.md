@@ -15,8 +15,8 @@ a child with its host; it must not be treated as authentication or sandboxing.
 
 Current typed contracts cover model chat, context, persona, memory recall and
 write, sessions, companion policy, encrypted mailbox operations, and proactive
-scheduling. Capability versions travel in both the readiness declaration and
-every invocation frame.
+scheduling, plus bounded multi-agent graph/turn coordination. Capability
+versions travel in both the readiness declaration and every invocation frame.
 
 | Path | Responsibility |
 | --- | --- |

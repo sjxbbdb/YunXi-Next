@@ -41,6 +41,7 @@ pub mod capabilities {
     pub const TOOL_SKILLS: &str = "tool.skills";
     pub const TOOL_SKILLS_VERSION: u32 = 1;
     pub const TOOL_MULTI_AGENT: &str = "tool.multi-agent";
+    pub const TOOL_MULTI_AGENT_VERSION: u32 = 1;
     pub const CHANNEL_WEIXIN: &str = "channel.weixin";
     pub const VOICE_TRANSCRIBE: &str = "voice.transcribe";
     pub const VOICE_SYNTHESIZE: &str = "voice.synthesize";

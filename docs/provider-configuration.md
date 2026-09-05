@@ -57,7 +57,7 @@ them to this repository.
 
 ## Capability Switches
 
-The twelve optional capabilities can be changed in Web Settings > Plugins.
+The thirteen optional capabilities can be changed in Web Settings > Plugins.
 Those choices are written to `YUNXI_NEXT_HOME\settings.json` (or the normal
 `~/.yunxi-next/settings.json` state root), and take effect on the next Host
 start. The following environment variables have higher precedence than the
@@ -77,6 +77,7 @@ stored document, so they remain the operator, CI, and recovery override.
 | `YUNXI_NEXT_FILES_ENABLED` | `false` | Launch read-only `tool.files@1` |
 | `YUNXI_NEXT_MCP_ENABLED` | `false` | Launch the configured Host-approved `tool.mcp@1` bridge |
 | `YUNXI_NEXT_SKILLS_ENABLED` | `false` | Launch read-only `tool.skills@1` discovery and context |
+| `YUNXI_NEXT_MULTI_AGENT_ENABLED` | `false` | Launch isolated `tool.multi-agent@1` coordination and child-model turns |
 | `YUNXI_NEXT_COMPANION_TOOL_REQUESTS` | `false` | Permit scheduler plans that ask the user to approve a tool; never executes it |
 
 The Next persona, memory, and companion variables take precedence over legacy
@@ -86,7 +87,7 @@ When memory is enabled while persona expression is disabled, the persona
 process runs only as the safety wrapper for memory context. A disabled
 capability is not launched and has no catalog route.
 
-The settings document accepts only the twelve known boolean fields, is capped
+The settings document accepts only the thirteen known boolean fields, is capped
 at 64 KiB, and uses revision-fenced same-directory replacement. It does not
 store provider credentials, executable paths, MCP secrets, or arbitrary plugin
 configuration. The Model capability is required and is not part of this
@@ -98,7 +99,8 @@ Each optional built-in executable also has a development-only path override:
 `YUNXI_NEXT_COMPANION_PLUGIN`, `YUNXI_NEXT_MAILBOX_PLUGIN`,
 `YUNXI_NEXT_SCHEDULER_PLUGIN`, `YUNXI_NEXT_SHELL_PLUGIN`,
 `YUNXI_NEXT_PATCH_PLUGIN`, `YUNXI_NEXT_FILES_PLUGIN`,
-`YUNXI_NEXT_MCP_PLUGIN`, and `YUNXI_NEXT_SKILLS_PLUGIN`.
+`YUNXI_NEXT_MCP_PLUGIN`, `YUNXI_NEXT_SKILLS_PLUGIN`, and
+`YUNXI_NEXT_MULTI_AGENT_PLUGIN`.
 
 When MCP is enabled, stdio remains the default. Configure one direct command;
 the command is not parsed by a shell and its child environment is cleared
@@ -158,6 +160,14 @@ Each immediate child directory may contain `SKILL.md` and an optional
 `tools.json`. Tool entries are validated declarations only. They are exposed to
 the model as `skill.<id>.<tool>`, but execution is disabled and does not request
 approval in this phase.
+
+When Multi-agent is enabled, `agent.spawn` and `agent.message` require Host
+approval. The coordinator stores bounded graph, transcript, budget, and event
+state under the active workspace's `.yunxi-next/multi-agent` directory. Each
+child turn uses a separate Model plugin process and receives no parent tool
+catalog. The current baseline executes child turns synchronously; stored
+interrupts take effect between turns and do not yet cancel an in-flight HTTP
+request.
 
 `YUNXI_NEXT_HOME` selects the global YunXi Next state root for settings and
 memory. The

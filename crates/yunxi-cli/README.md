@@ -23,7 +23,7 @@ Use `web --bind 127.0.0.1:0` to request an available local port. Closing its
 standard input shuts down the shared Host explicitly and lets all plugin
 children exit through their normal shutdown path. The command serves the
 embedded pinned dsh workbench with text chat, history, model projection, and
-Host approvals. Settings > Plugins exposes the twelve optional capability
+Host approvals. Settings > Plugins exposes the thirteen optional capability
 switches. Writes are revision-fenced, persisted under `YUNXI_NEXT_HOME`, and
 applied only when the Host restarts; the required Model plugin cannot be
 disabled.
@@ -37,7 +37,10 @@ cancellation. When Files is enabled, read-only search and view calls run with a
 workspace-read grant and do not request approval. Tool failures are returned to
 the model and surfaced as a deduplicated CLI warning. When Skills is enabled,
 bounded workspace-local instructions are injected and metadata-only tools are
-projected without granting execution. Use `--plugin <PATH>` to
+projected without granting execution. When Multi-agent is enabled, approved
+spawn/message calls launch a separate Model plugin process for each bounded
+child turn; list and stored-state interruption remain coordinator operations.
+Use `--plugin <PATH>` to
 launch a separate compatible model-plugin executable.
 Provider setup is documented in
 [`../../docs/provider-configuration.md`](../../docs/provider-configuration.md).

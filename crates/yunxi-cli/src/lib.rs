@@ -26,6 +26,7 @@ pub const INTERNAL_COMPANION_PLUGIN_ARGUMENT: &str = "__companion-plugin";
 pub const INTERNAL_MAILBOX_PLUGIN_ARGUMENT: &str = "__mailbox-plugin";
 pub const INTERNAL_CONTEXT_PLUGIN_ARGUMENT: &str = "__context-plugin";
 pub const INTERNAL_MEMORY_PLUGIN_ARGUMENT: &str = "__memory-plugin";
+pub const INTERNAL_MULTI_AGENT_PLUGIN_ARGUMENT: &str = "__multi-agent-plugin";
 pub const INTERNAL_PERSONA_PLUGIN_ARGUMENT: &str = "__persona-plugin";
 pub const INTERNAL_SCHEDULER_PLUGIN_ARGUMENT: &str = "__scheduler-plugin";
 pub const INTERNAL_STORAGE_PLUGIN_ARGUMENT: &str = "__storage-plugin";

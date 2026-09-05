@@ -1,9 +1,9 @@
 # YunXi Next 开发路线图
 
-> 版本：v1.1
-> 基线提交：`86fe5cf`
-> 制定日期：2026-08-22；更新日期：2026-08-24
-> 状态：Phase 3 本地单 Host 基线已完成；dsh 客户端、能力开关持久化和重启应用路径已接入
+> 版本：v1.2
+> 基线提交：`0a73001`
+> 制定日期：2026-08-22；更新日期：2026-08-28
+> 状态：Phase 4 多智能体隔离基线已接入；异步并行和执行中即时中断仍在开发
 
 这份文档是 YunXi Next 后续开发的排序、范围和完成判定。它不是功能愿望
 清单。没有通过本文件规定的验收门槛，能力只能标记为 `planned` 或
@@ -36,11 +36,13 @@ YunXi Next 最终应成为一个以 Rust trusted kernel 为中心、所有业务
 | File search / view | 基础版已接入 | 独立只读进程、`tool.files@1`、workspace read grant、路径和内容大小限制；默认关闭。 |
 | MCP stdio/HTTP bridge | 基础版已接入 | 独立二层进程、MCP initialize/list/call/cancel、JSON/SSE、session id、动态工具投影、Host approval 和崩溃恢复；默认关闭。HTTP 需要显式 network scope，Secret 只通过 reference grant 发放。 |
 | Skills | 基础版已接入 | 独立只读进程、受限发现/上下文、禁用过滤和 metadata-only 动态工具声明；默认关闭。 |
-| Composition | 基础版已接入 | Profile、Bundle、Layer 和插件 inventory 已有；12 个可选能力支持版本化持久化开关，顺序和任意第三方 bundle 配置仍未开放。 |
+| Multi-agent | 基础版已接入 | 独立协调进程、父子图、预算、持久化、恢复和独立子模型进程；默认关闭。当前子回合同步执行，不宣称后台并行或执行中即时中断。 |
+| Composition | 基础版已接入 | Profile、Bundle、Layer 和插件 inventory 已有；13 个可选能力支持版本化持久化开关，顺序和任意第三方 bundle 配置仍未开放。 |
 | Web | Phase 3 本地基线已接入 | 固定 dsh Web 客户端、session create/history/prompt、审批响应、mux/host 事件、健康/inventory/session projection 和 Settings > Plugins 能力开关共用同一个 CLI Host；当前仍是 loopback、单 Host、完整响应模式。 |
 
 当前默认开关由 `yunxi-settings` 定义：Context、Persona、Storage 开启；Memory、
-Companion、Mailbox、Scheduler、Shell、Patch、Files、MCP、Skills 关闭。Web 写入
+Companion、Mailbox、Scheduler、Shell、Patch、Files、MCP、Skills、Multi-agent
+关闭。Web 写入
 `YUNXI_NEXT_HOME\settings.json` 并在下一次 Host 启动时应用；显式环境变量拥有
 更高优先级，作为 CI 和故障恢复入口。
 
@@ -131,8 +133,21 @@ dsh 源码和 MIT 版权声明必须单独记录，不能混入 Rust Kernel 代�
 **交付物：** Agent spawn/list/message/interrupt、父子图、最大深度、预算、
 取消传播、子会话持久化和状态事件。
 
+**当前基线：** `P4-01` 已冻结 `tool.multi-agent@1` typed contract，并由
+`yunxi-multi-agent` 独立进程持久化父子图、转录、预算和有界事件；协调进程重启
+只把遗留的 Running 分支标记为失败。`P4-02` 已把 `agent.spawn/list/message/interrupt`
+接入模型工具目录，spawn/message 复用 Host approval，每次子回合启动单独的 Model
+plugin 进程，且不向子进程发放父会话工具目录或 Provider credential 协议字段。
+
+**待完成：** `P4-03` 实现后台并行 worker、执行中子模型请求的真实取消、Web
+分支/事件视图，以及受限的子 Agent 工具 grant 和模型选择。当前 `interrupt` 在
+回合之间递归更新持久化状态，不能终止已经发出的同步 HTTP 请求。
+
 **退出门槛：** 子 Agent 不能继承超出父任务的 grant；子 Agent 崩溃、超时或
 取消只结束对应分支；主会话、Kernel 和同级 Agent 仍可继续工作。
+
+当前已通过 grant 子集、失败分支和同级存活测试，但在执行中即时取消和并行调度
+完成前，Phase 4 仍保持 `baseline`，不标记为完整 `integrated`。
 
 ### Phase 5：Voice 和 Weixin Channel
 
@@ -230,6 +245,10 @@ Phase 0 和 Phase 1 已按下列顺序完成。后续仍保持一次只推进一
    会话恢复、插件状态、Host 事件和审批。
 6. `P3-05` 已完成：新增 `yunxi-settings`，接入 `settings.describe/update/replace/mutate`
    和 dsh Plugins 能力开关；写入只决定下一次 Host 组合，不热卸载运行中插件。
+7. `P4-01` 已完成：冻结多智能体协议、grant 子集、预算、父子图、持久化和重启恢复。
+8. `P4-02` 基线已完成：接入 Host 审批、独立子 Model 进程及
+   `agent.spawn/list/message/interrupt` 模型工具。
+9. `P4-03` 进行中：增加后台并行、执行中即时取消、Web 分支视图和受限子工具授权。
 
 ### 执行记录：2026-08-23
 
@@ -250,7 +269,15 @@ Phase 0 和 Phase 1 已按下列顺序完成。后续仍保持一次只推进一
 | `P3-02` 独立 HTTP/SSE carrier | 已完成 | `yunxi-web-gateway` 新增有界 HTTP/1.1 parser、固定 `/api` unary 路由、JSON content-type/size/framing 校验、`events.mux`/`events.host` SSE carrier、`ShutdownToken` 和 TCP serving helper；9 项 carrier 集成测试覆盖 malformed envelope、channel isolation、wire bytes 和 loopback TCP；Gateway 与 CLI 定向 Clippy 通过 |
 | `P3-03` WebHost session RPC 与审批事件 | 已完成 | `WebHost` 接入 `session.create/history/prompt`、`POST /api/respond`、审批 rpcId 回显校验、session/event 与 approval requested/resolved 事件；carrier 测试覆盖 session 路由、receipt、坏响应和既有 HTTP 边界 |
 | `P3-04` dsh Web 服务入口与共享 Host 生命周期 | 已完成 | `yunxi-next web` 默认 loopback 绑定、`--bind` 参数、标准输入 EOF 优雅关闭；固定上游 commit 的 dsh shell、字体、语言包和 42 个客户端 bundle 由 Rust executable 嵌入；YunXi adapter 只替换 bounded SSE carrier，并保留真实 session、history、approval 和 inventory 路径 |
-| `P3-05` 持久化能力设置 | 已完成 | `yunxi-settings` 提供 64 KiB 上限、严格 schema、revision fence、备份恢复和同目录原子替换；WebHost 只允许 `yunxi-capabilities` 的 12 个已知布尔字段，成功写入发送 Host event；dsh Plugins 页显示 restart-scoped switch，Model 保持只读；真实 Host 重启测试验证 disabled-no-launch、无路由和聊天存活 |
+| `P3-05` 持久化能力设置 | 已完成 | `yunxi-settings` 提供 64 KiB 上限、严格 schema、revision fence、备份恢复和同目录原子替换；WebHost 只允许 `yunxi-capabilities` 的 13 个已知布尔字段，成功写入发送 Host event；dsh Plugins 页显示 restart-scoped switch，Model 保持只读；真实 Host 重启测试验证 disabled-no-launch、无路由和聊天存活 |
+
+### 执行记录：2026-08-28
+
+| 项目 | 状态 | 证据 |
+| --- | --- | --- |
+| `P4-01` 多智能体协议与协调进程 | 已完成 | 新增 `tool.multi-agent@1`、`AgentDelegationGrant`、父子 grant 子集与固定预算；`yunxi-multi-agent` 在 workspace 内持久化图、转录和有界事件，使用备份可恢复原子替换；进程测试覆盖重启恢复且持久化数据不含 Provider credential |
+| `P4-02` Host 工具闭环与子模型隔离 | 基线已完成 | `agent.spawn/list/message/interrupt` 进入有界工具目录；spawn/message 经过既有审批；每个子回合使用单独 Model plugin 进程和独立转录，子失败写入对应分支并保持父模型可继续；禁用矩阵验证不启动、不注册、不暴露工具 |
+| `P4-03` 异步运行与实时取消 | 进行中 | 当前为同步子回合，递归 interrupt 只在回合边界生效；后台并行 worker、执行中进程取消、Web 图视图及受限子工具授权尚未接入 |
 
 本批次已改变 Model 的可选工具运行时行为，但没有把 manifest 声明误当作
 实际 Secret broker 或操作系统沙箱。Phase 1 的文字 Action Path 已完成
@@ -265,7 +292,11 @@ prompt/history/approval RPC、独立 HTTP/SSE carrier、插件 inventory 和持�
 开关均通过同一 Host 路径。设置只包含可选能力布尔值，不能写入 Provider Secret、
 可执行路径或任意插件配置；运行中不热卸载，重启后 disabled 插件不启动且没有路由。
 
+Phase 4 已形成第一版隔离基线：协调状态和子模型都位于受监督的独立进程，
+Agent grant 不能超过父级，单个子模型 API 失败只结束对应分支。当前仍按同步回合
+执行，不具备后台并行和执行中即时取消，因此不能视为多智能体阶段全部完成。
+
 这不代表生产 Web 服务已经完成。当前没有认证和非 loopback 监听策略，WebHost
 仍是文本内容、单实例活动会话、完整响应和轮询式事件，不宣称 token streaming、
-多会话并发或真正多客户端 fan-out。后续进入 Phase 4 前仍应保持旧版 fallback、
+多会话并发或真正多客户端 fan-out。继续推进 Phase 4 时仍应保持旧版 fallback、
 文字 CLI 和 trusted kernel 的独立验证。

@@ -35,6 +35,7 @@ export const inject = ['slots', 'locale', 'remote', 'remote.pluginInventory', 's
 const CAPABILITY_FIELDS: readonly CapabilityField[] = [
   'context', 'persona', 'memory', 'companion', 'storage', 'mailbox',
   'scheduler', 'shell', 'patch', 'files', 'mcp', 'skills',
+  'multi_agent',
 ]
 
 /** Accept only the complete boolean section supplied by the Rust settings owner. */

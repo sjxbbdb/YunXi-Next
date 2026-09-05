@@ -65,6 +65,10 @@ The optional MCP bridge discovers one external stdio Server and projects its
 tools behind Host approval. The optional Skills process discovers bounded
 workspace-local `SKILL.md` files, injects their instructions, and projects
 `tools.json` entries as metadata-only declarations that cannot execute yet.
+The optional Multi-agent coordinator provides bounded agent graphs and
+Host-approved child turns, each using a separate Model plugin process. Its
+current baseline is synchronous; background parallelism and live interruption
+remain Phase 4 work.
 
 API failures are returned per request and do not terminate the model plugin.
 An optional capability failure produces a visible warning and falls back to

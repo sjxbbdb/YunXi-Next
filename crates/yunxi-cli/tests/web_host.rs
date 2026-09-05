@@ -185,6 +185,14 @@ fn capability_settings_persist_and_apply_only_after_host_restart() {
     let capabilities = settings_namespace(&described);
     assert_eq!(capabilities["revision"], 0);
     assert_eq!(capabilities["value"]["context"], true);
+    assert_eq!(capabilities["value"]["multi_agent"], false);
+    assert_eq!(
+        capabilities["value"]
+            .as_object()
+            .expect("capability values")
+            .len(),
+        13
+    );
     assert_eq!(capabilities["applies"], "restart");
     let encoded_description = described.to_string();
     assert!(!encoded_description.contains("fixture-secret"));
@@ -420,7 +428,8 @@ impl WebChild {
             .env("YUNXI_NEXT_PATCH_ENABLED", "false")
             .env("YUNXI_NEXT_FILES_ENABLED", "false")
             .env("YUNXI_NEXT_MCP_ENABLED", "false")
-            .env("YUNXI_NEXT_SKILLS_ENABLED", "false");
+            .env("YUNXI_NEXT_SKILLS_ENABLED", "false")
+            .env("YUNXI_NEXT_MULTI_AGENT_ENABLED", "false");
         Self::start(command)
     }
 

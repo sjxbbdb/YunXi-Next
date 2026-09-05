@@ -1,0 +1,22 @@
+[package]
+name = "yunxi-multi-agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+yunxi-protocol = { path = "../yunxi-protocol" }
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "yunxi-multi-agent"
+path = "src/bin/yunxi-multi-agent.rs"
+
+[dev-dependencies]
+yunxi-kernel = { path = "../yunxi-kernel" }
+yunxi-plugin-host = { path = "../yunxi-plugin-host" }

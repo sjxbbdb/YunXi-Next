@@ -18,10 +18,11 @@ pub enum CapabilitySetting {
     Files,
     Mcp,
     Skills,
+    MultiAgent,
 }
 
 impl CapabilitySetting {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Context,
         Self::Persona,
         Self::Memory,
@@ -34,6 +35,7 @@ impl CapabilitySetting {
         Self::Files,
         Self::Mcp,
         Self::Skills,
+        Self::MultiAgent,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -50,6 +52,7 @@ impl CapabilitySetting {
             Self::Files => "files",
             Self::Mcp => "mcp",
             Self::Skills => "skills",
+            Self::MultiAgent => "multi_agent",
         }
     }
 
@@ -76,6 +79,7 @@ impl CapabilitySetting {
             Self::Files => ("YUNXI_NEXT_FILES_ENABLED", None),
             Self::Mcp => ("YUNXI_NEXT_MCP_ENABLED", None),
             Self::Skills => ("YUNXI_NEXT_SKILLS_ENABLED", None),
+            Self::MultiAgent => ("YUNXI_NEXT_MULTI_AGENT_ENABLED", None),
         }
     }
 }
@@ -107,6 +111,8 @@ pub struct CapabilityOverrides {
     mcp: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     skills: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    multi_agent: Option<bool>,
 }
 
 impl CapabilityOverrides {
@@ -124,6 +130,7 @@ impl CapabilityOverrides {
             CapabilitySetting::Files => self.files,
             CapabilitySetting::Mcp => self.mcp,
             CapabilitySetting::Skills => self.skills,
+            CapabilitySetting::MultiAgent => self.multi_agent,
         }
     }
 
@@ -157,6 +164,7 @@ impl CapabilityOverrides {
             CapabilitySetting::Files => &mut self.files,
             CapabilitySetting::Mcp => &mut self.mcp,
             CapabilitySetting::Skills => &mut self.skills,
+            CapabilitySetting::MultiAgent => &mut self.multi_agent,
         }
     }
 }
@@ -175,6 +183,7 @@ pub struct CapabilitySwitches {
     pub files: bool,
     pub mcp: bool,
     pub skills: bool,
+    pub multi_agent: bool,
 }
 
 impl Default for CapabilitySwitches {
@@ -203,6 +212,9 @@ impl CapabilitySwitches {
             files: overrides.get(CapabilitySetting::Files).unwrap_or(false),
             mcp: overrides.get(CapabilitySetting::Mcp).unwrap_or(false),
             skills: overrides.get(CapabilitySetting::Skills).unwrap_or(false),
+            multi_agent: overrides
+                .get(CapabilitySetting::MultiAgent)
+                .unwrap_or(false),
         }
     }
 
@@ -235,6 +247,7 @@ impl CapabilitySwitches {
             CapabilitySetting::Files => self.files,
             CapabilitySetting::Mcp => self.mcp,
             CapabilitySetting::Skills => self.skills,
+            CapabilitySetting::MultiAgent => self.multi_agent,
         }
     }
 
@@ -252,6 +265,7 @@ impl CapabilitySwitches {
             CapabilitySetting::Files => self.files = value,
             CapabilitySetting::Mcp => self.mcp = value,
             CapabilitySetting::Skills => self.skills = value,
+            CapabilitySetting::MultiAgent => self.multi_agent = value,
         }
     }
 }

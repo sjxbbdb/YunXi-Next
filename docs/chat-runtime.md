@@ -24,6 +24,8 @@ yunxi-next CLI process
     +--> yunxi-tool-files process --> read-only workspace search and reads
     +--> yunxi-tool-mcp process --> external MCP Server over stdio or HTTP/SSE
     +--> yunxi-tool-skills process --> bounded Skill metadata and instructions
+    +--> yunxi-multi-agent process --> graph, budgets, transcripts, and events
+    |       `--> one supervised model plugin process per child turn
     `--> model plugin process --> HTTPS --> model API
 ```
 
@@ -49,7 +51,7 @@ legacy `yunxi` command untouched.
 The model plugin is required. Context, persona, and session storage are enabled
 by default. Memory and companion behavior are disabled by default to preserve
 the legacy opt-in policy; mailbox and scheduler follow the companion switch
-unless explicitly overridden. Files, MCP, and Skills are also disabled by
+unless explicitly overridden. Files, MCP, Skills, and Multi-agent are also disabled by
 default. A disabled capability is never launched or registered.
 
 The correlation token prevents accidental attachment to the wrong launched
@@ -71,7 +73,7 @@ For each turn the CLI uses protocol-v2 `Invoke` frames in this order:
    optional follow-up guidance.
 6. `model.chat@1:complete` receives those system messages followed by rolling
    conversation history and the current user message. When Shell, Patch, Files,
-   MCP, or Skills is enabled, the request also carries a bounded tool catalog.
+   MCP, Skills, or Multi-agent is enabled, the request also carries a bounded tool catalog.
    MCP descriptors are projected as `mcp.fixture.echo`; metadata-only Skill
    descriptors are projected as `skill.review.check`.
 
@@ -92,6 +94,16 @@ Shell calls start with read-only, no-network authority; Patch calls receive the
 separate workspace-write authority. Manual `/shell` and `/patch` remain
 available as diagnostic fallback commands.
 
+Multi-agent exposes `agent.spawn`, `agent.list`, `agent.message`, and
+`agent.interrupt`. Spawn and message pause at the same Host approval boundary.
+The coordinator enforces parent-child grant subsets and fixed agent/depth/turn
+budgets, then persists graph state beneath `.yunxi-next/multi-agent`. Each
+approved child turn launches a new isolated Model plugin process with the
+child transcript, no parent tool catalog, and an explicit instruction not to
+act outside that delegated task. The Host shuts that process down after the
+reply. List reads bounded state; interrupt recursively marks the selected
+branch and descendants without changing siblings.
+
 After a successful model response, the host invokes these side-effect routes in
 order when enabled:
 
@@ -107,7 +119,8 @@ The model path currently uses complete responses rather than token streaming.
 The REPL keeps at most 32 user/assistant turns in working memory. `/clear`
 clears only that working context; `/new` starts a new persistent session, and
 `/resume <id>` restores a saved conversation. Legacy sessions are read-only and
-are imported into a new Next record on the first appended turn.
+are imported into a new Next record on the first appended turn. Multi-agent
+state follows the active Next session id across new and resumed sessions.
 
 API credentials are read from inherited environment variables. The CLI
 preflights configuration for useful startup errors, but credentials are never
@@ -140,6 +153,13 @@ serialized into local protocol frames or diagnostic output.
 - A Skills discovery or context failure removes its route and dynamic Skill
   declarations. The current model turn continues without Skill context; no
   metadata-only declaration can execute a command or acquire a grant.
+- A child model API failure is recorded only on that agent branch and returned
+  to the main model as a tool result. The parent model route, kernel, coordinator,
+  and sibling agent records remain available.
+- Coordinator restart marks only stale Running branches failed. The current
+  synchronous baseline applies recursive interruption between child turns; it
+  cannot yet kill an already in-flight child model HTTP request or run sibling
+  turns in parallel.
 - Automatic restart is intentionally absent. A future policy must be bounded,
   observable, and owned above the kernel primitive.
 

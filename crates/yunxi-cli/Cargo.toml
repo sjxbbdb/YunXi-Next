@@ -6,6 +6,7 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+serde.workspace = true
 serde_json.workspace = true
 yunxi-companion = { path = "../yunxi-companion" }
 yunxi-companion-mailbox = { path = "../yunxi-companion-mailbox" }
@@ -13,6 +14,7 @@ yunxi-composition = { path = "../yunxi-composition" }
 yunxi-context = { path = "../yunxi-context" }
 yunxi-kernel = { path = "../yunxi-kernel" }
 yunxi-memory = { path = "../yunxi-memory" }
+yunxi-multi-agent = { path = "../yunxi-multi-agent" }
 yunxi-model-openai = { path = "../yunxi-model-openai" }
 yunxi-persona = { path = "../yunxi-persona" }
 yunxi-plugin-host = { path = "../yunxi-plugin-host" }

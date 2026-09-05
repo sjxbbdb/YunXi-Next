@@ -156,8 +156,8 @@ window.__ModuleLoader__.load({
 			return matches.length === 1 ? matches[0] : void 0;
 		}
 		//#endregion
-		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-1b724c4edaa94137b565704a3acef4c3\packages\client\ui-deliverables\src\client\ProducedFiles.module.css.mjs
-		const css = ".qRmPKa_root{grid-template-columns:max-content minmax(0,1fr);align-items:center;gap:6px 8px;margin-top:16px;font-size:13px;line-height:22px;display:grid;position:relative}.qRmPKa_label{color:var(--dsw-alias-label-tertiary);grid-area:1/1}.qRmPKa_row{flex-wrap:nowrap;grid-area:1/2;align-items:center;gap:8px;min-width:0;display:flex;overflow:hidden}.qRmPKa_file{text-overflow:ellipsis;white-space:nowrap;background:var(--dsw-alias-interactive-bg-hover);max-width:320px;color:var(--dsw-alias-label-secondary);font:inherit;cursor:pointer;border:none;border-radius:6px;flex:none;margin:0;padding:0 8px;overflow:hidden}.qRmPKa_file:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}.qRmPKa_file:focus-visible,.qRmPKa_showFolder:focus-visible{box-shadow:inset 0 0 0 2px var(--dsw-alias-border-l3);outline:none}.qRmPKa_more{white-space:nowrap;color:var(--dsw-alias-label-tertiary);flex:none}.qRmPKa_showFolder{color:var(--dsw-alias-label-tertiary);font:inherit;cursor:pointer;background:0 0;border:none;border-radius:4px;grid-area:2/2;justify-self:start;margin:0;padding:0 2px;line-height:20px}.qRmPKa_showFolder:hover{color:var(--dsw-alias-label-secondary);text-decoration:underline}.qRmPKa_measure{visibility:hidden;pointer-events:none;contain:strict;width:0;height:0;position:absolute;overflow:hidden}.qRmPKa_probe{width:max-content;position:absolute;inset:0 auto auto 0}";
+		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-0a50875c14b34d63b17f6522f5dab19c\packages\client\ui-deliverables\src\client\ProducedFiles.module.css.mjs
+		const css = ".Vj2nwq_root{grid-template-columns:max-content minmax(0,1fr);align-items:center;gap:6px 8px;margin-top:16px;font-size:13px;line-height:22px;display:grid;position:relative}.Vj2nwq_label{color:var(--dsw-alias-label-tertiary);grid-area:1/1}.Vj2nwq_row{flex-wrap:nowrap;grid-area:1/2;align-items:center;gap:8px;min-width:0;display:flex;overflow:hidden}.Vj2nwq_file{text-overflow:ellipsis;white-space:nowrap;background:var(--dsw-alias-interactive-bg-hover);max-width:320px;color:var(--dsw-alias-label-secondary);font:inherit;cursor:pointer;border:none;border-radius:6px;flex:none;margin:0;padding:0 8px;overflow:hidden}.Vj2nwq_file:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}.Vj2nwq_file:focus-visible,.Vj2nwq_showFolder:focus-visible{box-shadow:inset 0 0 0 2px var(--dsw-alias-border-l3);outline:none}.Vj2nwq_more{white-space:nowrap;color:var(--dsw-alias-label-tertiary);flex:none}.Vj2nwq_showFolder{color:var(--dsw-alias-label-tertiary);font:inherit;cursor:pointer;background:0 0;border:none;border-radius:4px;grid-area:2/2;justify-self:start;margin:0;padding:0 2px;line-height:20px}.Vj2nwq_showFolder:hover{color:var(--dsw-alias-label-secondary);text-decoration:underline}.Vj2nwq_measure{visibility:hidden;pointer-events:none;contain:strict;width:0;height:0;position:absolute;overflow:hidden}.Vj2nwq_probe{width:max-content;position:absolute;inset:0 auto auto 0}";
 		const tagId = "@deepseek-ai/dsh-client-ui-deliverables/ProducedFiles.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -167,14 +167,14 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var ProducedFiles_module_css_default = {
-			"file": "qRmPKa_file",
-			"label": "qRmPKa_label",
-			"measure": "qRmPKa_measure",
-			"more": "qRmPKa_more",
-			"probe": "qRmPKa_probe",
-			"root": "qRmPKa_root",
-			"row": "qRmPKa_row",
-			"showFolder": "qRmPKa_showFolder"
+			"file": "Vj2nwq_file",
+			"label": "Vj2nwq_label",
+			"measure": "Vj2nwq_measure",
+			"more": "Vj2nwq_more",
+			"probe": "Vj2nwq_probe",
+			"root": "Vj2nwq_root",
+			"row": "Vj2nwq_row",
+			"showFolder": "Vj2nwq_showFolder"
 		};
 		//#endregion
 		//#region lib/types/client/ProducedFiles.js

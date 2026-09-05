@@ -1688,6 +1688,7 @@ dependencies = [
 name = "yunxi-cli"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "serde_json",
  "yunxi-companion",
  "yunxi-companion-mailbox",
@@ -1696,6 +1697,7 @@ dependencies = [
  "yunxi-kernel",
  "yunxi-memory",
  "yunxi-model-openai",
+ "yunxi-multi-agent",
  "yunxi-persona",
  "yunxi-plugin-host",
  "yunxi-protocol",
@@ -1765,6 +1767,17 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "yunxi-protocol",
+]
+
+[[package]]
+name = "yunxi-multi-agent"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "yunxi-kernel",
+ "yunxi-plugin-host",
  "yunxi-protocol",
 ]
 

@@ -7,8 +7,8 @@ window.__ModuleLoader__.load({
 		let react_jsx_runtime = require("react/jsx-runtime");
 		let react = require("react");
 		let _deepseek_ai_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
-		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-1b724c4edaa94137b565704a3acef4c3\packages\client\ui-skill\src\client\SkillRow.module.css.mjs
-		const css = ".qixuWG_card{flex-direction:column;display:flex}.qixuWG_row{align-items:center;min-width:0;height:24px;display:flex;position:relative;overflow:hidden}.qixuWG_row[data-expandable]{cursor:pointer}.qixuWG_card[data-state=running] .qixuWG_row:after{content:\"\";background:linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--dsw-alias-bg-base) 60%, transparent) 55%, transparent 100%);pointer-events:none;width:300px;animation:2.6s ease-out infinite qixuWG_dsh-skill-row-sweep;position:absolute;inset:0 auto 0 0}@keyframes qixuWG_dsh-skill-row-sweep{0%{left:-300px}90%,to{left:100%}}.qixuWG_leading{width:16px;height:16px;color:var(--dsw-alias-label-tertiary);flex:none;justify-content:center;align-items:center;margin-right:6px;display:inline-flex;position:relative}.qixuWG_chevron{color:var(--dsw-alias-label-secondary)}.qixuWG_iconIdle{opacity:1;transition:opacity .1s;display:inline-flex}.qixuWG_chevronHover{opacity:0;margin:auto;transition:opacity .1s;position:absolute;inset:0}.qixuWG_row:hover .qixuWG_iconIdle{opacity:0}.qixuWG_row:hover .qixuWG_chevronHover{opacity:1}.qixuWG_title{color:var(--dsw-alias-label-secondary);flex:none;font-size:14px;line-height:24px}.qixuWG_separator{background:var(--dsw-alias-label-caption);border-radius:1px;flex:none;width:2px;height:2px;margin:0 8px}.qixuWG_summary{text-overflow:ellipsis;white-space:nowrap;min-width:0;color:var(--dsw-alias-label-tertiary);flex:auto;font-size:14px;line-height:24px;overflow:hidden}.qixuWG_errorSummary{color:var(--dsw-alias-state-error-primary)}.qixuWG_bodyWrap{flex-direction:column;display:flex}.qixuWG_instructionsCard{border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-markdown-code-block);border-radius:12px;flex-direction:column;max-height:260px;margin:4px 0 4px 4px;display:flex;overflow:hidden}.qixuWG_instructionsHeader{border-bottom:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-markdown-code-block-banner);color:var(--dsw-alias-label-caption);text-transform:uppercase;letter-spacing:.04em;flex:none;padding:8px 12px;font-size:11px;font-weight:500;line-height:16px}.qixuWG_instructions{white-space:pre-wrap;overflow-wrap:anywhere;min-height:0;font:var(--dsw-font-markdown-code-block-small);color:var(--dsw-alias-label-secondary);margin:0;padding:10px 12px 12px;overflow:auto}.qixuWG_instructions[data-error]{color:var(--dsw-alias-state-error-primary)}.qixuWG_instructions::-webkit-scrollbar-thumb{background-clip:padding-box;border:2px solid #0000;border-radius:6px}.qixuWG_instructions::-webkit-scrollbar-track{margin:6px 0}.qixuWG_inspectButton{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-secondary);cursor:pointer;opacity:0;border-radius:999px;align-self:flex-start;align-items:center;gap:4px;margin:4px 0 2px 4px;padding:2px 8px;font-size:11px;line-height:16px;transition:opacity .1s;display:inline-flex}.qixuWG_card:hover .qixuWG_inspectButton,.qixuWG_inspectButton:focus-visible{opacity:1}.qixuWG_inspectButton:hover{background:var(--dsw-alias-interactive-bg-hover-solid);color:var(--dsw-alias-label-primary)}.qixuWG_visuallyHidden{clip:rect(0 0 0 0);white-space:nowrap;width:1px;height:1px;position:absolute;overflow:hidden}@media (prefers-reduced-motion:reduce){.qixuWG_card[data-state=running] .qixuWG_row:after{animation:none;display:none}.qixuWG_iconIdle,.qixuWG_chevronHover,.qixuWG_inspectButton{transition:none}}";
+		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-0a50875c14b34d63b17f6522f5dab19c\packages\client\ui-skill\src\client\SkillRow.module.css.mjs
+		const css = ".LRn-uq_card{flex-direction:column;display:flex}.LRn-uq_row{align-items:center;min-width:0;height:24px;display:flex;position:relative;overflow:hidden}.LRn-uq_row[data-expandable]{cursor:pointer}.LRn-uq_card[data-state=running] .LRn-uq_row:after{content:\"\";background:linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--dsw-alias-bg-base) 60%, transparent) 55%, transparent 100%);pointer-events:none;width:300px;animation:2.6s ease-out infinite LRn-uq_dsh-skill-row-sweep;position:absolute;inset:0 auto 0 0}@keyframes LRn-uq_dsh-skill-row-sweep{0%{left:-300px}90%,to{left:100%}}.LRn-uq_leading{width:16px;height:16px;color:var(--dsw-alias-label-tertiary);flex:none;justify-content:center;align-items:center;margin-right:6px;display:inline-flex;position:relative}.LRn-uq_chevron{color:var(--dsw-alias-label-secondary)}.LRn-uq_iconIdle{opacity:1;transition:opacity .1s;display:inline-flex}.LRn-uq_chevronHover{opacity:0;margin:auto;transition:opacity .1s;position:absolute;inset:0}.LRn-uq_row:hover .LRn-uq_iconIdle{opacity:0}.LRn-uq_row:hover .LRn-uq_chevronHover{opacity:1}.LRn-uq_title{color:var(--dsw-alias-label-secondary);flex:none;font-size:14px;line-height:24px}.LRn-uq_separator{background:var(--dsw-alias-label-caption);border-radius:1px;flex:none;width:2px;height:2px;margin:0 8px}.LRn-uq_summary{text-overflow:ellipsis;white-space:nowrap;min-width:0;color:var(--dsw-alias-label-tertiary);flex:auto;font-size:14px;line-height:24px;overflow:hidden}.LRn-uq_errorSummary{color:var(--dsw-alias-state-error-primary)}.LRn-uq_bodyWrap{flex-direction:column;display:flex}.LRn-uq_instructionsCard{border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-markdown-code-block);border-radius:12px;flex-direction:column;max-height:260px;margin:4px 0 4px 4px;display:flex;overflow:hidden}.LRn-uq_instructionsHeader{border-bottom:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-markdown-code-block-banner);color:var(--dsw-alias-label-caption);text-transform:uppercase;letter-spacing:.04em;flex:none;padding:8px 12px;font-size:11px;font-weight:500;line-height:16px}.LRn-uq_instructions{white-space:pre-wrap;overflow-wrap:anywhere;min-height:0;font:var(--dsw-font-markdown-code-block-small);color:var(--dsw-alias-label-secondary);margin:0;padding:10px 12px 12px;overflow:auto}.LRn-uq_instructions[data-error]{color:var(--dsw-alias-state-error-primary)}.LRn-uq_instructions::-webkit-scrollbar-thumb{background-clip:padding-box;border:2px solid #0000;border-radius:6px}.LRn-uq_instructions::-webkit-scrollbar-track{margin:6px 0}.LRn-uq_inspectButton{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-secondary);cursor:pointer;opacity:0;border-radius:999px;align-self:flex-start;align-items:center;gap:4px;margin:4px 0 2px 4px;padding:2px 8px;font-size:11px;line-height:16px;transition:opacity .1s;display:inline-flex}.LRn-uq_card:hover .LRn-uq_inspectButton,.LRn-uq_inspectButton:focus-visible{opacity:1}.LRn-uq_inspectButton:hover{background:var(--dsw-alias-interactive-bg-hover-solid);color:var(--dsw-alias-label-primary)}.LRn-uq_visuallyHidden{clip:rect(0 0 0 0);white-space:nowrap;width:1px;height:1px;position:absolute;overflow:hidden}@media (prefers-reduced-motion:reduce){.LRn-uq_card[data-state=running] .LRn-uq_row:after{animation:none;display:none}.LRn-uq_iconIdle,.LRn-uq_chevronHover,.LRn-uq_inspectButton{transition:none}}";
 		const tagId = "@deepseek-ai/dsh-client-ui-skill/SkillRow.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -18,23 +18,23 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var SkillRow_module_css_default = {
-			"bodyWrap": "qixuWG_bodyWrap",
-			"card": "qixuWG_card",
-			"chevron": "qixuWG_chevron",
-			"chevronHover": "qixuWG_chevronHover",
-			"dsh-skill-row-sweep": "qixuWG_dsh-skill-row-sweep",
-			"errorSummary": "qixuWG_errorSummary",
-			"iconIdle": "qixuWG_iconIdle",
-			"inspectButton": "qixuWG_inspectButton",
-			"instructions": "qixuWG_instructions",
-			"instructionsCard": "qixuWG_instructionsCard",
-			"instructionsHeader": "qixuWG_instructionsHeader",
-			"leading": "qixuWG_leading",
-			"row": "qixuWG_row",
-			"separator": "qixuWG_separator",
-			"summary": "qixuWG_summary",
-			"title": "qixuWG_title",
-			"visuallyHidden": "qixuWG_visuallyHidden"
+			"bodyWrap": "LRn-uq_bodyWrap",
+			"card": "LRn-uq_card",
+			"chevron": "LRn-uq_chevron",
+			"chevronHover": "LRn-uq_chevronHover",
+			"dsh-skill-row-sweep": "LRn-uq_dsh-skill-row-sweep",
+			"errorSummary": "LRn-uq_errorSummary",
+			"iconIdle": "LRn-uq_iconIdle",
+			"inspectButton": "LRn-uq_inspectButton",
+			"instructions": "LRn-uq_instructions",
+			"instructionsCard": "LRn-uq_instructionsCard",
+			"instructionsHeader": "LRn-uq_instructionsHeader",
+			"leading": "LRn-uq_leading",
+			"row": "LRn-uq_row",
+			"separator": "LRn-uq_separator",
+			"summary": "LRn-uq_summary",
+			"title": "LRn-uq_title",
+			"visuallyHidden": "LRn-uq_visuallyHidden"
 		};
 		//#endregion
 		//#region lib/types/client/SkillRow.js

@@ -51,6 +51,7 @@ impl ChatSession {
             })?;
         let session = result.into_session();
         self.active_session_id = Some(session.id().to_string());
+        self.agent_session_id = session.id().to_string();
         self.first_turn = true;
         self.proactive_in_session = 0;
         self.pending_action = None;
@@ -91,6 +92,7 @@ impl ChatSession {
         let session = self.load_web_session(id)?;
         let messages = session.messages().to_vec();
         self.active_session_id = Some(session.id().to_string());
+        self.agent_session_id = session.id().to_string();
         self.first_turn = true;
         self.proactive_in_session = 0;
         self.pending_action = None;
@@ -211,6 +213,7 @@ impl ChatSession {
             ManagementCommand::ResumeSession(id) => self.resume_session(&id),
             ManagementCommand::NewSession => {
                 self.active_session_id = None;
+                self.agent_session_id = super::multi_agent::new_agent_session_id();
                 self.first_turn = true;
                 self.proactive_in_session = 0;
                 self.pending_action = None;
@@ -583,6 +586,7 @@ impl ChatSession {
             .ok_or_else(|| format!("session `{id}` was not found"))?;
         let messages = session.messages().to_vec();
         self.active_session_id = Some(session.id().to_string());
+        self.agent_session_id = session.id().to_string();
         self.first_turn = true;
         self.proactive_in_session = 0;
         self.pending_action = None;

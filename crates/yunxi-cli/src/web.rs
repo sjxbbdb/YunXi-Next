@@ -871,7 +871,7 @@ fn capability_edits(payload: &Value) -> Result<Vec<CapabilityEdit>, String> {
 
 fn capability_settings_schema() -> Value {
     json!({
-        "uid": 13,
+        "uid": 14,
         "refs": {
             "1": { "type": "boolean" },
             "2": { "type": "boolean" },
@@ -885,7 +885,8 @@ fn capability_settings_schema() -> Value {
             "10": { "type": "boolean" },
             "11": { "type": "boolean" },
             "12": { "type": "boolean" },
-            "13": {
+            "13": { "type": "boolean" },
+            "14": {
                 "type": "object",
                 "dict": {
                     "context": 1,
@@ -899,7 +900,8 @@ fn capability_settings_schema() -> Value {
                     "patch": 9,
                     "files": 10,
                     "mcp": 11,
-                    "skills": 12
+                    "skills": 12,
+                    "multi_agent": 13
                 }
             }
         }

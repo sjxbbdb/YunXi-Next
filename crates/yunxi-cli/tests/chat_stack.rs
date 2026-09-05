@@ -990,8 +990,13 @@ fn disabled_optional_capabilities_never_launch_or_register_routes() {
         .env("YUNXI_NEXT_FILES_ENABLED", "false")
         .env("YUNXI_NEXT_MCP_ENABLED", "false")
         .env("YUNXI_NEXT_SKILLS_ENABLED", "false")
+        .env("YUNXI_NEXT_MULTI_AGENT_ENABLED", "false")
         .env("YUNXI_NEXT_MCP_COMMAND", "this-command-must-not-launch")
         .env("YUNXI_NEXT_SKILLS_PLUGIN", "this-plugin-must-not-launch")
+        .env(
+            "YUNXI_NEXT_MULTI_AGENT_PLUGIN",
+            "this-plugin-must-not-launch",
+        )
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1013,6 +1018,172 @@ fn disabled_optional_capabilities_never_launch_or_register_routes() {
     );
     let stdout = String::from_utf8(output.stdout).expect("UTF-8 CLI output");
     assert!(stdout.contains("plugins: 1 | capabilities: 1 | failed: 0"));
+}
+
+#[test]
+fn approved_multi_agent_spawn_uses_an_isolated_model_process_and_persists_result() {
+    let workspace = unique_temp_dir("yunxi-multi-agent-e2e");
+    fs::create_dir_all(&workspace).expect("create workspace");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let server = thread::spawn(move || {
+        let (parent_stream, parent_body) = accept_request(&listener);
+        assert!(parent_body.contains("agent.spawn"), "body: {parent_body}");
+        write_response(
+            parent_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":null,"tool_calls":[{"id":"agent-spawn-1","type":"function","function":{"name":"agent.spawn","arguments":"{\"task\":\"analyze the delegated fixture\",\"name\":\"fixture\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+        );
+
+        let (child_stream, child_body) = accept_request(&listener);
+        assert!(
+            child_body.contains("isolated YunXi child agent"),
+            "child body: {child_body}"
+        );
+        assert!(
+            child_body.contains("analyze the delegated fixture"),
+            "child body: {child_body}"
+        );
+        assert!(
+            !child_body.contains("\"tools\""),
+            "child body: {child_body}"
+        );
+        write_response(
+            child_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"child isolated result"},"finish_reason":"stop"}]}"#,
+        );
+
+        let (continuation_stream, continuation_body) = accept_request(&listener);
+        assert!(
+            continuation_body.contains("child isolated result"),
+            "continuation body: {continuation_body}"
+        );
+        write_response(
+            continuation_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"parent used child result"},"finish_reason":"stop"}]}"#,
+        );
+    });
+
+    let mut child = configured_cli(address)
+        .current_dir(&workspace)
+        .env("YUNXI_NEXT_MULTI_AGENT_ENABLED", "true")
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch CLI with multi-agent");
+    child
+        .stdin
+        .take()
+        .expect("open CLI stdin")
+        .write_all(b"delegate the fixture\n/approve\n/quit\n")
+        .expect("write multi-agent prompt");
+    let output = wait_for_cli(child);
+    server.join().expect("join mock API");
+
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 output");
+    assert!(stdout.contains("Approval required"), "stdout: {stdout}");
+    assert!(
+        stdout.contains("parent used child result"),
+        "stdout: {stdout}"
+    );
+    let state_path = fs::read_dir(workspace.join(".yunxi-next/multi-agent"))
+        .expect("read multi-agent state")
+        .next()
+        .expect("state entry")
+        .expect("state path")
+        .path();
+    let state = fs::read_to_string(state_path).expect("read state");
+    assert!(state.contains("child isolated result"));
+    assert!(state.contains("\"status\": \"completed\""));
+    assert!(!state.contains("fixture-secret"));
+    fs::remove_dir_all(workspace).expect("remove workspace");
+}
+
+#[test]
+fn child_model_api_failure_ends_only_that_branch_and_parent_model_continues() {
+    let workspace = unique_temp_dir("yunxi-multi-agent-failure");
+    fs::create_dir_all(&workspace).expect("create workspace");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let server = thread::spawn(move || {
+        let (parent_stream, _) = accept_request(&listener);
+        write_response(
+            parent_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":null,"tool_calls":[{"id":"agent-spawn-fail","type":"function","function":{"name":"agent.spawn","arguments":"{\"task\":\"fail in isolation\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+        );
+
+        let (child_stream, child_body) = accept_request(&listener);
+        assert!(child_body.contains("fail in isolation"));
+        write_response(
+            child_stream,
+            "500 Internal Server Error",
+            r#"{"error":{"message":"child fixture failed"}}"#,
+        );
+
+        let (continuation_stream, continuation_body) = accept_request(&listener);
+        assert!(
+            continuation_body.contains("child_model_failed"),
+            "continuation body: {continuation_body}"
+        );
+        write_response(
+            continuation_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"parent survived child failure"},"finish_reason":"stop"}]}"#,
+        );
+    });
+
+    let mut child = configured_cli(address)
+        .current_dir(&workspace)
+        .env("YUNXI_NEXT_MULTI_AGENT_ENABLED", "true")
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch CLI with multi-agent");
+    child
+        .stdin
+        .take()
+        .expect("open CLI stdin")
+        .write_all(b"delegate failing task\n/approve\n/quit\n")
+        .expect("write multi-agent prompt");
+    let output = wait_for_cli(child);
+    server.join().expect("join mock API");
+
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(String::from_utf8_lossy(&output.stdout).contains("parent survived child failure"));
+    let state_path = fs::read_dir(workspace.join(".yunxi-next/multi-agent"))
+        .expect("read multi-agent state")
+        .next()
+        .expect("state entry")
+        .expect("state path")
+        .path();
+    let state = fs::read_to_string(state_path).expect("read state");
+    assert!(state.contains("\"status\": \"failed\""));
+    assert!(state.contains("child_model_failed"));
+    fs::remove_dir_all(workspace).expect("remove workspace");
 }
 
 #[test]

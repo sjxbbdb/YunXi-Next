@@ -7,8 +7,8 @@ window.__ModuleLoader__.load({
 		let react_jsx_runtime = require("react/jsx-runtime");
 		let react = require("react");
 		let _deepseek_ai_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
-		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-1b724c4edaa94137b565704a3acef4c3\packages\client\ui-jobs\src\client\JobListAction.module.css.mjs
-		const css = ".kWEQ2W_root{position:relative}.kWEQ2W_trigger{min-height:28px;color:var(--dsw-alias-label-tertiary);cursor:pointer;background:0 0;border:0;border-radius:6px;align-items:center;gap:3px;padding:3px 2px;font-size:12px;line-height:18px;display:inline-flex}.kWEQ2W_trigger:hover,.kWEQ2W_trigger:focus-visible{color:var(--dsw-alias-label-secondary)}.kWEQ2W_trigger svg{transition:transform .12s}.kWEQ2W_triggerOpen{transform:rotate(180deg)}.kWEQ2W_triggerDot{flex:none}.kWEQ2W_count{margin:0 5px}.kWEQ2W_menu{z-index:100;box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-specific-menu);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);width:336px;max-width:min(400px,100vw - 32px);max-height:min(420px,100vh - 140px);box-shadow:var(--dsw-shadow-lv3);border-radius:12px;flex-direction:column;gap:1px;margin:0;padding:4px;list-style:none;display:flex;position:absolute;top:calc(100% + 5px);left:0;overflow:auto}.kWEQ2W_row{box-sizing:border-box;width:100%;min-height:32px;color:var(--dsw-alias-label-primary);border-radius:8px;align-items:center;gap:8px;padding:6px 8px;font-size:13px;line-height:18px;display:flex}.kWEQ2W_rowSettled{color:var(--dsw-alias-label-tertiary)}.kWEQ2W_rowDot{flex:none}.kWEQ2W_kind{background:var(--dsw-alias-fill-l2);color:var(--dsw-alias-label-secondary);border-radius:5px;flex:none;padding:0 6px;font-size:11px;line-height:18px}.kWEQ2W_label{min-width:0;font-family:var(--dsw-font-mono);white-space:nowrap;text-overflow:ellipsis;flex:1;overflow:hidden}.kWEQ2W_status,.kWEQ2W_duration{color:var(--dsw-alias-label-tertiary);flex:none;font-size:11px;line-height:18px}.kWEQ2W_status{white-space:nowrap;text-overflow:ellipsis;max-width:40%;overflow:hidden}.kWEQ2W_duration{font-variant-numeric:tabular-nums}";
+		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-0a50875c14b34d63b17f6522f5dab19c\packages\client\ui-jobs\src\client\JobListAction.module.css.mjs
+		const css = ".L16jda_root{position:relative}.L16jda_trigger{min-height:28px;color:var(--dsw-alias-label-tertiary);cursor:pointer;background:0 0;border:0;border-radius:6px;align-items:center;gap:3px;padding:3px 2px;font-size:12px;line-height:18px;display:inline-flex}.L16jda_trigger:hover,.L16jda_trigger:focus-visible{color:var(--dsw-alias-label-secondary)}.L16jda_trigger svg{transition:transform .12s}.L16jda_triggerOpen{transform:rotate(180deg)}.L16jda_triggerDot{flex:none}.L16jda_count{margin:0 5px}.L16jda_menu{z-index:100;box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-specific-menu);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);width:336px;max-width:min(400px,100vw - 32px);max-height:min(420px,100vh - 140px);box-shadow:var(--dsw-shadow-lv3);border-radius:12px;flex-direction:column;gap:1px;margin:0;padding:4px;list-style:none;display:flex;position:absolute;top:calc(100% + 5px);left:0;overflow:auto}.L16jda_row{box-sizing:border-box;width:100%;min-height:32px;color:var(--dsw-alias-label-primary);border-radius:8px;align-items:center;gap:8px;padding:6px 8px;font-size:13px;line-height:18px;display:flex}.L16jda_rowSettled{color:var(--dsw-alias-label-tertiary)}.L16jda_rowDot{flex:none}.L16jda_kind{background:var(--dsw-alias-fill-l2);color:var(--dsw-alias-label-secondary);border-radius:5px;flex:none;padding:0 6px;font-size:11px;line-height:18px}.L16jda_label{min-width:0;font-family:var(--dsw-font-mono);white-space:nowrap;text-overflow:ellipsis;flex:1;overflow:hidden}.L16jda_status,.L16jda_duration{color:var(--dsw-alias-label-tertiary);flex:none;font-size:11px;line-height:18px}.L16jda_status{white-space:nowrap;text-overflow:ellipsis;max-width:40%;overflow:hidden}.L16jda_duration{font-variant-numeric:tabular-nums}";
 		const tagId = "@deepseek-ai/dsh-client-ui-jobs/JobListAction.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -18,19 +18,19 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var JobListAction_module_css_default = {
-			"count": "kWEQ2W_count",
-			"duration": "kWEQ2W_duration",
-			"kind": "kWEQ2W_kind",
-			"label": "kWEQ2W_label",
-			"menu": "kWEQ2W_menu",
-			"root": "kWEQ2W_root",
-			"row": "kWEQ2W_row",
-			"rowDot": "kWEQ2W_rowDot",
-			"rowSettled": "kWEQ2W_rowSettled",
-			"status": "kWEQ2W_status",
-			"trigger": "kWEQ2W_trigger",
-			"triggerDot": "kWEQ2W_triggerDot",
-			"triggerOpen": "kWEQ2W_triggerOpen"
+			"count": "L16jda_count",
+			"duration": "L16jda_duration",
+			"kind": "L16jda_kind",
+			"label": "L16jda_label",
+			"menu": "L16jda_menu",
+			"root": "L16jda_root",
+			"row": "L16jda_row",
+			"rowDot": "L16jda_rowDot",
+			"rowSettled": "L16jda_rowSettled",
+			"status": "L16jda_status",
+			"trigger": "L16jda_trigger",
+			"triggerDot": "L16jda_triggerDot",
+			"triggerOpen": "L16jda_triggerOpen"
 		};
 		//#endregion
 		//#region lib/types/client/JobListAction.js

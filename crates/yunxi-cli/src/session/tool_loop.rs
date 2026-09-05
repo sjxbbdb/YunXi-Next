@@ -13,6 +13,10 @@ pub(crate) const SHELL_TOOL_NAME: &str = "shell.execute";
 pub(crate) const PATCH_TOOL_NAME: &str = "patch.apply";
 pub(crate) const FILE_SEARCH_TOOL_NAME: &str = "file.search";
 pub(crate) const FILE_READ_TOOL_NAME: &str = "file.read";
+pub(crate) const AGENT_SPAWN_TOOL_NAME: &str = "agent.spawn";
+pub(crate) const AGENT_LIST_TOOL_NAME: &str = "agent.list";
+pub(crate) const AGENT_MESSAGE_TOOL_NAME: &str = "agent.message";
+pub(crate) const AGENT_INTERRUPT_TOOL_NAME: &str = "agent.interrupt";
 const MCP_TOOL_PREFIX: &str = "mcp";
 
 const MAX_SHELL_ARGUMENT_BYTES: usize = 64 * 1024;
@@ -36,6 +40,20 @@ pub(crate) enum ToolAction {
     },
     FileRead {
         path: String,
+    },
+    AgentSpawn {
+        task: String,
+        name: Option<String>,
+        parent_id: Option<String>,
+    },
+    AgentList,
+    AgentMessage {
+        agent_id: String,
+        message: String,
+    },
+    AgentInterrupt {
+        agent_id: String,
+        recursive: bool,
     },
     Mcp {
         binding: McpToolBinding,
@@ -63,6 +81,26 @@ impl ToolAction {
             ),
             Self::FileSearch { query, path } => format!("query: {query} (root: {path})"),
             Self::FileRead { path } => format!("path: {path}"),
+            Self::AgentSpawn {
+                task,
+                name,
+                parent_id,
+            } => format!(
+                "task: {} bytes | name: {} | parent: {}",
+                task.len(),
+                name.as_deref().unwrap_or("automatic"),
+                parent_id
+                    .as_deref()
+                    .unwrap_or(yunxi_protocol::ROOT_AGENT_ID)
+            ),
+            Self::AgentList => "list delegated agents".to_string(),
+            Self::AgentMessage { agent_id, message } => {
+                format!("agent: {agent_id} | message: {} bytes", message.len())
+            }
+            Self::AgentInterrupt {
+                agent_id,
+                recursive,
+            } => format!("agent: {agent_id} | recursive: {recursive}"),
             Self::Mcp { binding, arguments } => format!(
                 "server: {} | tool: {} | arguments: {} bytes",
                 binding.server_name,
@@ -202,6 +240,7 @@ pub(crate) fn catalog_with_skills(
     shell_enabled: bool,
     patch_enabled: bool,
     files_enabled: bool,
+    multi_agent_enabled: bool,
     mcp_tools: &[McpToolBinding],
     skill_tools: &[SkillToolBinding],
 ) -> Option<ToolCatalog> {
@@ -275,6 +314,64 @@ pub(crate) fn catalog_with_skills(
             .expect("built-in file read tool definition"),
         );
     }
+    if multi_agent_enabled {
+        definitions.extend([
+            ToolDefinition::new(
+                ToolName::new(AGENT_SPAWN_TOOL_NAME).expect("built-in agent spawn tool name"),
+                "Start one isolated child model branch after explicit user approval.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "task": {"type": "string", "maxLength": yunxi_protocol::MAX_AGENT_MESSAGE_BYTES},
+                        "name": {"type": "string", "maxLength": 64},
+                        "parent_id": {"type": "string", "maxLength": 128}
+                    },
+                    "required": ["task"],
+                    "additionalProperties": false
+                }),
+            )
+            .expect("built-in agent spawn tool definition"),
+            ToolDefinition::new(
+                ToolName::new(AGENT_LIST_TOOL_NAME).expect("built-in agent list tool name"),
+                "List delegated child branches, budgets, and recent lifecycle events.",
+                json!({
+                    "type": "object",
+                    "properties": {},
+                    "additionalProperties": false
+                }),
+            )
+            .expect("built-in agent list tool definition"),
+            ToolDefinition::new(
+                ToolName::new(AGENT_MESSAGE_TOOL_NAME).expect("built-in agent message tool name"),
+                "Send another message to an existing child model branch after approval.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "agent_id": {"type": "string", "maxLength": 128},
+                        "message": {"type": "string", "maxLength": yunxi_protocol::MAX_AGENT_MESSAGE_BYTES}
+                    },
+                    "required": ["agent_id", "message"],
+                    "additionalProperties": false
+                }),
+            )
+            .expect("built-in agent message tool definition"),
+            ToolDefinition::new(
+                ToolName::new(AGENT_INTERRUPT_TOOL_NAME)
+                    .expect("built-in agent interrupt tool name"),
+                "Interrupt one child branch and optionally propagate cancellation to descendants.",
+                json!({
+                    "type": "object",
+                    "properties": {
+                        "agent_id": {"type": "string", "maxLength": 128},
+                        "recursive": {"type": "boolean"}
+                    },
+                    "required": ["agent_id"],
+                    "additionalProperties": false
+                }),
+            )
+            .expect("built-in agent interrupt tool definition"),
+        ]);
+    }
     definitions.extend(mcp_tools.iter().map(|binding| {
         ToolDefinition::new(
             binding.model_name().clone(),
@@ -297,6 +394,7 @@ pub(crate) fn catalog_with_skills(
 
 pub(crate) fn decode_call_with_skills(
     call: &ToolCall,
+    multi_agent_enabled: bool,
     mcp_tools: &[McpToolBinding],
     skill_tools: &[SkillToolBinding],
 ) -> Result<ToolAction, ToolCallError> {
@@ -320,6 +418,20 @@ pub(crate) fn decode_call_with_skills(
         FILE_READ_TOOL_NAME => Ok(ToolAction::FileRead {
             path: required_text(object, "path", 1024)?,
         }),
+        AGENT_SPAWN_TOOL_NAME if multi_agent_enabled => Ok(ToolAction::AgentSpawn {
+            task: required_text(object, "task", yunxi_protocol::MAX_AGENT_MESSAGE_BYTES)?,
+            name: optional_text(object, "name", 64)?,
+            parent_id: optional_text(object, "parent_id", 128)?,
+        }),
+        AGENT_LIST_TOOL_NAME if multi_agent_enabled => Ok(ToolAction::AgentList),
+        AGENT_MESSAGE_TOOL_NAME if multi_agent_enabled => Ok(ToolAction::AgentMessage {
+            agent_id: required_text(object, "agent_id", 128)?,
+            message: required_text(object, "message", yunxi_protocol::MAX_AGENT_MESSAGE_BYTES)?,
+        }),
+        AGENT_INTERRUPT_TOOL_NAME if multi_agent_enabled => Ok(ToolAction::AgentInterrupt {
+            agent_id: required_text(object, "agent_id", 128)?,
+            recursive: optional_bool(object, "recursive")?.unwrap_or(true),
+        }),
         name => mcp_tools
             .iter()
             .find(|binding| binding.model_name.as_str() == name)
@@ -338,6 +450,20 @@ pub(crate) fn decode_call_with_skills(
             })
             .ok_or_else(|| ToolCallError::UnsupportedTool(name.to_string())),
     }
+}
+
+fn optional_bool(
+    object: &serde_json::Map<String, Value>,
+    field: &'static str,
+) -> Result<Option<bool>, ToolCallError> {
+    object
+        .get(field)
+        .map(|value| {
+            value
+                .as_bool()
+                .ok_or(ToolCallError::ArgumentMustBeBoolean { field })
+        })
+        .transpose()
 }
 
 fn optional_timeout(object: &serde_json::Map<String, Value>) -> Result<u64, ToolCallError> {
@@ -404,6 +530,9 @@ pub(crate) enum ToolCallError {
     ArgumentMustBeText {
         field: &'static str,
     },
+    ArgumentMustBeBoolean {
+        field: &'static str,
+    },
     ArgumentEmpty {
         field: &'static str,
     },
@@ -440,6 +569,9 @@ impl fmt::Display for ToolCallError {
             }
             Self::ArgumentMustBeText { field } => {
                 write!(formatter, "tool argument `{field}` must be text")
+            }
+            Self::ArgumentMustBeBoolean { field } => {
+                write!(formatter, "tool argument `{field}` must be a boolean")
             }
             Self::ArgumentEmpty { field } => {
                 write!(formatter, "tool argument `{field}` cannot be empty")
@@ -496,11 +628,12 @@ mod tests {
     #[test]
     fn catalog_only_exposes_enabled_tools() {
         let tool_catalog =
-            catalog_with_skills(true, false, false, &[], &[]).expect("shell catalog");
+            catalog_with_skills(true, false, false, false, &[], &[]).expect("shell catalog");
         assert_eq!(tool_catalog.tools().len(), 1);
         assert_eq!(tool_catalog.tools()[0].name().as_str(), SHELL_TOOL_NAME);
-        assert!(super::catalog_with_skills(false, false, false, &[], &[]).is_none());
-        let file_catalog = catalog_with_skills(false, false, true, &[], &[]).expect("file catalog");
+        assert!(super::catalog_with_skills(false, false, false, false, &[], &[]).is_none());
+        let file_catalog =
+            catalog_with_skills(false, false, true, false, &[], &[]).expect("file catalog");
         assert_eq!(file_catalog.tools().len(), 2);
     }
 
@@ -509,7 +642,7 @@ mod tests {
         let call = ToolCall::new("call-1", SHELL_TOOL_NAME, json!({"command": "echo hello"}))
             .expect("shell call");
         assert_eq!(
-            decode_call_with_skills(&call, &[], &[]).expect("decode shell call"),
+            decode_call_with_skills(&call, false, &[], &[]).expect("decode shell call"),
             ToolAction::Shell {
                 command: "echo hello".to_string(),
                 timeout_millis: DEFAULT_MODEL_TOOL_TIMEOUT_MILLIS,
@@ -519,7 +652,7 @@ mod tests {
         let invalid =
             ToolCall::new("call-2", PATCH_TOOL_NAME, json!({"patch": 1})).expect("wire-valid call");
         assert!(matches!(
-            decode_call_with_skills(&invalid, &[], &[]),
+            decode_call_with_skills(&invalid, false, &[], &[]),
             Err(ToolCallError::ArgumentMustBeText { field: "patch" })
         ));
 
@@ -530,7 +663,7 @@ mod tests {
         )
         .expect("timed shell call");
         assert!(matches!(
-            decode_call_with_skills(&timed, &[], &[]),
+            decode_call_with_skills(&timed, false, &[], &[]),
             Ok(ToolAction::Shell {
                 timeout_millis: 25,
                 ..
@@ -544,15 +677,54 @@ mod tests {
         )
         .expect("wire-valid timeout call");
         assert!(matches!(
-            decode_call_with_skills(&invalid_timeout, &[], &[]),
+            decode_call_with_skills(&invalid_timeout, false, &[], &[]),
             Err(ToolCallError::TimeoutOutOfRange { .. })
         ));
 
         let file_call = ToolCall::new("call-5", FILE_READ_TOOL_NAME, json!({"path": "src/lib.rs"}))
             .expect("file call");
         assert!(matches!(
-            decode_call_with_skills(&file_call, &[], &[]),
+            decode_call_with_skills(&file_call, false, &[], &[]),
             Ok(ToolAction::FileRead { .. })
+        ));
+    }
+
+    #[test]
+    fn multi_agent_tools_are_gated_and_decode_without_child_grants() {
+        let catalog =
+            catalog_with_skills(false, false, false, true, &[], &[]).expect("multi-agent catalog");
+        let names = catalog
+            .tools()
+            .iter()
+            .map(|tool| tool.name().as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            vec![
+                AGENT_SPAWN_TOOL_NAME,
+                AGENT_LIST_TOOL_NAME,
+                AGENT_MESSAGE_TOOL_NAME,
+                AGENT_INTERRUPT_TOOL_NAME,
+            ]
+        );
+
+        let call = ToolCall::new(
+            "agent-1",
+            AGENT_SPAWN_TOOL_NAME,
+            json!({"task": "inspect tests", "name": "tests"}),
+        )
+        .expect("agent call");
+        assert_eq!(
+            decode_call_with_skills(&call, true, &[], &[]).expect("decode agent call"),
+            ToolAction::AgentSpawn {
+                task: "inspect tests".to_string(),
+                name: Some("tests".to_string()),
+                parent_id: None,
+            }
+        );
+        assert!(matches!(
+            decode_call_with_skills(&call, false, &[], &[]),
+            Err(ToolCallError::UnsupportedTool(_))
         ));
     }
 
@@ -566,13 +738,20 @@ mod tests {
         .expect("MCP descriptor");
         let binding = McpToolBinding::from_descriptor("fixture", &descriptor).expect("MCP binding");
         assert_eq!(binding.model_name().as_str(), "mcp.fixture.echo");
-        let catalog = catalog_with_skills(false, false, false, std::slice::from_ref(&binding), &[])
-            .expect("MCP catalog");
+        let catalog = catalog_with_skills(
+            false,
+            false,
+            false,
+            false,
+            std::slice::from_ref(&binding),
+            &[],
+        )
+        .expect("MCP catalog");
         assert_eq!(catalog.tools()[0].name().as_str(), "mcp.fixture.echo");
         let call =
             ToolCall::new("mcp-1", "mcp.fixture.echo", json!({"text": "hello"})).expect("MCP call");
         assert_eq!(
-            decode_call_with_skills(&call, &[binding], &[]).expect("decode MCP call"),
+            decode_call_with_skills(&call, false, &[binding], &[]).expect("decode MCP call"),
             ToolAction::Mcp {
                 binding: McpToolBinding::from_descriptor("fixture", &descriptor)
                     .expect("MCP binding"),
@@ -598,14 +777,21 @@ mod tests {
         let binding =
             SkillToolBinding::from_descriptor(&skill, &descriptor).expect("Skill binding");
 
-        let catalog = catalog_with_skills(false, false, false, &[], std::slice::from_ref(&binding))
-            .expect("Skill catalog");
+        let catalog = catalog_with_skills(
+            false,
+            false,
+            false,
+            false,
+            &[],
+            std::slice::from_ref(&binding),
+        )
+        .expect("Skill catalog");
         assert_eq!(catalog.tools()[0].name().as_str(), "skill.review.check");
 
         let call =
             ToolCall::new("skill-1", "skill.review.check", json!({})).expect("Skill tool call");
         assert_eq!(
-            decode_call_with_skills(&call, &[], std::slice::from_ref(&binding))
+            decode_call_with_skills(&call, false, &[], std::slice::from_ref(&binding))
                 .expect("decode Skill call"),
             ToolAction::Skill {
                 binding,

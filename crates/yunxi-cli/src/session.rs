@@ -1,5 +1,6 @@
 //! Multi-plugin host orchestration and chat request assembly.
 
+mod multi_agent;
 mod stateful;
 mod tool_loop;
 
@@ -21,6 +22,7 @@ use yunxi_context::CONTEXT_PLUGIN_ID;
 use yunxi_kernel::{PluginCommand, PluginId, PluginIdError};
 use yunxi_memory::MEMORY_PLUGIN_ID;
 use yunxi_model_openai::{MODEL_PLUGIN_ID, ProviderConfig, ProviderConfigError};
+use yunxi_multi_agent::MULTI_AGENT_PLUGIN_ID;
 use yunxi_persona::PERSONA_PLUGIN_ID;
 use yunxi_plugin_host::{
     CatalogError, PluginCallError, PluginHostError, PluginLaunch, ProcessPluginHost,
@@ -51,9 +53,10 @@ use crate::{
     INTERNAL_COMPANION_PLUGIN_ARGUMENT, INTERNAL_CONTEXT_PLUGIN_ARGUMENT,
     INTERNAL_FILES_PLUGIN_ARGUMENT, INTERNAL_MAILBOX_PLUGIN_ARGUMENT, INTERNAL_MCP_PLUGIN_ARGUMENT,
     INTERNAL_MEMORY_PLUGIN_ARGUMENT, INTERNAL_MODEL_PLUGIN_ARGUMENT,
-    INTERNAL_PATCH_PLUGIN_ARGUMENT, INTERNAL_PERSONA_PLUGIN_ARGUMENT,
-    INTERNAL_SCHEDULER_PLUGIN_ARGUMENT, INTERNAL_SHELL_PLUGIN_ARGUMENT,
-    INTERNAL_SKILLS_PLUGIN_ARGUMENT, INTERNAL_STORAGE_PLUGIN_ARGUMENT,
+    INTERNAL_MULTI_AGENT_PLUGIN_ARGUMENT, INTERNAL_PATCH_PLUGIN_ARGUMENT,
+    INTERNAL_PERSONA_PLUGIN_ARGUMENT, INTERNAL_SCHEDULER_PLUGIN_ARGUMENT,
+    INTERNAL_SHELL_PLUGIN_ARGUMENT, INTERNAL_SKILLS_PLUGIN_ARGUMENT,
+    INTERNAL_STORAGE_PLUGIN_ARGUMENT,
     management::{ManagementCommand, ManagementResult},
 };
 
@@ -75,6 +78,7 @@ const PATCH_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_PATCH_PLUGIN";
 const FILES_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_FILES_PLUGIN";
 const MCP_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_MCP_PLUGIN";
 const SKILLS_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_SKILLS_PLUGIN";
+const MULTI_AGENT_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_MULTI_AGENT_PLUGIN";
 
 pub(crate) trait ChatBackend {
     fn complete(&mut self, messages: &[ChatMessage]) -> Result<String, ChatFailure>;
@@ -101,6 +105,9 @@ pub(crate) struct ChatSession {
     capability_settings: CapabilitySettingsStore,
     model_plugin_id: PluginId,
     model_capability: CapabilityDescriptor,
+    child_model_command: PluginCommand,
+    child_model_required_grants: Vec<GrantKind>,
+    child_model_response_timeout: Duration,
     context_capability: Option<CapabilityDescriptor>,
     memory_capability: Option<CapabilityDescriptor>,
     memory_write_capability: Option<CapabilityDescriptor>,
@@ -119,6 +126,9 @@ pub(crate) struct ChatSession {
     skills_capability: Option<CapabilityDescriptor>,
     skill_ids: Vec<String>,
     skill_tools: Vec<tool_loop::SkillToolBinding>,
+    multi_agent_capability: Option<CapabilityDescriptor>,
+    agent_session_id: String,
+    agent_budget: yunxi_protocol::AgentBudget,
     cwd: PathBuf,
     provider: String,
     model: String,
@@ -180,15 +190,16 @@ impl ChatSession {
             Some(path) => PluginCommand::new(path),
             None => PluginCommand::new(&executable).arg(INTERNAL_MODEL_PLUGIN_ARGUMENT),
         };
-        let model_launch = PluginLaunch::new(model_plugin_id.clone(), model_command)
+        let model_required_grants = if plugin_path.is_none() {
+            vec![GrantKind::Network, GrantKind::ProviderCredential]
+        } else {
+            Vec::new()
+        };
+        let model_launch = PluginLaunch::new(model_plugin_id.clone(), model_command.clone())
             .with_display_name("OpenAI-compatible chat model")
             .with_handshake_timeout(HANDSHAKE_TIMEOUT)
-            .with_io_timeouts(Some(response_timeout), Some(WRITE_TIMEOUT));
-        let model_launch = if plugin_path.is_none() {
-            model_launch.with_required_grants([GrantKind::Network, GrantKind::ProviderCredential])
-        } else {
-            model_launch
-        };
+            .with_io_timeouts(Some(response_timeout), Some(WRITE_TIMEOUT))
+            .with_required_grants(model_required_grants.iter().copied());
         host.launch(model_launch)?;
         let model_capability =
             descriptor(capabilities::MODEL_CHAT, capabilities::MODEL_CHAT_VERSION)?;
@@ -574,6 +585,37 @@ impl ChatSession {
             None
         };
 
+        let multi_agent_capability = if switches.multi_agent {
+            let id = PluginId::new(MULTI_AGENT_PLUGIN_ID)?;
+            let capability = descriptor(
+                capabilities::TOOL_MULTI_AGENT,
+                capabilities::TOOL_MULTI_AGENT_VERSION,
+            )?;
+            launch_action_optional(
+                &mut host,
+                id,
+                "Isolated multi-agent coordinator",
+                optional_command(
+                    &executable,
+                    INTERNAL_MULTI_AGENT_PLUGIN_ARGUMENT,
+                    MULTI_AGENT_PLUGIN_PATH_ENV,
+                ),
+                &capability,
+                &[
+                    GrantKind::Approval,
+                    GrantKind::WorkspaceRead,
+                    GrantKind::WorkspaceWrite,
+                    GrantKind::AgentDelegation,
+                ],
+                &mut notices,
+            )
+            .then_some(capability)
+        } else {
+            None
+        };
+        let agent_session_id = multi_agent::new_agent_session_id();
+        let agent_budget = yunxi_protocol::AgentBudget::conservative();
+
         let reported_notices = notices.iter().cloned().collect();
         Ok(Self {
             host,
@@ -581,6 +623,9 @@ impl ChatSession {
             capability_settings,
             model_plugin_id,
             model_capability,
+            child_model_command: model_command,
+            child_model_required_grants: model_required_grants,
+            child_model_response_timeout: response_timeout,
             context_capability,
             memory_capability,
             memory_write_capability,
@@ -599,6 +644,9 @@ impl ChatSession {
             skills_capability,
             skill_ids,
             skill_tools,
+            multi_agent_capability,
+            agent_session_id,
+            agent_budget,
             cwd,
             provider,
             model,
@@ -651,9 +699,14 @@ impl ChatSession {
         Some(PendingApprovalView {
             call_id: call.id().to_string(),
             tool_name: call.name().to_string(),
-            summary: tool_loop::decode_call_with_skills(call, &self.mcp_tools, &self.skill_tools)
-                .map(|action| action.summary().to_string())
-                .unwrap_or_else(|_| "model requested a tool action".to_string()),
+            summary: tool_loop::decode_call_with_skills(
+                call,
+                self.multi_agent_capability.is_some(),
+                &self.mcp_tools,
+                &self.skill_tools,
+            )
+            .map(|action| action.summary().to_string())
+            .unwrap_or_else(|_| "model requested a tool action".to_string()),
         })
     }
 
@@ -844,6 +897,7 @@ impl ChatBackend for ChatSession {
                     .to_string(),
             });
         }
+        self.prepare_agent_session();
         let prompt = latest_user_message(messages)
             .unwrap_or_default()
             .to_string();
@@ -912,6 +966,7 @@ impl ChatSession {
             self.shell_capability.is_some(),
             self.patch_capability.is_some(),
             self.files_capability.is_some(),
+            self.multi_agent_capability.is_some(),
             &self.mcp_tools,
             &self.skill_tools,
         ) {
@@ -990,11 +1045,18 @@ impl ChatSession {
                 "tool continuation has no pending call".to_string(),
             ));
         };
-        match tool_loop::decode_call_with_skills(&call, &self.mcp_tools, &self.skill_tools) {
+        match tool_loop::decode_call_with_skills(
+            &call,
+            self.multi_agent_capability.is_some(),
+            &self.mcp_tools,
+            &self.skill_tools,
+        ) {
             Ok(
                 action @ (tool_loop::ToolAction::FileSearch { .. }
                 | tool_loop::ToolAction::FileRead { .. }
-                | tool_loop::ToolAction::Skill { .. }),
+                | tool_loop::ToolAction::Skill { .. }
+                | tool_loop::ToolAction::AgentList
+                | tool_loop::ToolAction::AgentInterrupt { .. }),
             ) => {
                 let outcome = self.execute_model_tool(&action);
                 self.append_tool_outcome(&call, outcome);
@@ -1026,6 +1088,17 @@ impl ChatSession {
                     }
                     tool_loop::ToolAction::Skill { .. } => {
                         unreachable!("metadata-only Skill tools are handled before approval")
+                    }
+                    tool_loop::ToolAction::AgentSpawn { .. }
+                    | tool_loop::ToolAction::AgentMessage { .. } => vec![
+                        GrantKind::Approval,
+                        GrantKind::WorkspaceRead,
+                        GrantKind::WorkspaceWrite,
+                        GrantKind::AgentDelegation,
+                    ],
+                    tool_loop::ToolAction::AgentList
+                    | tool_loop::ToolAction::AgentInterrupt { .. } => {
+                        unreachable!("read-only and cancellation agent tools run without approval")
                     }
                 };
                 let approval = ToolApprovalRequest::new(
@@ -1093,8 +1166,13 @@ impl ChatSession {
         let Some(PendingAction::ModelTool { call }) = self.pending_action.take() else {
             return Err("there is no pending model tool action".to_string());
         };
-        let action = tool_loop::decode_call_with_skills(&call, &self.mcp_tools, &self.skill_tools)
-            .map_err(|error| error.to_string())?;
+        let action = tool_loop::decode_call_with_skills(
+            &call,
+            self.multi_agent_capability.is_some(),
+            &self.mcp_tools,
+            &self.skill_tools,
+        )
+        .map_err(|error| error.to_string())?;
         let outcome = self.execute_model_tool(&action);
         self.append_tool_outcome(&call, outcome);
         self.finish_model_tool_progress()
@@ -1163,6 +1241,19 @@ impl ChatSession {
                 ),
             )
             .expect("bounded Skill tool rejection"),
+            tool_loop::ToolAction::AgentSpawn {
+                task,
+                name,
+                parent_id,
+            } => self.execute_agent_spawn(task, name.as_deref(), parent_id.as_deref(), &ticket),
+            tool_loop::ToolAction::AgentList => self.execute_agent_list(&ticket),
+            tool_loop::ToolAction::AgentMessage { agent_id, message } => {
+                self.execute_agent_message(agent_id, message, &ticket)
+            }
+            tool_loop::ToolAction::AgentInterrupt {
+                agent_id,
+                recursive,
+            } => self.execute_agent_interrupt(agent_id, *recursive, &ticket),
             tool_loop::ToolAction::Shell {
                 command,
                 timeout_millis,
@@ -1935,6 +2026,7 @@ fn build_composition(
         (FILES_PLUGIN_ID, switches.files),
         (MCP_PLUGIN_ID, switches.mcp),
         (SKILLS_PLUGIN_ID, switches.skills),
+        (MULTI_AGENT_PLUGIN_ID, switches.multi_agent),
     ]
     .into_iter()
     .map(|(id, enabled)| {

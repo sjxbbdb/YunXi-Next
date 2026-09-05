@@ -13,6 +13,7 @@
 | `companion.rs` | Companion tone and emotional policy payloads |
 | `files.rs` | Bounded read-only workspace file search and viewing payloads |
 | `mcp.rs` | Bounded MCP Server discovery, call, cancellation, status, and authority payloads |
+| `multi_agent.rs` | Bounded delegation, graph, turn, event, and cancellation payloads |
 | `skills.rs` | Bounded Skill metadata, instruction context, and status payloads |
 | `scheduler.rs` | Proactive signal, limit, and plan payloads |
 | `mailbox.rs` | Encrypted mailbox management payloads |

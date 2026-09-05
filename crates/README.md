@@ -13,6 +13,7 @@ when it owns a stable responsibility and can state its dependency direction.
 | [`yunxi-kernel`](yunxi-kernel/README.md) | Process-isolated plugin lifecycle and kernel health |
 | [`yunxi-memory`](yunxi-memory/README.md) | Legacy-compatible recall and Next-only memory write plugin |
 | [`yunxi-model-openai`](yunxi-model-openai/README.md) | OpenAI-compatible HTTP capability running as a child process |
+| [`yunxi-multi-agent`](yunxi-multi-agent/README.md) | Isolated agent graph, budget, transcript, and lifecycle coordination |
 | [`yunxi-persona`](yunxi-persona/README.md) | Isolated persona and memory-context compiler plugin |
 | [`yunxi-plugin-host`](yunxi-plugin-host/README.md) | Capability provider catalog and deterministic routing checks |
 | [`yunxi-protocol`](yunxi-protocol/README.md) | Versioned local messages, bounded transport, and readiness handshake |

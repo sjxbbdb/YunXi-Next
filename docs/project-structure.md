@@ -90,6 +90,7 @@ YunXi Next/
     |   |   |-- web.rs                 reusable Web Host facade over ChatSession
     |   |   |-- session/               stateful orchestration split from model routing
     |   |   |   |-- README.md          session module ownership
+    |   |   |   |-- multi_agent.rs     coordinator calls and isolated child-model turns
     |   |   |   |-- stateful.rs        storage, memory-write, scheduler, and mailbox calls
     |   |   |   `-- tool_loop.rs       bounded model-tool catalog and argument decoding
     |   |   `-- ui.rs                  ANSI-aware compact presentation
@@ -163,6 +164,20 @@ YunXi Next/
     |       `-- bin/                    standalone plugin entry points
     |           |-- README.md           binary purpose
     |           `-- yunxi-model-openai.rs standalone plugin executable
+    |-- yunxi-multi-agent/              isolated agent coordination plugin
+    |   |-- Cargo.toml                  serde and protocol dependencies
+    |   |-- README.md                   coordination boundary and exclusions
+    |   |-- src/                        graph and plugin implementation
+    |   |   |-- README.md               source file index
+    |   |   |-- lib.rs                  stable coordinator-plugin facade
+    |   |   |-- plugin.rs               handshake and typed operation dispatch
+    |   |   |-- store.rs                bounded graph, transcript, budget, and persistence
+    |   |   `-- bin/                    standalone plugin entry point
+    |   |       |-- README.md           binary purpose
+    |   |       `-- yunxi-multi-agent.rs coordinator plugin executable
+    |   `-- tests/                      process-boundary coordinator tests
+    |       |-- README.md               integration test ownership
+    |       `-- process.rs              typed calls, persistence, restart, and secret fixture
     |-- yunxi-persona/                  persona context capability plugin
     |   |-- Cargo.toml                 JSON, serde, and protocol dependencies
     |   |-- README.md                  persona trust boundary and layout
@@ -301,6 +316,7 @@ YunXi Next/
     |       |-- memory_write.rs         memory extraction and review contracts
     |       |-- message.rs              versioned host/plugin messages
     |       |-- mcp.rs                  bounded MCP list/call/status contracts
+    |       |-- multi_agent.rs          bounded delegation, graph, turn, and event contracts
     |       |-- scheduler.rs            proactive scheduling payload contracts
     |       |-- sessions.rs             persistent-session payload contracts
     |       |-- skills.rs               bounded Skill metadata/context contracts

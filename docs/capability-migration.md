@@ -45,7 +45,7 @@ surfaces. They are not allowed to bypass the trusted approval or routing layer.
 | File search and viewing | `yunxi-agent-tools`, `yunxi-agent-context` | `tool.files@1:search/read` | `yunxi-tool-files` | Baseline integrated: isolated name search and bounded UTF-8 reads under a required read-only workspace grant; write, rename, indexing, and richer ignore policy remain out of scope |
 | MCP bridge | `yunxi-agent-mcp`, `yunxi-agent-tools` | `tool.mcp@1:list/call/cancel/status` | `yunxi-tool-mcp` | Baseline integrated: one explicit stdio or opt-in HTTP Server, bounded JSON-RPC initialize/list/call/cancel, JSON/SSE responses, session reuse, dynamic model projection, Host Approval, exact network scopes, reference-only Secret grants, redaction, and isolated crash recovery |
 | Skills and dynamic tools | `yunxi-agent-skills`, `yunxi-agent-tools` | `tool.skills@1:list/context/status` | `yunxi-tool-skills` | Baseline integrated: isolated workspace-bounded discovery, validated metadata, bounded instruction injection, disabled filtering, and metadata-only model tool projection; executable Skill tools and richer lifecycle management remain pending |
-| Multi-agent coordination | `yunxi-agent-multi-agent` | `tool.multi-agent@1` | `yunxi-multi-agent` | Planned: inheritance wave 3 |
+| Multi-agent coordination | `yunxi-agent-multi-agent` | `tool.multi-agent@1` | `yunxi-multi-agent` | Baseline integrated: isolated coordinator, parent-child grant subset, fixed graph/turn budgets, persisted transcripts/events, restart recovery, Host-approved spawn/message, and a separate Model plugin process per child turn; background parallelism, in-flight cancellation, child tool grants, and Web graph UI remain pending |
 | Weixin channel | `yunxi-agent-weixin` | `channel.weixin@1` | `yunxi-channel-weixin` | Planned: inheritance wave 4 |
 | Voice input (speech recognition) | `yunxi-agent-voice` | `voice.transcribe@1` | `yunxi-voice` | Planned: inheritance wave 4 |
 | Voice output (speech synthesis) | `yunxi-agent-voice` | `voice.synthesize@1` | `yunxi-voice` | Planned: inheritance wave 4 |
@@ -56,8 +56,8 @@ is redistributed across the YunXi Next protocol, plugin host, and narrow
 capability contracts rather than migrated as one runtime plugin.
 
 Legacy `yunxi-agent-cli`, `yunxi-agent-tui`, and the embedded Web server are
-interaction surfaces. They will consume the same plugin catalog. The future Web
-settings page will render installed plugin manifests and persist enable/disable
+interaction surfaces. They consume the same plugin catalog. The current Web
+settings page renders the bounded built-in inventory and persists enable/disable
 state without loading disabled plugin code.
 
 `yunxi-agent-eval` remains development infrastructure. Its scenarios become
@@ -74,9 +74,10 @@ cross-plugin acceptance fixtures instead of a runtime capability.
    companion policy, mailbox, and scheduler use process boundaries and explicit
    workspace-scoped grants. Remaining parity items are recorded in the ledger.
 4. **Action path:** shell, patch, MCP, future executable Skill tools, and
-   multi-agent run only after host-issued approval and resource grants. Current
-   Skill declarations are metadata-only and cannot execute. A plugin result
-   never upgrades its own authority.
+   multi-agent child turns run only after host-issued approval and resource
+   grants. Read-only agent listing and stored-state interruption do not acquire
+   execution authority. Current Skill declarations are metadata-only and cannot
+   execute. A plugin result never upgrades its own authority.
 5. **Channel and media path:** Weixin and voice become optional adapters over
    the same runtime calls. Their failure cannot stop terminal chat.
 6. **Management surface:** Web settings reads manifests, changes persisted
@@ -195,3 +196,28 @@ carry executable fields: a model call receives `skill_tool_unavailable` without
 an approval prompt or side effect. Disabled Skills are omitted, and a discovery
 or context-process failure removes only the Skills route while model chat
 continues.
+
+## Phase 4 Baseline Evidence
+
+`yunxi-multi-agent` runs as a separate coordinator process with the stable
+`tool.multi-agent@1` contract. Its Host-issued `AgentDelegationGrant` binds a
+workspace, session, approval ticket, graph/turn budget, and allowed child-grant
+set. Spawn rejects depth, count, turn, transcript, or grant escalation before
+state is written. Graphs, bounded events, and child transcripts use recoverable
+same-directory replacement beneath `.yunxi-next/multi-agent`.
+
+The CLI exposes `agent.spawn`, `agent.list`, `agent.message`, and
+`agent.interrupt` only when the capability is enabled. Spawn and message reuse
+the existing user approval continuation. Each child turn starts a separate
+Model plugin process, receives its own transcript and no parent tool catalog,
+and is explicitly shut down afterward. A child API failure marks only that
+branch failed and is returned to the parent model as a tool result; the main
+model route remains usable. Restart recovery marks only stale Running branches
+failed, recursive interruption spares siblings, and process fixtures verify
+that Provider credentials are absent from persisted coordinator state.
+
+This is a baseline rather than full integration. Child turns are synchronous,
+so `agent.interrupt` updates stored cancellation between turns but cannot yet
+terminate an in-flight model HTTP request. Parallel/background workers, live
+cancellation, delegated child tools, model selection, and a Web graph/event
+view remain Phase 4 work.

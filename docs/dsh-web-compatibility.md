@@ -69,7 +69,8 @@ successful change emits `settings/document-updated` on `events.host`.
 `yunxi-settings` persists the target composition to `settings.json`; the live
 Host keeps its current children and routes until restart. Explicit environment
 switches override that document for the process. The required Model entry is
-read-only.
+read-only; the current inventory exposes thirteen restart-scoped optional
+capability switches, including Multi-agent.
 
 `yunxi-web-gateway/build.rs` recursively validates `web/dist` and generates an
 exact embedded resource table. It admits only the required document, script,

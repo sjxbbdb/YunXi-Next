@@ -24,6 +24,7 @@ pub enum GrantKind {
     Network,
     Secret,
     ProviderCredential,
+    AgentDelegation,
 }
 
 impl fmt::Display for GrantKind {
@@ -35,6 +36,7 @@ impl fmt::Display for GrantKind {
             Self::Network => "network",
             Self::Secret => "secret",
             Self::ProviderCredential => "provider_credential",
+            Self::AgentDelegation => "agent_delegation",
         };
         formatter.write_str(value)
     }

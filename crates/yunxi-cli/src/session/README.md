@@ -6,4 +6,5 @@ memory writes, proactive scheduling, and the encrypted mailbox. Parent
 approval continuation for automatic tool calls, plus the browser-safe Web
 projection. `tool_loop.rs` owns the built-in
 Shell/Patch catalog, MCP/Skill dynamic projections, bounded argument decoding,
-and tool-result conversion.
+and tool-result conversion. `multi_agent.rs` owns isolated child-model launches,
+coordinator calls, and branch failure reporting.

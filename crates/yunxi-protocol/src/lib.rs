@@ -14,6 +14,7 @@ mod manifest;
 mod mcp;
 mod memory_write;
 mod message;
+mod multi_agent;
 mod scheduler;
 mod sessions;
 mod skills;
@@ -72,6 +73,18 @@ pub use memory_write::{
 pub use message::{
     ChatMessage, ChatRequest, ChatResult, ChatRole, HostMessage, MODEL_CHAT_COMPLETE_OPERATION,
     PROTOCOL_VERSION, PluginMessage,
+};
+pub use multi_agent::{
+    AgentBudget, AgentDelegationGrant, AgentEvent, AgentEventKind, AgentInterruptRequest,
+    AgentListRequest, AgentListResult, AgentMutationResult, AgentProtocolError, AgentSnapshot,
+    AgentSpawnRequest, AgentSpawnResult, AgentStatus, AgentTranscriptEntry, AgentTranscriptRole,
+    AgentTurnCompleteRequest, AgentTurnFailRequest, AgentTurnStartRequest, AgentTurnStartResult,
+    MAX_AGENT_COUNT, MAX_AGENT_DEPTH, MAX_AGENT_EVENTS, MAX_AGENT_MESSAGE_BYTES,
+    MAX_AGENT_REPLY_BYTES, MAX_AGENT_TOTAL_TURNS, MAX_AGENT_TRANSCRIPT_ENTRIES,
+    MAX_AGENT_TURNS_PER_AGENT, ROOT_AGENT_ID, TOOL_MULTI_AGENT_INTERRUPT_OPERATION,
+    TOOL_MULTI_AGENT_LIST_OPERATION, TOOL_MULTI_AGENT_SPAWN_OPERATION,
+    TOOL_MULTI_AGENT_TURN_COMPLETE_OPERATION, TOOL_MULTI_AGENT_TURN_FAIL_OPERATION,
+    TOOL_MULTI_AGENT_TURN_START_OPERATION,
 };
 pub use scheduler::{
     ProactiveAction, ProactivePlan, ProactiveSchedulerRequest, ProactiveSchedulerResult,

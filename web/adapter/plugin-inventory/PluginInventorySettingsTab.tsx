@@ -23,6 +23,7 @@ export type CapabilityField =
   | 'files'
   | 'mcp'
   | 'skills'
+  | 'multi_agent'
 
 export type CapabilitySettings = Record<CapabilityField, boolean>
 
@@ -78,6 +79,7 @@ const CAPABILITY_BY_ENTRY: Readonly<Record<string, CapabilityField>> = {
   'yunxi.tool.files': 'files',
   'yunxi.tool.mcp': 'mcp',
   'yunxi.tool.skills': 'skills',
+  'yunxi.multi-agent': 'multi_agent',
 }
 
 function phaseLabel(

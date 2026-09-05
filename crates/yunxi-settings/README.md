@@ -5,7 +5,7 @@ The crate owns capability defaults, environment-variable precedence, schema
 validation, revision fencing, backup recovery, and same-directory atomic file
 replacement.
 
-The settings document contains booleans only. It never stores provider
+The settings document contains thirteen built-in capability booleans only. It never stores provider
 credentials, plugin executable paths, arbitrary JSON configuration, or legacy
 YunXi state. Writes take effect when the next `yunxi-next` Host starts.
 

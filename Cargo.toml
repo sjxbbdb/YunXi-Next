@@ -7,6 +7,7 @@ members = [
     "crates/yunxi-context",
     "crates/yunxi-kernel",
     "crates/yunxi-memory",
+    "crates/yunxi-multi-agent",
     "crates/yunxi-model-openai",
     "crates/yunxi-persona",
     "crates/yunxi-plugin-host",
