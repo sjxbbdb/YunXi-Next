@@ -11,11 +11,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use yunxi_protocol::{
-    AgentBudget, AgentDelegationGrant, AgentEvent, AgentEventKind, AgentInterruptRequest,
-    AgentListResult, AgentMutationResult, AgentProtocolError, AgentSnapshot, AgentSpawnRequest,
-    AgentSpawnResult, AgentStatus, AgentTranscriptEntry, AgentTurnCompleteRequest,
-    AgentTurnFailRequest, AgentTurnStartRequest, AgentTurnStartResult, GrantKind, MAX_AGENT_COUNT,
-    MAX_AGENT_EVENTS, MAX_AGENT_TRANSCRIPT_ENTRIES, ROOT_AGENT_ID,
+    AgentBudget, AgentDelegationGrant, AgentEvent, AgentEventKind, AgentInspectRequest,
+    AgentInspectResult, AgentInterruptRequest, AgentListResult, AgentMutationResult,
+    AgentProtocolError, AgentSnapshot, AgentSpawnRequest, AgentSpawnResult, AgentStatus,
+    AgentTranscriptEntry, AgentTurnCompleteRequest, AgentTurnFailRequest, AgentTurnStartRequest,
+    AgentTurnStartResult, GrantKind, MAX_AGENT_COUNT, MAX_AGENT_EVENTS,
+    MAX_AGENT_TRANSCRIPT_ENTRIES, ROOT_AGENT_ID,
 };
 
 const DOCUMENT_VERSION: u32 = 1;
@@ -162,6 +163,19 @@ impl CoordinatorStore {
             truncated,
         )
         .map_err(MultiAgentStoreError::Protocol)
+    }
+
+    pub fn inspect(
+        &self,
+        request: &AgentInspectRequest,
+    ) -> Result<AgentInspectResult, MultiAgentStoreError> {
+        self.require_matching_authority(request.grant())?;
+        request.validate().map_err(MultiAgentStoreError::Protocol)?;
+        let document = self.load_or_new()?;
+        let index = document.agent_index(request.agent_id())?;
+        let agent = &document.agents[index];
+        AgentInspectResult::new(agent.snapshot()?, agent.transcript.clone())
+            .map_err(MultiAgentStoreError::Protocol)
     }
 
     pub fn start_turn(
@@ -389,7 +403,6 @@ impl CoordinatorStore {
         }
 
         if document.coordinator_instance_id != self.instance_id {
-            self.require_write()?;
             let now = now_millis();
             let running = document
                 .agents
@@ -409,7 +422,11 @@ impl CoordinatorStore {
                 )?;
             }
             document.coordinator_instance_id = self.instance_id.clone();
-            self.save(&document)?;
+            // Read-only Web projections still need a truthful post-restart view;
+            // writable callers persist the same recovery on their next mutation.
+            if self.writable {
+                self.save(&document)?;
+            }
         }
         Ok(document)
     }
@@ -986,6 +1003,13 @@ mod tests {
                 .status(),
             AgentStatus::Completed
         );
+        let inspected = store
+            .inspect(
+                &AgentInspectRequest::new(grant, sibling.agent().id()).expect("inspect request"),
+            )
+            .expect("inspect");
+        assert_eq!(inspected.agent().id(), sibling.agent().id());
+        assert_eq!(inspected.transcript().len(), 2);
         assert!(store.path().is_file());
         let _ignored = fs::remove_dir_all(root);
     }
@@ -1005,6 +1029,20 @@ mod tests {
                     .expect("start"),
             )
             .expect("start turn");
+
+        let read_only_grant = AgentDelegationGrant::new(
+            yunxi_protocol::WorkspaceGrant::read_only(&root),
+            grant.session_id(),
+            "ticket-read",
+            grant.budget(),
+        )
+        .expect("read-only grant")
+        .with_allowed_child_grants([GrantKind::WorkspaceRead])
+        .expect("read-only child grants");
+        let read_only = CoordinatorStore::from_grant(&read_only_grant, "instance-2")
+            .expect("read-only restart view");
+        let read_only_list = read_only.list().expect("read-only recovery view");
+        assert_eq!(read_only_list.agents()[0].status(), AgentStatus::Failed);
 
         let restarted = CoordinatorStore::from_grant(&grant, "instance-2").expect("restart");
         let list = restarted.list().expect("recover list");

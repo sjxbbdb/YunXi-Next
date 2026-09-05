@@ -87,7 +87,7 @@ YunXi Next/
     |   |   |-- main.rs                executable and built-in child mode switch
     |   |   |-- repl.rs                commands and bounded chat history
     |   |   |-- session.rs             capability launch, composition, and model routing
-    |   |   |-- web.rs                 reusable Web Host facade over ChatSession
+    |   |   |-- web.rs                 Web Host facade, session RPC, and subagent projection
     |   |   |-- session/               stateful orchestration split from model routing
     |   |   |   |-- README.md          session module ownership
     |   |   |   |-- multi_agent.rs     coordinator calls and isolated child-model turns
@@ -316,7 +316,7 @@ YunXi Next/
     |       |-- memory_write.rs         memory extraction and review contracts
     |       |-- message.rs              versioned host/plugin messages
     |       |-- mcp.rs                  bounded MCP list/call/status contracts
-    |       |-- multi_agent.rs          bounded delegation, graph, turn, and event contracts
+    |       |-- multi_agent.rs          bounded delegation, graph, inspect, turn, and event contracts
     |       |-- scheduler.rs            proactive scheduling payload contracts
     |       |-- sessions.rs             persistent-session payload contracts
     |       |-- skills.rs               bounded Skill metadata/context contracts

@@ -10,6 +10,7 @@ use crate::{GrantKind, WorkspaceGrant};
 
 pub const TOOL_MULTI_AGENT_SPAWN_OPERATION: &str = "spawn";
 pub const TOOL_MULTI_AGENT_LIST_OPERATION: &str = "list";
+pub const TOOL_MULTI_AGENT_INSPECT_OPERATION: &str = "inspect";
 pub const TOOL_MULTI_AGENT_TURN_START_OPERATION: &str = "turn_start";
 pub const TOOL_MULTI_AGENT_TURN_COMPLETE_OPERATION: &str = "turn_complete";
 pub const TOOL_MULTI_AGENT_TURN_FAIL_OPERATION: &str = "turn_fail";
@@ -614,6 +615,74 @@ impl AgentListResult {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct AgentInspectRequest {
+    grant: AgentDelegationGrant,
+    agent_id: String,
+}
+
+impl AgentInspectRequest {
+    pub fn new(
+        grant: AgentDelegationGrant,
+        agent_id: impl Into<String>,
+    ) -> Result<Self, AgentProtocolError> {
+        let request = Self {
+            grant,
+            agent_id: agent_id.into(),
+        };
+        request.validate()?;
+        Ok(request)
+    }
+
+    pub fn grant(&self) -> &AgentDelegationGrant {
+        &self.grant
+    }
+
+    pub fn agent_id(&self) -> &str {
+        &self.agent_id
+    }
+
+    pub fn validate(&self) -> Result<(), AgentProtocolError> {
+        self.grant.validate()?;
+        validate_agent_id(&self.agent_id)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AgentInspectResult {
+    agent: AgentSnapshot,
+    transcript: Vec<AgentTranscriptEntry>,
+}
+
+impl AgentInspectResult {
+    pub fn new(
+        agent: AgentSnapshot,
+        transcript: Vec<AgentTranscriptEntry>,
+    ) -> Result<Self, AgentProtocolError> {
+        agent.validate()?;
+        if transcript.len() > MAX_AGENT_TRANSCRIPT_ENTRIES {
+            return Err(AgentProtocolError::TooManyTranscriptEntries {
+                count: transcript.len(),
+                maximum: MAX_AGENT_TRANSCRIPT_ENTRIES,
+            });
+        }
+        for entry in &transcript {
+            entry.validate()?;
+        }
+        Ok(Self { agent, transcript })
+    }
+
+    pub fn agent(&self) -> &AgentSnapshot {
+        &self.agent
+    }
+
+    pub fn transcript(&self) -> &[AgentTranscriptEntry] {
+        &self.transcript
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AgentTurnStartRequest {
     grant: AgentDelegationGrant,
     agent_id: String,
@@ -1130,5 +1199,41 @@ mod tests {
             oversized,
             Err(AgentProtocolError::FieldTooLong { .. })
         ));
+    }
+
+    #[test]
+    fn inspect_contract_round_trips_a_bounded_transcript() {
+        let request = AgentInspectRequest::new(grant(), "agent-1").expect("inspect request");
+        let encoded = serde_json::to_string(&request).expect("serialize inspect request");
+        let decoded =
+            serde_json::from_str::<AgentInspectRequest>(&encoded).expect("decode inspect request");
+        decoded.validate().expect("validate inspect request");
+
+        let agent = AgentSnapshot::new(
+            "agent-1",
+            ROOT_AGENT_ID,
+            "worker",
+            1,
+            AgentStatus::Completed,
+            1,
+            Vec::new(),
+            1,
+            2,
+        )
+        .expect("snapshot");
+        let result = AgentInspectResult::new(
+            agent,
+            vec![
+                AgentTranscriptEntry::user("task").expect("user entry"),
+                AgentTranscriptEntry::assistant("result").expect("assistant entry"),
+            ],
+        )
+        .expect("inspect result");
+        let decoded = serde_json::from_value::<AgentInspectResult>(
+            serde_json::to_value(&result).expect("serialize inspect result"),
+        )
+        .expect("decode inspect result");
+        assert_eq!(decoded.agent().id(), "agent-1");
+        assert_eq!(decoded.transcript().len(), 2);
     }
 }

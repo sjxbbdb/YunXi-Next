@@ -163,6 +163,176 @@ fn web_command_serves_chat_history_events_and_approval() {
 }
 
 #[test]
+fn web_projects_isolated_multi_agent_tree_and_history() {
+    let workspace = unique_temp_dir("yunxi-web-multi-agent");
+    fs::create_dir_all(&workspace).expect("create multi-agent Web workspace");
+
+    let model_listener = TcpListener::bind("127.0.0.1:0").expect("bind model fixture");
+    model_listener
+        .set_nonblocking(true)
+        .expect("make model fixture nonblocking");
+    let model_address = model_listener.local_addr().expect("model fixture address");
+    let model_server = thread::spawn(move || {
+        let (parent_stream, parent_body) = accept_request(&model_listener);
+        assert!(
+            parent_body.contains("agent.spawn"),
+            "parent body: {parent_body}"
+        );
+        write_response(
+            parent_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":null,"tool_calls":[{"id":"web-agent-spawn","type":"function","function":{"name":"agent.spawn","arguments":"{\"task\":\"inspect the Web fixture\",\"name\":\"web-worker\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+        );
+
+        let (child_stream, child_body) = accept_request(&model_listener);
+        assert!(
+            child_body.contains("isolated YunXi child agent"),
+            "child body: {child_body}"
+        );
+        assert!(
+            child_body.contains("inspect the Web fixture"),
+            "child body: {child_body}"
+        );
+        assert!(
+            !child_body.contains("\"tools\""),
+            "child body: {child_body}"
+        );
+        write_response(
+            child_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"Web child result"},"finish_reason":"stop"}]}"#,
+        );
+
+        let (continuation_stream, continuation_body) = accept_request(&model_listener);
+        assert!(
+            continuation_body.contains("Web child result"),
+            "continuation body: {continuation_body}"
+        );
+        write_response(
+            continuation_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"Web parent completed"},"finish_reason":"stop"}]}"#,
+        );
+    });
+
+    let mut command = WebChild::command(&workspace, model_address);
+    command
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .env("YUNXI_NEXT_MEMORY_ENABLED", "false")
+        .env("YUNXI_NEXT_COMPANION_ENABLED", "false")
+        .env("YUNXI_NEXT_STORAGE_ENABLED", "true")
+        .env("YUNXI_NEXT_MAILBOX_ENABLED", "false")
+        .env("YUNXI_NEXT_SCHEDULER_ENABLED", "false")
+        .env("YUNXI_NEXT_SHELL_ENABLED", "false")
+        .env("YUNXI_NEXT_PATCH_ENABLED", "false")
+        .env("YUNXI_NEXT_FILES_ENABLED", "false")
+        .env("YUNXI_NEXT_MCP_ENABLED", "false")
+        .env("YUNXI_NEXT_SKILLS_ENABLED", "false")
+        .env("YUNXI_NEXT_MULTI_AGENT_ENABLED", "true");
+    let mut web = WebChild::start(command);
+    let address = web.wait_for_address();
+
+    let created = rpc_call(address, "multi-create", "session.create", json!({}));
+    let root_session_id = created["sessionId"]
+        .as_str()
+        .expect("root session id")
+        .to_string();
+    assert_eq!(
+        rpc_call(
+            address,
+            "multi-prompt",
+            "session.prompt",
+            json!({
+                "sessionId": root_session_id,
+                "mode": "queue",
+                "content": [{ "type": "text", "text": "delegate the Web fixture" }]
+            }),
+        ),
+        json!({ "accepted": true })
+    );
+
+    let approval_events = get_events(address, "/api/events.mux");
+    let approval = approval_events
+        .iter()
+        .find(|event| event.payload["type"] == "approval/requested")
+        .expect("multi-agent approval event");
+    assert_eq!(approval.payload["toolName"], "agent.spawn");
+    let approval_response = RpcMessage::client_response(
+        RpcId::new(approval.rpc_id.clone()).expect("approval response id"),
+        RpcResult::success(json!({
+            "sessionId": root_session_id,
+            "approvalId": approval.payload["approvalId"],
+            "outcome": "allowed-once",
+        })),
+    )
+    .expect("approval response");
+    assert_eq!(
+        post_json(
+            address,
+            "/api/respond",
+            approval_response
+                .encode()
+                .expect("encode approval response"),
+        ),
+        json!({ "accepted": true })
+    );
+
+    let catalog = rpc_call(
+        address,
+        "multi-list",
+        "subagent.list",
+        json!({ "parentSessionId": root_session_id }),
+    );
+    assert_eq!(catalog["parentAvailable"], true);
+    let entries = catalog["entries"].as_array().expect("subagent entries");
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0]["kind"], "child");
+    assert_eq!(entries[0]["id"], "agent-1");
+    assert_eq!(entries[0]["mode"], "one-shot");
+    assert_eq!(entries[0]["label"], "web-worker");
+    assert_eq!(entries[0]["activity"], "inactive");
+    assert_eq!(entries[0]["hasChildren"], false);
+
+    let sessions = rpc_call(address, "multi-sessions", "session.list", json!({}));
+    let child_summary = sessions["items"]
+        .as_array()
+        .expect("session summaries")
+        .iter()
+        .find(|summary| summary["sessionId"] == "agent-1")
+        .expect("child session summary");
+    assert_eq!(child_summary["origin"], "subagent");
+    assert_eq!(child_summary["parentSessionId"], root_session_id);
+
+    let history = rpc_call(
+        address,
+        "multi-history",
+        "subagent.history",
+        json!({
+            "parentSessionId": root_session_id,
+            "childSessionId": "agent-1",
+            "mode": "one-shot",
+            "maxMessages": 16,
+        }),
+    );
+    assert_eq!(history["hasMore"], false);
+    let history_events = history["events"].as_array().expect("child history events");
+    assert_eq!(history_events.len(), 6);
+    assert!(history_events.iter().any(|event| {
+        event["event"]["type"] == "user/message"
+            && event["event"]["data"]["content"][0]["text"] == "inspect the Web fixture"
+    }));
+    assert!(history_events.iter().any(|event| {
+        event["event"]["type"] == "assistant/message"
+            && event["event"]["data"]["message"]["content"][0]["text"] == "Web child result"
+    }));
+
+    web.stop();
+    model_server.join().expect("join multi-agent model fixture");
+    remove_workspace(&workspace);
+}
+
+#[test]
 fn capability_settings_persist_and_apply_only_after_host_restart() {
     let workspace = unique_temp_dir("yunxi-web-settings");
     fs::create_dir_all(&workspace).expect("create settings workspace");

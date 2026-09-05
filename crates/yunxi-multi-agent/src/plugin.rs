@@ -5,10 +5,11 @@ use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use yunxi_protocol::{
-    AgentInterruptRequest, AgentListRequest, AgentSpawnRequest, AgentTurnCompleteRequest,
-    AgentTurnFailRequest, AgentTurnStartRequest, CapabilityDescriptor, CapabilityError, GrantKind,
-    GrantRequirement, HostMessage, InvocationCodecError, InvocationResponse, PluginMessage,
-    ProtocolError, TOOL_MULTI_AGENT_INTERRUPT_OPERATION, TOOL_MULTI_AGENT_LIST_OPERATION,
+    AgentInspectRequest, AgentInterruptRequest, AgentListRequest, AgentSpawnRequest,
+    AgentTurnCompleteRequest, AgentTurnFailRequest, AgentTurnStartRequest, CapabilityDescriptor,
+    CapabilityError, GrantKind, GrantRequirement, HostMessage, InvocationCodecError,
+    InvocationResponse, PluginMessage, ProtocolError, TOOL_MULTI_AGENT_INSPECT_OPERATION,
+    TOOL_MULTI_AGENT_INTERRUPT_OPERATION, TOOL_MULTI_AGENT_LIST_OPERATION,
     TOOL_MULTI_AGENT_SPAWN_OPERATION, TOOL_MULTI_AGENT_TURN_COMPLETE_OPERATION,
     TOOL_MULTI_AGENT_TURN_FAIL_OPERATION, TOOL_MULTI_AGENT_TURN_START_OPERATION, capabilities,
     connect_plugin_with_grants,
@@ -71,6 +72,15 @@ pub fn run_multi_agent_plugin() -> Result<(), MultiAgentPluginError> {
                         .and_then(|payload| {
                             CoordinatorStore::from_grant(payload.grant(), &instance_id)
                                 .and_then(|store| store.list())
+                                .map_err(MultiAgentPluginError::Store)
+                        })
+                        .and_then(|result| encode(request_id, &result)),
+                    TOOL_MULTI_AGENT_INSPECT_OPERATION => request
+                        .decode_payload::<AgentInspectRequest>()
+                        .map_err(MultiAgentPluginError::Invocation)
+                        .and_then(|payload| {
+                            CoordinatorStore::from_grant(payload.grant(), &instance_id)
+                                .and_then(|store| store.inspect(&payload))
                                 .map_err(MultiAgentPluginError::Store)
                         })
                         .and_then(|result| encode(request_id, &result)),

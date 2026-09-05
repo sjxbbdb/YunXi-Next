@@ -102,6 +102,8 @@ pub struct GatewaySessionSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     parent_session_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    origin: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     cwd: Option<String>,
 }
 
@@ -113,6 +115,7 @@ impl GatewaySessionSummary {
             running,
             blank,
             parent_session_id: None,
+            origin: None,
             cwd: None,
         }
     }
@@ -120,6 +123,15 @@ impl GatewaySessionSummary {
     pub fn with_parent_session_id(mut self, session_id: impl Into<String>) -> Self {
         self.parent_session_id = Some(session_id.into());
         self
+    }
+
+    pub fn with_origin(mut self, origin: impl Into<String>) -> Self {
+        self.origin = Some(origin.into());
+        self
+    }
+
+    pub fn with_subagent_origin(self) -> Self {
+        self.with_origin("subagent")
     }
 
     pub fn with_cwd(mut self, cwd: impl Into<String>) -> Self {
@@ -145,6 +157,10 @@ impl GatewaySessionSummary {
 
     pub fn parent_session_id(&self) -> Option<&str> {
         self.parent_session_id.as_deref()
+    }
+
+    pub fn origin(&self) -> Option<&str> {
+        self.origin.as_deref()
     }
 
     pub fn cwd(&self) -> Option<&str> {

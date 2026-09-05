@@ -6,7 +6,9 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
-use yunxi_protocol::{ChatMessage, ChatRole};
+use yunxi_protocol::{
+    AgentListResult, AgentStatus, AgentTranscriptRole, ChatMessage, ChatRole, ROOT_AGENT_ID,
+};
 use yunxi_settings::{
     CAPABILITY_SETTINGS_NAMESPACE, CapabilityEdit, CapabilitySetting, CapabilitySettingsError,
     CapabilitySettingsStore, CapabilitySwitches,
@@ -19,6 +21,7 @@ use yunxi_web_gateway::{
     Gateway, GatewayBackend, GatewayError, GatewayProjection, SESSION_CREATE_METHOD,
     SESSION_HISTORY_METHOD, SESSION_PROMPT_METHOD, SETTINGS_DESCRIBE_METHOD,
     SETTINGS_MUTATE_METHOD, SETTINGS_REPLACE_METHOD, SETTINGS_UPDATE_METHOD,
+    SUBAGENT_HISTORY_METHOD, SUBAGENT_LIST_METHOD,
 };
 
 use crate::session::{ChatBackend, ChatSession};
@@ -74,6 +77,8 @@ impl WebHost {
             SESSION_CREATE_METHOD => self.dispatch_session_create(request),
             SESSION_HISTORY_METHOD => self.dispatch_session_history(request),
             SESSION_PROMPT_METHOD => self.dispatch_session_prompt(request),
+            SUBAGENT_LIST_METHOD => self.dispatch_subagent_list(request),
+            SUBAGENT_HISTORY_METHOD => self.dispatch_subagent_history(request),
             SETTINGS_DESCRIBE_METHOD => self.dispatch_settings_describe(request),
             SETTINGS_UPDATE_METHOD => self.dispatch_settings_update(request),
             SETTINGS_REPLACE_METHOD => self.dispatch_settings_replace(request),
@@ -469,6 +474,240 @@ impl WebHost {
                 "hasMore": has_more,
             }),
         )
+    }
+
+    fn dispatch_subagent_list(
+        &mut self,
+        request: &ClientRequest,
+    ) -> Result<ServerResponse, WebHostError> {
+        let Some(parent_session_id) = string_field(request.payload(), "parentSessionId") else {
+            return self.failure(
+                request,
+                "invalid-payload",
+                "subagent.list requires a string parentSessionId",
+                json!({ "field": "parentSessionId" }),
+            );
+        };
+        if !self.session.multi_agent_web_available() {
+            return self.success(
+                request,
+                json!({
+                    "entries": [],
+                    "parentAvailable": self.web_session_id.as_deref()
+                        == Some(parent_session_id.as_str()),
+                }),
+            );
+        }
+
+        let context = match self.subagent_context(&parent_session_id) {
+            Ok(context) => context,
+            Err(_error) => {
+                return self.failure(
+                    request,
+                    "subagent-parent-unavailable",
+                    "the multi-agent catalog is unavailable",
+                    json!({ "parentSessionId": parent_session_id }),
+                );
+            }
+        };
+        let Some((_root_session_id, parent_agent_id, graph)) = context else {
+            return self.success(request, json!({ "entries": [], "parentAvailable": false }));
+        };
+        let entries = graph
+            .agents()
+            .iter()
+            .filter(|agent| agent.parent_id() == parent_agent_id)
+            .map(|agent| {
+                let has_children = graph
+                    .agents()
+                    .iter()
+                    .any(|child| child.parent_id() == agent.id());
+                json!({
+                    "kind": "child",
+                    "id": agent.id(),
+                    "mode": "one-shot",
+                    "label": agent.name(),
+                    "activity": if agent.status() == AgentStatus::Running {
+                        "running"
+                    } else {
+                        "inactive"
+                    },
+                    "hasChildren": has_children,
+                })
+            })
+            .collect::<Vec<_>>();
+        self.success(
+            request,
+            json!({
+                "entries": entries,
+                "parentAvailable": true,
+            }),
+        )
+    }
+
+    fn dispatch_subagent_history(
+        &mut self,
+        request: &ClientRequest,
+    ) -> Result<ServerResponse, WebHostError> {
+        let Some(parent_session_id) = string_field(request.payload(), "parentSessionId") else {
+            return self.failure(
+                request,
+                "invalid-payload",
+                "subagent.history requires a string parentSessionId",
+                json!({ "field": "parentSessionId" }),
+            );
+        };
+        let Some(child_session_id) = string_field(request.payload(), "childSessionId") else {
+            return self.failure(
+                request,
+                "invalid-payload",
+                "subagent.history requires a string childSessionId",
+                json!({ "field": "childSessionId" }),
+            );
+        };
+        if request.payload().get("mode").and_then(Value::as_str) != Some("one-shot") {
+            return self.failure(
+                request,
+                "subagent-not-resumable",
+                "this WebHost exposes one-shot child history only",
+                json!({ "childSessionId": child_session_id }),
+            );
+        }
+        let before_seq = optional_u64(request.payload(), "beforeSeq");
+        let raw_maximum = optional_u64(request.payload(), "maxMessages");
+        let maximum = raw_maximum.unwrap_or(50).clamp(1, 128) as usize;
+        if request.payload().get("beforeSeq").is_some() && before_seq.is_none() {
+            return self.failure(
+                request,
+                "invalid-payload",
+                "subagent.history beforeSeq must be a non-negative integer",
+                json!({ "field": "beforeSeq" }),
+            );
+        }
+        if request.payload().get("maxMessages").is_some()
+            && !raw_maximum.is_some_and(|value| value > 0)
+        {
+            return self.failure(
+                request,
+                "invalid-payload",
+                "subagent.history maxMessages must be a positive integer",
+                json!({ "field": "maxMessages" }),
+            );
+        }
+        if !self.session.multi_agent_web_available() {
+            return self.failure(
+                request,
+                "subagent-catalog-diagnostic",
+                "the multi-agent coordinator is disabled or unavailable",
+                json!({
+                    "parentSessionId": parent_session_id,
+                    "childSessionId": child_session_id,
+                    "reason": "unavailable",
+                }),
+            );
+        }
+
+        let context = match self.subagent_context(&parent_session_id) {
+            Ok(context) => context,
+            Err(_error) => {
+                return self.failure(
+                    request,
+                    "subagent-catalog-diagnostic",
+                    "the multi-agent history is unavailable",
+                    json!({
+                        "parentSessionId": parent_session_id,
+                        "childSessionId": child_session_id,
+                        "reason": "unavailable",
+                    }),
+                );
+            }
+        };
+        let Some((root_session_id, parent_agent_id, graph)) = context else {
+            return self.failure(
+                request,
+                "subagent-not-found",
+                "the requested parent session does not exist",
+                json!({
+                    "parentSessionId": parent_session_id,
+                    "childSessionId": child_session_id,
+                }),
+            );
+        };
+        let is_direct_child = graph
+            .agents()
+            .iter()
+            .any(|agent| agent.id() == child_session_id && agent.parent_id() == parent_agent_id);
+        if !is_direct_child {
+            return self.failure(
+                request,
+                "subagent-not-found",
+                "the requested child session does not exist under this parent",
+                json!({
+                    "parentSessionId": parent_session_id,
+                    "childSessionId": child_session_id,
+                }),
+            );
+        }
+
+        let inspected = match self
+            .session
+            .web_agent_inspect(&root_session_id, &child_session_id)
+        {
+            Ok(inspected) => inspected,
+            Err(_error) => {
+                return self.failure(
+                    request,
+                    "subagent-catalog-diagnostic",
+                    "the child session history is unavailable",
+                    json!({
+                        "parentSessionId": parent_session_id,
+                        "childSessionId": child_session_id,
+                        "reason": "unavailable",
+                    }),
+                );
+            }
+        };
+        let messages = inspected
+            .transcript()
+            .iter()
+            .map(|entry| match entry.role() {
+                AgentTranscriptRole::User => ChatMessage::user(entry.content()),
+                AgentTranscriptRole::Assistant => ChatMessage::assistant(entry.content()),
+            })
+            .collect::<Vec<_>>();
+        let (events, has_more) = history_page(&messages, before_seq, maximum);
+        self.success(
+            request,
+            json!({
+                "events": events,
+                "hasMore": has_more,
+            }),
+        )
+    }
+
+    fn subagent_context(
+        &mut self,
+        parent_session_id: &str,
+    ) -> Result<Option<(String, String, AgentListResult)>, String> {
+        let Some(root_session_id) = self.web_session_id.clone() else {
+            return Ok(None);
+        };
+        let graph = self.session.web_agent_graph(&root_session_id)?;
+        if parent_session_id == root_session_id {
+            return Ok(Some((root_session_id, ROOT_AGENT_ID.to_string(), graph)));
+        }
+        if graph
+            .agents()
+            .iter()
+            .any(|agent| agent.id() == parent_session_id)
+        {
+            return Ok(Some((
+                root_session_id,
+                parent_session_id.to_string(),
+                graph,
+            )));
+        }
+        Ok(None)
     }
 
     fn dispatch_session_prompt(

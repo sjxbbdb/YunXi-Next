@@ -139,9 +139,14 @@ dsh 源码和 MIT 版权声明必须单独记录，不能混入 Rust Kernel 代�
 接入模型工具目录，spawn/message 复用 Host approval，每次子回合启动单独的 Model
 plugin 进程，且不向子进程发放父会话工具目录或 Provider credential 协议字段。
 
-**待完成：** `P4-03` 实现后台并行 worker、执行中子模型请求的真实取消、Web
-分支/事件视图，以及受限的子 Agent 工具 grant 和模型选择。当前 `interrupt` 在
-回合之间递归更新持久化状态，不能终止已经发出的同步 HTTP 请求。
+**当前进展：** `P4-03` 已先完成 Web 只读投影切片：dsh 现有的
+`subagent.list` / `subagent.history` 能读取真实父子图、子会话状态和有界 transcript，
+`session.list` 会携带 `origin: subagent` 与 `parentSessionId`。查询使用只读 grant，
+协调器重启后的运行中分支会在只读视图中降级为失败，不阻断历史查看。
+
+**待完成：** 后台并行 worker、执行中子模型请求的真实取消、子 Agent 工具 grant 和
+模型选择。当前 `interrupt` 在回合之间递归更新持久化状态，不能终止已经发出的同步
+HTTP 请求；Web 端暂只支持 one-shot 子会话查看，不支持 continuable 子会话续写。
 
 **退出门槛：** 子 Agent 不能继承超出父任务的 grant；子 Agent 崩溃、超时或
 取消只结束对应分支；主会话、Kernel 和同级 Agent 仍可继续工作。
@@ -277,7 +282,13 @@ Phase 0 和 Phase 1 已按下列顺序完成。后续仍保持一次只推进一
 | --- | --- | --- |
 | `P4-01` 多智能体协议与协调进程 | 已完成 | 新增 `tool.multi-agent@1`、`AgentDelegationGrant`、父子 grant 子集与固定预算；`yunxi-multi-agent` 在 workspace 内持久化图、转录和有界事件，使用备份可恢复原子替换；进程测试覆盖重启恢复且持久化数据不含 Provider credential |
 | `P4-02` Host 工具闭环与子模型隔离 | 基线已完成 | `agent.spawn/list/message/interrupt` 进入有界工具目录；spawn/message 经过既有审批；每个子回合使用单独 Model plugin 进程和独立转录，子失败写入对应分支并保持父模型可继续；禁用矩阵验证不启动、不注册、不暴露工具 |
-| `P4-03` 异步运行与实时取消 | 进行中 | 当前为同步子回合，递归 interrupt 只在回合边界生效；后台并行 worker、执行中进程取消、Web 图视图及受限子工具授权尚未接入 |
+| `P4-03` Web 子会话投影切片 | 部分完成 | 新增只读 `inspect` 协议操作；WebHost 接入 dsh `subagent.list/history`，投影 one-shot 子 Agent 的目录、状态、父子 lineage 和分页历史；进程级测试覆盖审批、隔离子模型、`session.list` 来源字段和历史读取 |
+
+### 执行记录：2026-09-05
+
+| 项目 | 状态 | 证据 |
+| --- | --- | --- |
+| `P4-03` Web 子 Agent 目录与历史 | 已完成首个切片 | `AgentInspectRequest/Result` 与协调器 `inspect` 仅返回受限 transcript；`subagent.list` 支持根及已知子父级，`subagent.history` 输出 dsh `HistoryEntry` 分页；只读重启恢复、HTTP 路由和 `yunxi-cli/tests/web_host.rs` 进程回归均通过 |
 
 本批次已改变 Model 的可选工具运行时行为，但没有把 manifest 声明误当作
 实际 Secret broker 或操作系统沙箱。Phase 1 的文字 Action Path 已完成

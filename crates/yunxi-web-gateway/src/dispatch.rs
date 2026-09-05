@@ -32,6 +32,7 @@ pub const SESSION_MODELS_METHOD: &str = "session.models";
 pub const SESSION_PROMPT_METHOD: &str = "session.prompt";
 pub const SKILL_LIST_METHOD: &str = "skill.list";
 pub const SUBAGENT_LIST_METHOD: &str = "subagent.list";
+pub const SUBAGENT_HISTORY_METHOD: &str = "subagent.history";
 pub const WORKSPACE_LIST_METHOD: &str = "workspace.list";
 
 const DEFAULT_WORKSPACE_ID: &str = "yunxi-default";
@@ -170,6 +171,13 @@ impl Gateway {
                 Ok(()) => RpcResult::success(json!({
                     "entries": [],
                     "parentAvailable": true,
+                })),
+                Err(error) => RpcResult::failure(error),
+            },
+            SUBAGENT_HISTORY_METHOD => match object_payload(request.method(), request.payload()) {
+                Ok(()) => RpcResult::success(json!({
+                    "events": [],
+                    "hasMore": false,
                 })),
                 Err(error) => RpcResult::failure(error),
             },

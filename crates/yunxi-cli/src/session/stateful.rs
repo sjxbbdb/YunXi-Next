@@ -1,6 +1,6 @@
 //! Stateful post-response orchestration and REPL management calls.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -9,14 +9,14 @@ use std::process;
 use yunxi_composition::{EntryId, PluginFiberPhase, PluginInventorySnapshot};
 use yunxi_kernel::PluginState;
 use yunxi_protocol::{
-    ActionGrant, COMPANION_MAILBOX_ENQUEUE_OPERATION, COMPANION_MAILBOX_GET_OPERATION,
+    ActionGrant, AgentStatus, COMPANION_MAILBOX_ENQUEUE_OPERATION, COMPANION_MAILBOX_GET_OPERATION,
     COMPANION_MAILBOX_LIST_OPERATION, COMPANION_MAILBOX_MARK_READ_OPERATION,
     MEMORY_WRITE_EXTRACT_OPERATION, MEMORY_WRITE_REVIEW_OPERATION, MailboxEnqueueRequest,
     MailboxGetRequest, MailboxGetResult, MailboxItemKind, MailboxListRequest, MailboxListResult,
     MailboxMarkReadRequest, MailboxMutationResult, MemoryReviewAction, MemoryReviewRequest,
     MemoryReviewResult, MemoryWriteRequest, MemoryWriteResult, MemoryWriteStatus,
     PatchApplyRequest, PatchApplyResult, PatchChangeKind, ProactiveSchedulerRequest,
-    ProactiveSchedulerResult, SCHEDULER_PROACTIVE_EVALUATE_OPERATION,
+    ProactiveSchedulerResult, ROOT_AGENT_ID, SCHEDULER_PROACTIVE_EVALUATE_OPERATION,
     STORAGE_SESSIONS_APPEND_OPERATION, STORAGE_SESSIONS_CREATE_OPERATION,
     STORAGE_SESSIONS_LIST_OPERATION, STORAGE_SESSIONS_LOAD_OPERATION, SessionAppendRequest,
     SessionCreateRequest, SessionCreateResult, SessionListRequest, SessionListResult,
@@ -321,6 +321,45 @@ impl ChatSession {
                 )
                 .with_cwd(self.cwd.to_string_lossy()),
             );
+        }
+
+        if let Some(root_session_id) = self.active_session_id.clone() {
+            let known_session_ids = sessions
+                .iter()
+                .map(|session| session.session_id().to_string())
+                .collect::<BTreeSet<_>>();
+            if self.multi_agent_capability.is_some() {
+                if let Ok(graph) = self.web_agent_graph(&root_session_id) {
+                    for agent in graph.agents() {
+                        if known_session_ids.contains(agent.id()) {
+                            continue;
+                        }
+                        let Ok(updated_at) = u64::try_from(agent.updated_at_millis()) else {
+                            self.push_notice(format!(
+                                "agent `{}` has an unsupported timestamp and was omitted from Web list",
+                                agent.id()
+                            ));
+                            continue;
+                        };
+                        let parent_session_id = if agent.parent_id() == ROOT_AGENT_ID {
+                            root_session_id.clone()
+                        } else {
+                            agent.parent_id().to_string()
+                        };
+                        sessions.push(
+                            GatewaySessionSummary::new(
+                                agent.id(),
+                                updated_at,
+                                agent.status() == AgentStatus::Running,
+                                false,
+                            )
+                            .with_parent_session_id(parent_session_id)
+                            .with_subagent_origin()
+                            .with_cwd(self.cwd.to_string_lossy()),
+                        );
+                    }
+                }
+            }
         }
         sessions
     }

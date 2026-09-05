@@ -22,12 +22,15 @@ The stable method set currently covers:
 - `session.models`
 - `session.prompt`
 - read-only startup projections for credentials, providers, presets, commands,
-  skills, subagents, and Cordis inventory
+  skills, subagents, and Cordis inventory; the concrete `WebHost` also serves
+  dsh `subagent.list` and one-shot `subagent.history` projections
 - `respond` (the carrier-level approval response route)
 
-The generic `Gateway` owns the projection-only methods; `yunxi-cli::WebHost`
-adds the session methods and the three revision-fenced capability-settings
-writes while keeping the same ChatSession and plugin Host.
+The generic `Gateway` owns the projection-only methods and an empty fallback
+for subagent history; `yunxi-cli::WebHost` adds the session methods, the
+three revision-fenced capability-settings writes, and the real read-only
+subagent graph/history projection while keeping the same ChatSession and
+plugin Host.
 Unknown methods and the two event-stream methods used as unary calls return a
 structured dsh `RpcResult` failure. The carrier is dependency-light and uses
 bounded HTTP/1.1 request parsing plus bounded SSE responses; callers own the

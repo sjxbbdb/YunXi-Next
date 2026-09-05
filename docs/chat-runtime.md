@@ -102,7 +102,12 @@ approved child turn launches a new isolated Model plugin process with the
 child transcript, no parent tool catalog, and an explicit instruction not to
 act outside that delegated task. The Host shuts that process down after the
 reply. List reads bounded state; interrupt recursively marks the selected
-branch and descendants without changing siblings.
+branch and descendants without changing siblings. The WebHost additionally
+projects the graph through dsh-compatible `subagent.list` and
+`subagent.history` calls: one-shot child rows expose their parent lineage,
+activity, and bounded transcript history through read-only coordinator grants.
+Continuable child prompts, background workers, and cancellation of an in-flight
+child HTTP request remain outside this baseline.
 
 After a successful model response, the host invokes these side-effect routes in
 order when enabled:

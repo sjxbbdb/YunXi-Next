@@ -12,6 +12,10 @@ use yunxi_protocol::{
 use super::{ChatSession, HANDSHAKE_TIMEOUT, WRITE_TIMEOUT, call_lost_route, tool_loop};
 
 impl ChatSession {
+    pub(crate) fn multi_agent_web_available(&self) -> bool {
+        self.multi_agent_capability.is_some()
+    }
+
     pub(super) fn prepare_agent_session(&mut self) {
         if self.multi_agent_capability.is_none() {
             return;
@@ -131,6 +135,61 @@ impl ChatSession {
             Ok(result) => completed_tool_outcome(result, "multi-agent list returned invalid data"),
             Err(error) => {
                 self.multi_agent_tool_error_outcome(tool_loop::AGENT_LIST_TOOL_NAME, error)
+            }
+        }
+    }
+
+    pub(crate) fn web_agent_graph(
+        &mut self,
+        root_session_id: &str,
+    ) -> Result<yunxi_protocol::AgentListResult, String> {
+        let Some(capability) = self.multi_agent_capability.clone() else {
+            return Err("multi-agent capability is disabled or unavailable".to_string());
+        };
+        let grant = self
+            .web_agent_grant(root_session_id)
+            .map_err(|error| error.to_string())?;
+        let result = self.host.invoke::<_, yunxi_protocol::AgentListResult>(
+            &capability,
+            yunxi_protocol::TOOL_MULTI_AGENT_LIST_OPERATION,
+            &yunxi_protocol::AgentListRequest::new(grant),
+        );
+        match result {
+            Ok(result) => Ok(result),
+            Err(error) => {
+                if call_lost_route(&error) {
+                    self.multi_agent_capability = None;
+                }
+                Err(error.to_string())
+            }
+        }
+    }
+
+    pub(crate) fn web_agent_inspect(
+        &mut self,
+        root_session_id: &str,
+        agent_id: &str,
+    ) -> Result<yunxi_protocol::AgentInspectResult, String> {
+        let Some(capability) = self.multi_agent_capability.clone() else {
+            return Err("multi-agent capability is disabled or unavailable".to_string());
+        };
+        let grant = self
+            .web_agent_grant(root_session_id)
+            .map_err(|error| error.to_string())?;
+        let request = yunxi_protocol::AgentInspectRequest::new(grant, agent_id)
+            .map_err(|error| error.to_string())?;
+        let result = self.host.invoke::<_, yunxi_protocol::AgentInspectResult>(
+            &capability,
+            yunxi_protocol::TOOL_MULTI_AGENT_INSPECT_OPERATION,
+            &request,
+        );
+        match result {
+            Ok(result) => Ok(result),
+            Err(error) => {
+                if call_lost_route(&error) {
+                    self.multi_agent_capability = None;
+                }
+                Err(error.to_string())
             }
         }
     }
@@ -321,6 +380,18 @@ impl ChatSession {
             yunxi_protocol::WorkspaceGrant::read_write(&self.cwd),
             &self.agent_session_id,
             ticket,
+            self.agent_budget,
+        )
+    }
+
+    fn web_agent_grant(
+        &self,
+        root_session_id: &str,
+    ) -> Result<yunxi_protocol::AgentDelegationGrant, yunxi_protocol::AgentProtocolError> {
+        yunxi_protocol::AgentDelegationGrant::new(
+            yunxi_protocol::WorkspaceGrant::read_only(&self.cwd),
+            root_session_id,
+            format!("web-read-{}", std::process::id()),
             self.agent_budget,
         )
     }
