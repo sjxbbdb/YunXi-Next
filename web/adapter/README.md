@@ -11,4 +11,5 @@ implemented here.
 `plugin-inventory/` is the second bounded overlay. It keeps the upstream
 Plugins tab structure but binds each YunXi capability row to the
 `yunxi-capabilities` settings namespace. The model row remains read-only and
-the thirteen optional capability changes are explicitly restart-scoped.
+the 15 optional capability changes are composition-scoped: Web writes rebuild
+the current Host, while a standalone CLI process reads them at its next start.

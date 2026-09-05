@@ -67,10 +67,12 @@ single `yunxi-capabilities` namespace. Only one-level known boolean fields are
 accepted, writes are revision-fenced and bounded to 64 mutations, and a
 successful change emits `settings/document-updated` on `events.host`.
 `yunxi-settings` persists the target composition to `settings.json`; the live
-Host keeps its current children and routes until restart. Explicit environment
-switches override that document for the process. The required Model entry is
-read-only; the current inventory exposes thirteen restart-scoped optional
-capability switches, including Multi-agent.
+Host keeps its current children and routes until the next Host composition.
+Explicit environment switches override that document for the process. The
+required Model entry is read-only. The settings domain has 15 built-in keys,
+and the current CLI/Web launch schema exposes all 15 connected composition-scoped
+optional switches, including Multi-agent. `voice` and `weixin` launch
+deterministic fixture routes when enabled and remain off by default.
 
 `yunxi-web-gateway/build.rs` recursively validates `web/dist` and generates an
 exact embedded resource table. It admits only the required document, script,
@@ -90,7 +92,7 @@ The independent Rust carrier currently provides:
   `settings.describe`, `credentials.describe`, `llm.providers`, presets,
   commands, skills, subagents, and Cordis inventory;
 - `settings.update`, `settings.replace`, and `settings.mutate` for the
-  restart-scoped optional capability switches;
+  composition-scoped optional capability switches;
 - `POST /api/respond` with a bounded `client-response` body and a JSON receipt;
 - `GET /api/events.mux` and `GET /api/events.host` as bounded SSE responses;
 - complete `turn/start`, message, step, and `turn/end` event sequences for
@@ -117,6 +119,11 @@ is syntactically valid JSON returns a bounded structured `bad-request` response;
 invalid HTTP framing remains a normal HTTP 400/413 response. Credential
 descriptions expose only configured state and never return secret values.
 
+The imported browser adapter source contains Voice and Weixin inventory-field
+mappings, and the Rust Web schema and CLI composition launch their fixture
+routes when enabled. The UI is evidence of route/inventory wiring only; it is
+not evidence of real microphone, speaker, login, or channel transport support.
+
 ## Migration Order
 
 1. Keep dsh's Web/client packages in a separately tracked compatibility input.
@@ -129,7 +136,7 @@ descriptions expose only configured state and never return secret values.
    difference.
 5. [x] Import and serve the pinned dsh browser shell and client graph.
 6. [x] Persist bounded capability switches and connect them to the dsh Plugins
-   tab with restart-scoped state.
+   tab with composition-scoped state.
 7. Replace the remaining read-only compatibility projections with native Rust
    services incrementally while retaining the browser UI.
 

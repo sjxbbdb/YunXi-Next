@@ -24,9 +24,11 @@ yunxi-next CLI process
     +--> yunxi-tool-files process --> read-only workspace search and reads
     +--> yunxi-tool-mcp process --> external MCP Server over stdio or HTTP/SSE
     +--> yunxi-tool-skills process --> bounded Skill metadata and instructions
-    +--> yunxi-multi-agent process --> graph, budgets, transcripts, and events
-    |       `--> one supervised model plugin process per child turn
-    `--> model plugin process --> HTTPS --> model API
+  +--> yunxi-multi-agent process --> graph, budgets, transcripts, and events
+  |       `--> one supervised model plugin process per child turn
+  +--> yunxi-voice process --> bounded transcribe/synthesize fixture routes
+  +--> yunxi-weixin process --> bounded channel fixture route
+  `--> model plugin process --> HTTPS --> model API
 ```
 
 The default distribution launches the same `yunxi-next` executable in a private
@@ -38,6 +40,11 @@ be selected with `--plugin`; optional plugin paths have development environment
 overrides. Windows installs `yunxi-next` independently and leaves the existing
 legacy `yunxi` command untouched.
 
+`yunxi-voice` and `yunxi-weixin` are part of this topology when their switches
+are enabled. They are launch-wired and visible in Host inventory, but their
+current implementations are deterministic process fixtures: Voice has no
+device runtime and Weixin has no login or network transport.
+
 ## Readiness
 
 1. The host binds an ephemeral IPv4 loopback port and launches the child.
@@ -48,11 +55,18 @@ legacy `yunxi` command untouched.
    require specific manifest grants before a route is registered.
 4. `Welcome` and `Ready` complete the handshake before the CLI accepts input.
 
-The model plugin is required. Context, persona, and session storage are enabled
-by default. Memory and companion behavior are disabled by default to preserve
-the legacy opt-in policy; mailbox and scheduler follow the companion switch
-unless explicitly overridden. Files, MCP, Skills, and Multi-agent are also disabled by
-default. A disabled capability is never launched or registered.
+The model plugin and the Cordis Agent-spine bootstrap are required. The live
+CLI turn uses the standalone `yunxi-agent-spine` loop through its Host adapter;
+`ChatSession` owns durable application hooks around it. Context, persona, and
+session storage are enabled by
+default. Memory, companion, mailbox, scheduler, Shell,
+Patch, Files, MCP, Skills, and Multi-agent are disabled by default because they
+have external effects or require additional grants. A disabled capability is
+never launched or registered; explicit `settings.plugins` values override the
+manifest default and legacy capability settings.
+The settings crate accepts 15 built-in optional keys, and the current CLI/Web
+launch composition has all 15 connected optional entries. `voice` and `weixin`
+are off by default and use fixture routes until production adapters are added.
 
 The correlation token prevents accidental attachment to the wrong launched
 process. It is not a security or sandbox boundary. Frames are limited to 16
@@ -165,8 +179,12 @@ serialized into local protocol frames or diagnostic output.
   synchronous baseline applies recursive interruption between child turns; it
   cannot yet kill an already in-flight child model HTTP request or run sibling
   turns in parallel.
-- Automatic restart is intentionally absent. A future policy must be bounded,
-  observable, and owned above the kernel primitive.
+- An unexpected optional Host failure is retried with bounded backoff up to
+  three times for the current enable cycle. The synchronous implementation
+  advances recovery at `refresh()`/inspection boundaries; after exhaustion it
+  removes the plugin route and disables the plugin until explicit re-enable or
+  manual restart. A failed optional plugin does not stop sibling plugins or the
+  Agent spine.
 
 Process isolation does not restrict filesystem, network, CPU, or memory access.
 A separate sandbox design is required before running untrusted plugins.

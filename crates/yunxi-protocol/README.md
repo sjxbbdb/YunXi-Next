@@ -13,6 +13,11 @@ use a capability-neutral invocation envelope with typed payloads at each
 capability boundary. Frames are bounded at 16 MiB. The launch token correlates
 a child with its host; it must not be treated as authentication or sandboxing.
 
+Manifests may optionally carry `runtime` metadata containing a host-group name
+and risk level. The field is omitted from legacy manifests, so protocol v2
+messages remain backward compatible. It is a placement/default-startup hint,
+not an OS sandbox or an additional permission grant.
+
 Current typed contracts cover model chat, context, persona, memory recall and
 write, sessions, companion policy, encrypted mailbox operations, and proactive
 scheduling, plus bounded multi-agent graph/turn coordination. Capability

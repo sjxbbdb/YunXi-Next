@@ -1,0 +1,23 @@
+[package]
+name = "yunxi-weixin"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Bounded Rust contracts and fixtures for YunXi Weixin plugins"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+yunxi-protocol = { path = "../yunxi-protocol" }
+
+[dev-dependencies]
+yunxi-kernel = { path = "../yunxi-kernel" }
+yunxi-plugin-host = { path = "../yunxi-plugin-host" }
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "yunxi-weixin-plugin-fixture"
+path = "src/bin/yunxi-weixin-plugin-fixture.rs"

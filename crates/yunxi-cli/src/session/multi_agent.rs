@@ -306,7 +306,8 @@ impl ChatSession {
             .with_display_name("Isolated child chat model")
             .with_handshake_timeout(HANDSHAKE_TIMEOUT)
             .with_io_timeouts(Some(self.child_model_response_timeout), Some(WRITE_TIMEOUT))
-            .with_required_grants(self.child_model_required_grants.iter().copied());
+            .with_required_grants(self.child_model_required_grants.iter().copied())
+            .with_expected_capabilities([self.model_capability.clone()]);
         if let Err(error) = child_host.launch(launch) {
             child_host.shutdown();
             return Err(ChildTurnError::new(

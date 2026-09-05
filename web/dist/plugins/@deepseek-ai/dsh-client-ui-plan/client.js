@@ -7,8 +7,8 @@ window.__ModuleLoader__.load({
 		let react_jsx_runtime = require("react/jsx-runtime");
 		let react = require("react");
 		let _deepseek_ai_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
-		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-0a50875c14b34d63b17f6522f5dab19c\packages\client\ui-plan\src\client\PlanModeControl.module.css.mjs
-		const css = "._6jCyMa_wrap{align-items:center;gap:6px;display:inline-flex}._6jCyMa_chip{background:var(--dsw-alias-state-warn-tertiary);min-width:34px;color:var(--dsw-alias-state-warn-label);cursor:pointer;border:none;border-radius:999px;align-items:center;gap:4px;padding:2px 8px;font-size:13px;font-weight:500;line-height:20px;display:inline-flex}._6jCyMa_chip:hover:not(:disabled){color:var(--dsw-alias-state-warn-primary)}._6jCyMa_chip:focus-visible{outline:2px solid var(--dsw-alias-state-warn-label);outline-offset:2px}._6jCyMa_chip:disabled{opacity:.6;cursor:default}._6jCyMa_close{color:currentColor;align-items:center;display:inline-flex}._6jCyMa_error{color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:18px}";
+		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-ab5a0433e27742b99ef765dc97041378\packages\client\ui-plan\src\client\PlanModeControl.module.css.mjs
+		const css = ".NqmVGq_wrap{align-items:center;gap:6px;display:inline-flex}.NqmVGq_chip{background:var(--dsw-alias-state-warn-tertiary);min-width:34px;color:var(--dsw-alias-state-warn-label);cursor:pointer;border:none;border-radius:999px;align-items:center;gap:4px;padding:2px 8px;font-size:13px;font-weight:500;line-height:20px;display:inline-flex}.NqmVGq_chip:hover:not(:disabled){color:var(--dsw-alias-state-warn-primary)}.NqmVGq_chip:focus-visible{outline:2px solid var(--dsw-alias-state-warn-label);outline-offset:2px}.NqmVGq_chip:disabled{opacity:.6;cursor:default}.NqmVGq_close{color:currentColor;align-items:center;display:inline-flex}.NqmVGq_error{color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:18px}";
 		const tagId = "@deepseek-ai/dsh-client-ui-plan/PlanModeControl.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -18,10 +18,10 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var PlanModeControl_module_css_default = {
-			"chip": "_6jCyMa_chip",
-			"close": "_6jCyMa_close",
-			"error": "_6jCyMa_error",
-			"wrap": "_6jCyMa_wrap"
+			"chip": "NqmVGq_chip",
+			"close": "NqmVGq_close",
+			"error": "NqmVGq_error",
+			"wrap": "NqmVGq_wrap"
 		};
 		//#endregion
 		//#region lib/types/client/PlanModeControl.js

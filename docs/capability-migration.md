@@ -46,9 +46,15 @@ surfaces. They are not allowed to bypass the trusted approval or routing layer.
 | MCP bridge | `yunxi-agent-mcp`, `yunxi-agent-tools` | `tool.mcp@1:list/call/cancel/status` | `yunxi-tool-mcp` | Baseline integrated: one explicit stdio or opt-in HTTP Server, bounded JSON-RPC initialize/list/call/cancel, JSON/SSE responses, session reuse, dynamic model projection, Host Approval, exact network scopes, reference-only Secret grants, redaction, and isolated crash recovery |
 | Skills and dynamic tools | `yunxi-agent-skills`, `yunxi-agent-tools` | `tool.skills@1:list/context/status` | `yunxi-tool-skills` | Baseline integrated: isolated workspace-bounded discovery, validated metadata, bounded instruction injection, disabled filtering, and metadata-only model tool projection; executable Skill tools and richer lifecycle management remain pending |
 | Multi-agent coordination | `yunxi-agent-multi-agent` | `tool.multi-agent@1` | `yunxi-multi-agent` | Baseline integrated: isolated coordinator, parent-child grant subset, fixed graph/turn budgets, persisted transcripts/events, restart recovery, Host-approved spawn/message, and a separate Model plugin process per child turn; background parallelism, in-flight cancellation, child tool grants, and Web graph UI remain pending |
-| Weixin channel | `yunxi-agent-weixin` | `channel.weixin@1` | `yunxi-channel-weixin` | Planned: inheritance wave 4 |
-| Voice input (speech recognition) | `yunxi-agent-voice` | `voice.transcribe@1` | `yunxi-voice` | Planned: inheritance wave 4 |
-| Voice output (speech synthesis) | `yunxi-agent-voice` | `voice.synthesize@1` | `yunxi-voice` | Planned: inheritance wave 4 |
+| Weixin channel | `yunxi-agent-weixin` | `channel.weixin@1` | `yunxi-weixin` | Baseline launch-wired contract/fixture: process-host handshake, required Network/Secret declarations, typed inbound/outbound routing, idempotency, ACK/cancel/fail state transitions, malformed-payload handling, disable route removal, and CLI/Web inventory projection; no real login, SDK, or network transport |
+| Voice input (speech recognition) | `yunxi-agent-voice` | `voice.transcribe@1` | `yunxi-voice` | Baseline launch-wired contract/fixture: bounded chunks, partial/final transcript events, cancellation, backpressure, process-host handshake, exact capability check, disable route removal, and CLI/Web inventory projection; no Device grant or device runtime |
+| Voice output (speech synthesis) | `yunxi-agent-voice` | `voice.synthesize@1` | `yunxi-voice` | Baseline launch-wired contract/fixture: bounded text/audio chunks, cancellation, backpressure, process-host handshake, exact capability check, disable route removal, and CLI/Web inventory projection; output bytes are synthetic and no speaker runtime exists |
+
+The Voice and Weixin rows remain `baseline`, not full product `integrated`.
+Their crates prove typed contracts and an isolated test process, and the current
+`yunxi-cli` Host composition launches them and exposes their inventory routes
+when enabled. Creating a fixture is evidence for the process boundary only; it
+is not evidence of microphone, speaker, login, or network support.
 
 Legacy `yunxi-agent-core`, `yunxi-agent-protocol`, and
 `yunxi-agent-runtime` contain mixed contracts and orchestration. Their behavior
@@ -58,7 +64,12 @@ capability contracts rather than migrated as one runtime plugin.
 Legacy `yunxi-agent-cli`, `yunxi-agent-tui`, and the embedded Web server are
 interaction surfaces. They consume the same plugin catalog. The current Web
 settings page renders the bounded built-in inventory and persists enable/disable
-state without loading disabled plugin code.
+state without loading disabled plugin code. A successful Web write rebuilds the
+current Host composition; the WebHost does not hot-unmount a single running
+plugin in place. A standalone CLI process reads the setting when its next Host
+is created. `yunxi-settings` has 15 built-in keys, and the current CLI/Web launch
+path exposes all 15 connected optional entries; `voice` and `weixin` remain
+fixture routes until their production adapters exist.
 
 `yunxi-agent-eval` remains development infrastructure. Its scenarios become
 cross-plugin acceptance fixtures instead of a runtime capability.
@@ -78,24 +89,31 @@ cross-plugin acceptance fixtures instead of a runtime capability.
    grants. Read-only agent listing and stored-state interruption do not acquire
    execution authority. Current Skill declarations are metadata-only and cannot
    execute. A plugin result never upgrades its own authority.
-5. **Channel and media path:** Weixin and voice become optional adapters over
-   the same runtime calls. Their failure cannot stop terminal chat.
-6. **Management surface:** Web settings reads manifests, changes persisted
-   enable state, and shows lifecycle health from the kernel and plugin host.
+5. **Channel and media path (baseline contracts):** Voice and Weixin fixtures
+   now exercise the same versioned process boundary, but real adapters still
+   need CLI/Web composition, host-issued device/network/secret authority, and
+   product-level fallback before this phase is integrated.
+6. **Management surface:** Web settings reads the bounded Host inventory,
+   changes persisted enable state, and shows lifecycle health from the kernel
+   and plugin host. Manifest metadata remains Host-owned at the dsh wire
+   boundary; WebHost rebuilds its current composition after a successful write.
 
 ## Voice Migration Boundary
 
-Voice input and voice output are both part of the inheritance scope. They are
+Voice input and voice output are both part of the inheritance scope. The current
+repository has a contract and process fixture baseline, but no usable device
+adapter. They are
 separate capabilities even when one executable provides both, so either side
 can be disabled, replaced, or restarted without taking down text chat.
 
-The planned contracts have these minimum properties:
+The current contracts and fixture have these properties:
 
 - `voice.transcribe@1` accepts bounded audio chunks, emits partial and final
   transcripts, and supports cancellation and backpressure;
 - `voice.synthesize@1` accepts bounded text, emits audio chunks, and supports
   cancellation and backpressure;
-- microphone, speaker, and device permissions are host-issued grants rather
+- the fixture requests no `Device` grant because it has no device access;
+  production microphone/speaker permissions must be host-issued grants rather
   than authority inferred by a voice plugin;
 - raw audio is not persisted by default; an explicit user action is required
   for recording or diagnostic retention;
@@ -104,10 +122,12 @@ The planned contracts have these minimum properties:
 - channel adapters such as Weixin consume these same contracts instead of
   embedding a second speech implementation.
 
-The voice wave must include loopback fixtures for partial/final input,
-streamed output, cancellation, backpressure, permission denial, and failure
-fallback. A provider-specific speech SDK is an implementation detail of the
-plugin and must not leak into the host protocol.
+The current fixture covers partial/final input, synthetic output,
+cancellation, bounds, malformed payloads, and process disable/removal. Device
+permission denial, playable streaming output, real failure fallback, and SDK
+integration remain required for the production voice wave. A provider-specific
+speech SDK is an implementation detail of the plugin and must not leak into the
+host protocol.
 
 ## Per-Plugin Acceptance Gate
 
@@ -126,8 +146,9 @@ Voice plugins additionally prove that device grants are enforced, streamed
 audio can be cancelled without hanging the host, and raw audio is absent from
 default persistent state.
 
-The migration ledger status changes only after these gates pass; source copied
-into the new repository but still called in-process remains `planned`.
+The migration ledger status changes only after these gates pass. A typed
+contract or process fixture alone is `baseline`; source copied into the new
+repository but still called in-process remains `planned`.
 
 ## Phase 0 Evidence
 
@@ -221,3 +242,27 @@ so `agent.interrupt` updates stored cancellation between turns but cannot yet
 terminate an in-flight model HTTP request. Parallel/background workers, live
 cancellation, delegated child tools, model selection, and a Web graph/event
 view remain Phase 4 work.
+
+## Channel and Media Baseline Evidence
+
+`yunxi-voice` provides bounded `voice.transcribe@1` and
+`voice.synthesize@1` request/event types and a Rust child-process fixture. The
+fixture announces both capabilities through the protocol-v2 handshake and
+returns deterministic transcript events or synthetic audio markers. Host
+integration tests verify the expected capability set, malformed requests,
+cancellation, and route removal after disable. It intentionally has no
+microphone, speaker, codec, SDK, network, or `Device` grant.
+
+`yunxi-weixin` provides a bounded `channel.weixin@1` contract and a separate
+`yunxi-weixin-plugin-fixture`. The fixture declares required `Network` and
+`Secret` grants so the manifest shape is testable, then performs only local
+in-memory message registration and delivery-state transitions. Host tests
+verify exact capability matching, idempotent inbound/ACK behavior, malformed
+payload handling, and route removal after disable. The grants are declarations
+for a future adapter, not a credential broker or permission to access Weixin.
+
+Both fixtures are now launched by `yunxi-cli` and projected as live Host/Web
+inventory routes when enabled. They are not yet connected to real devices or a
+Weixin service. The next production steps are to replace the fixture handlers
+behind the same Host boundary and add failure fallback tests showing text chat
+remains available.

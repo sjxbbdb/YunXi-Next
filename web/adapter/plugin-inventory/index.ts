@@ -21,7 +21,7 @@ export type { PluginInventoryLocaleKey } from './locales.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
-    /** Host plugin inventory and restart-scoped YunXi capability controls. */
+    /** Host plugin inventory and composition-scoped YunXi capability controls. */
     'settings.pluginInventory': PluginInventoryLocaleKey
   }
 }
@@ -35,7 +35,7 @@ export const inject = ['slots', 'locale', 'remote', 'remote.pluginInventory', 's
 const CAPABILITY_FIELDS: readonly CapabilityField[] = [
   'context', 'persona', 'memory', 'companion', 'storage', 'mailbox',
   'scheduler', 'shell', 'patch', 'files', 'mcp', 'skills',
-  'multi_agent',
+  'multi_agent', 'voice', 'weixin',
 ]
 
 /** Accept only the complete boolean section supplied by the Rust settings owner. */

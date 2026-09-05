@@ -1,6 +1,10 @@
 //! Multi-plugin host orchestration and chat request assembly.
 
+mod cordis;
 mod multi_agent;
+mod plugin_policy;
+mod spine_adapter;
+mod spine_runtime;
 mod stateful;
 mod tool_loop;
 
@@ -19,6 +23,7 @@ use yunxi_composition::{
     CompositionEntry, CompositionError, CompositionSnapshot, ConfigLayer, Profile,
 };
 use yunxi_context::CONTEXT_PLUGIN_ID;
+use yunxi_cordis_runtime::RuntimeError;
 use yunxi_kernel::{PluginCommand, PluginId, PluginIdError};
 use yunxi_memory::MEMORY_PLUGIN_ID;
 use yunxi_model_openai::{MODEL_PLUGIN_ID, ProviderConfig, ProviderConfigError};
@@ -38,16 +43,19 @@ use yunxi_protocol::{
     ToolApprovalRequest, ToolCall, ToolCallBatch, ToolLoopPolicy, ToolResultOutcome, capabilities,
 };
 use yunxi_scheduler::SCHEDULER_PLUGIN_ID;
-use yunxi_settings::{CapabilitySettingsStore, CapabilitySwitches};
+use yunxi_settings::CapabilitySettingsStore;
 use yunxi_storage::STORAGE_PLUGIN_ID;
 use yunxi_tool_files::FILES_PLUGIN_ID;
 use yunxi_tool_mcp::{
-    HTTP_ENDPOINT_ENV, MCP_PLUGIN_ID, NETWORK_GRANT_ENV, SECRET_GRANT_ENV, TRANSPORT_ENV,
+    ARGS_ENV, CHILD_ENV_ENV, COMMAND_ENV, HTTP_ENDPOINT_ENV, HTTP_HEADERS_ENV, HTTP_SECRETS_ENV,
+    MCP_PLUGIN_ID, NAME_ENV, NETWORK_GRANT_ENV, SECRET_GRANT_ENV, TRANSPORT_ENV,
 };
 use yunxi_tool_patch::PATCH_PLUGIN_ID;
 use yunxi_tool_shell::SHELL_PLUGIN_ID;
 use yunxi_tool_skills::{SKILLS_DISABLED_ENV, SKILLS_MODE_ENV, SKILLS_PLUGIN_ID, SKILLS_ROOT_ENV};
+use yunxi_voice::VOICE_FIXTURE_PLUGIN_ID;
 use yunxi_web_gateway::{GatewayProjection, GatewayStatus};
+use yunxi_weixin::WEIXIN_PLUGIN_ID;
 
 use crate::{
     INTERNAL_COMPANION_PLUGIN_ARGUMENT, INTERNAL_CONTEXT_PLUGIN_ARGUMENT,
@@ -56,15 +64,84 @@ use crate::{
     INTERNAL_MULTI_AGENT_PLUGIN_ARGUMENT, INTERNAL_PATCH_PLUGIN_ARGUMENT,
     INTERNAL_PERSONA_PLUGIN_ARGUMENT, INTERNAL_SCHEDULER_PLUGIN_ARGUMENT,
     INTERNAL_SHELL_PLUGIN_ARGUMENT, INTERNAL_SKILLS_PLUGIN_ARGUMENT,
-    INTERNAL_STORAGE_PLUGIN_ARGUMENT,
+    INTERNAL_STORAGE_PLUGIN_ARGUMENT, INTERNAL_VOICE_PLUGIN_ARGUMENT,
+    INTERNAL_WEIXIN_PLUGIN_ARGUMENT,
     management::{ManagementCommand, ManagementResult},
 };
+
+use cordis::CordisBridge;
+use plugin_policy::PluginSwitches;
+use spine_adapter::ProcessPluginHostHandle;
+use spine_runtime::{SpineController, SpineRuntimeConfig};
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const READ_ONLY_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 const ACTION_RESPONSE_TIMEOUT: Duration = Duration::from_secs(125);
 const RESPONSE_TIMEOUT_MARGIN: Duration = Duration::from_secs(5);
+
+// A plugin process starts with a small launch environment.  Provider and MCP
+// credentials/configuration are copied only by their dedicated helpers below.
+const SAFE_PLUGIN_ENVIRONMENT: &[&str] = &[
+    "PATH",
+    "Path",
+    "PATHEXT",
+    "SystemRoot",
+    "WINDIR",
+    "ComSpec",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "USERPROFILE",
+    "HOME",
+    "YUNXI_HOME",
+    "YUNXI_NEXT_HOME",
+    "LANG",
+    "LC_ALL",
+];
+
+const MODEL_ENVIRONMENT: &[&str] = &[
+    "YUNXI_PROVIDER_PROFILE",
+    "YUNXI_PROVIDER_BASE_URL",
+    "OPENAI_BASE_URL",
+    "YUNXI_PROVIDER_API_KEY",
+    "YUNXI_PROVIDER_API_KEY_ENV",
+    "DEEPSEEK_API_KEY",
+    "OPENAI_API_KEY",
+    "YUNXI_AGENT_MODEL",
+    "YUNXI_PROVIDER_TIMEOUT_MILLIS",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+];
+
+const MCP_ENVIRONMENT: &[&str] = &[
+    TRANSPORT_ENV,
+    COMMAND_ENV,
+    ARGS_ENV,
+    NAME_ENV,
+    CHILD_ENV_ENV,
+    HTTP_ENDPOINT_ENV,
+    HTTP_HEADERS_ENV,
+    HTTP_SECRETS_ENV,
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+];
 
 const CONTEXT_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_CONTEXT_PLUGIN";
 const COMPANION_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_COMPANION_PLUGIN";
@@ -79,6 +156,9 @@ const FILES_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_FILES_PLUGIN";
 const MCP_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_MCP_PLUGIN";
 const SKILLS_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_SKILLS_PLUGIN";
 const MULTI_AGENT_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_MULTI_AGENT_PLUGIN";
+const VOICE_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_VOICE_PLUGIN";
+const WEIXIN_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_WEIXIN_PLUGIN";
+const AGENT_ENGINE_ENV: &str = "YUNXI_NEXT_AGENT_ENGINE";
 
 pub(crate) trait ChatBackend {
     fn complete(&mut self, messages: &[ChatMessage]) -> Result<String, ChatFailure>;
@@ -100,7 +180,9 @@ pub(crate) struct BackendStatus {
 }
 
 pub(crate) struct ChatSession {
-    host: ProcessPluginHost,
+    cordis: CordisBridge,
+    host: ProcessPluginHostHandle,
+    spine: Option<SpineController>,
     composition: CompositionSnapshot,
     capability_settings: CapabilitySettingsStore,
     model_plugin_id: PluginId,
@@ -180,29 +262,32 @@ impl ChatSession {
         let executable = env::current_exe()?;
         let cwd = env::current_dir()?;
         let mut capability_settings = CapabilitySettingsStore::from_environment();
-        let switches = capability_settings.effective_from_environment();
+        let legacy_switches = capability_settings.effective_from_environment();
+        let switches = PluginSwitches::resolve(&capability_settings, &legacy_switches);
         let composition = build_composition(&switches)?;
+        let cordis = CordisBridge::start()?;
         let mut host = ProcessPluginHost::new();
         let mut notices = capability_settings.take_warnings();
 
         let model_plugin_id = PluginId::new(MODEL_PLUGIN_ID)?;
-        let model_command = match plugin_path {
+        let model_command = with_model_environment(match plugin_path {
             Some(path) => PluginCommand::new(path),
             None => PluginCommand::new(&executable).arg(INTERNAL_MODEL_PLUGIN_ARGUMENT),
-        };
+        });
         let model_required_grants = if plugin_path.is_none() {
             vec![GrantKind::Network, GrantKind::ProviderCredential]
         } else {
             Vec::new()
         };
+        let model_capability =
+            descriptor(capabilities::MODEL_CHAT, capabilities::MODEL_CHAT_VERSION)?;
         let model_launch = PluginLaunch::new(model_plugin_id.clone(), model_command.clone())
             .with_display_name("OpenAI-compatible chat model")
             .with_handshake_timeout(HANDSHAKE_TIMEOUT)
             .with_io_timeouts(Some(response_timeout), Some(WRITE_TIMEOUT))
-            .with_required_grants(model_required_grants.iter().copied());
+            .with_required_grants(model_required_grants.iter().copied())
+            .with_expected_capabilities([model_capability.clone()]);
         host.launch(model_launch)?;
-        let model_capability =
-            descriptor(capabilities::MODEL_CHAT, capabilities::MODEL_CHAT_VERSION)?;
         require_provider(&mut host, &model_plugin_id, &model_capability)?;
 
         let context_capability = if switches.context {
@@ -228,7 +313,7 @@ impl ChatSession {
             None
         };
 
-        let persona_process_needed = switches.persona || switches.memory;
+        let persona_process_needed = switches.persona;
         let persona_capability = if persona_process_needed {
             let id = PluginId::new(PERSONA_PLUGIN_ID)?;
             let capability = descriptor(
@@ -257,13 +342,18 @@ impl ChatSession {
             None
         };
 
-        let memory_capability = if switches.memory {
+        let memory_capabilities = if switches.memory {
             let id = PluginId::new(MEMORY_PLUGIN_ID)?;
-            let capability = descriptor(
+            let recall_capability = descriptor(
                 capabilities::MEMORY_RECALL,
                 capabilities::MEMORY_RECALL_VERSION,
             )?;
-            launch_optional(
+            let write_capability = descriptor(
+                capabilities::MEMORY_WRITE,
+                capabilities::MEMORY_WRITE_VERSION,
+            )?;
+            let expected_capabilities = [recall_capability.clone(), write_capability.clone()];
+            let launched = launch_optional_with_expected_capabilities(
                 &mut host,
                 id,
                 "Long-term memory",
@@ -272,29 +362,34 @@ impl ChatSession {
                     INTERNAL_MEMORY_PLUGIN_ARGUMENT,
                     MEMORY_PLUGIN_PATH_ENV,
                 ),
-                &capability,
+                &recall_capability,
+                &expected_capabilities,
+                OptionalLaunchPolicy {
+                    required_grants: &[],
+                    read_timeout: READ_ONLY_RESPONSE_TIMEOUT,
+                },
                 &mut notices,
-            )
-            .then_some(capability)
+            );
+            launched.then_some((recall_capability, write_capability))
         } else {
             None
         };
 
-        let memory_write_capability = if memory_capability.is_some() {
-            let capability = descriptor(
-                capabilities::MEMORY_WRITE,
-                capabilities::MEMORY_WRITE_VERSION,
-            )?;
-            optional_secondary_capability(
-                &mut host,
-                &PluginId::new(MEMORY_PLUGIN_ID)?,
-                &capability,
-                &mut notices,
-            )
-            .then_some(capability)
-        } else {
-            None
-        };
+        let (memory_capability, memory_write_capability) =
+            if let Some((recall_capability, write_capability)) = memory_capabilities {
+                let write_available = optional_secondary_capability(
+                    &mut host,
+                    &PluginId::new(MEMORY_PLUGIN_ID)?,
+                    &write_capability,
+                    &mut notices,
+                );
+                (
+                    Some(recall_capability),
+                    write_available.then_some(write_capability),
+                )
+            } else {
+                (None, None)
+            };
 
         let storage_capability = if switches.storage {
             let id = PluginId::new(STORAGE_PLUGIN_ID)?;
@@ -469,7 +564,7 @@ impl ChatSession {
                 &mut host,
                 id.clone(),
                 "MCP tool bridge",
-                optional_command(
+                optional_mcp_command(
                     &executable,
                     INTERNAL_MCP_PLUGIN_ARGUMENT,
                     MCP_PLUGIN_PATH_ENV,
@@ -613,12 +708,93 @@ impl ChatSession {
         } else {
             None
         };
+
+        // The fixture announces both voice routes in one process.  Keep the
+        // two descriptors separate so a future device-backed adapter can
+        // replace either route without changing the host contract.
+        let voice_capabilities = if switches.voice {
+            let id = PluginId::new(VOICE_FIXTURE_PLUGIN_ID)?;
+            let transcribe_capability = descriptor(
+                capabilities::VOICE_TRANSCRIBE,
+                capabilities::VOICE_TRANSCRIBE_VERSION,
+            )?;
+            let synthesize_capability = descriptor(
+                capabilities::VOICE_SYNTHESIZE,
+                capabilities::VOICE_SYNTHESIZE_VERSION,
+            )?;
+            let expected_capabilities =
+                [transcribe_capability.clone(), synthesize_capability.clone()];
+            let launched = launch_optional_with_expected_capabilities(
+                &mut host,
+                id,
+                "Voice transcription and synthesis",
+                optional_command(
+                    &executable,
+                    INTERNAL_VOICE_PLUGIN_ARGUMENT,
+                    VOICE_PLUGIN_PATH_ENV,
+                ),
+                &transcribe_capability,
+                &expected_capabilities,
+                OptionalLaunchPolicy {
+                    required_grants: &[],
+                    read_timeout: READ_ONLY_RESPONSE_TIMEOUT,
+                },
+                &mut notices,
+            );
+            launched.then_some((transcribe_capability, synthesize_capability))
+        } else {
+            None
+        };
+        let (_voice_transcribe_capability, _voice_synthesize_capability) =
+            if let Some((transcribe_capability, synthesize_capability)) = voice_capabilities {
+                let synthesize_available = optional_secondary_capability(
+                    &mut host,
+                    &PluginId::new(VOICE_FIXTURE_PLUGIN_ID)?,
+                    &synthesize_capability,
+                    &mut notices,
+                );
+                (
+                    Some(transcribe_capability),
+                    synthesize_available.then_some(synthesize_capability),
+                )
+            } else {
+                (None, None)
+            };
+
+        let _weixin_capability = if switches.weixin {
+            let id = PluginId::new(WEIXIN_PLUGIN_ID)?;
+            let capability = descriptor(
+                capabilities::CHANNEL_WEIXIN,
+                capabilities::CHANNEL_WEIXIN_VERSION,
+            )?;
+            launch_action_optional(
+                &mut host,
+                id,
+                "Weixin channel bridge",
+                optional_command(
+                    &executable,
+                    INTERNAL_WEIXIN_PLUGIN_ARGUMENT,
+                    WEIXIN_PLUGIN_PATH_ENV,
+                ),
+                &capability,
+                &[GrantKind::Network, GrantKind::Secret],
+                &mut notices,
+            )
+            .then_some(capability)
+        } else {
+            None
+        };
+
+        let host = ProcessPluginHostHandle::new(host);
+
         let agent_session_id = multi_agent::new_agent_session_id();
         let agent_budget = yunxi_protocol::AgentBudget::conservative();
 
         let reported_notices = notices.iter().cloned().collect();
-        Ok(Self {
+        let mut session = Self {
+            cordis,
             host,
+            spine: None,
             composition,
             capability_settings,
             model_plugin_id,
@@ -659,7 +835,78 @@ impl ChatSession {
             next_action_ticket: 1,
             tool_continuation: None,
             tool_loop_policy: ToolLoopPolicy::default(),
-        })
+        };
+        session.initialize_spine();
+        Ok(session)
+    }
+
+    fn initialize_spine(&mut self) {
+        if legacy_engine_requested() {
+            self.push_notice(format!(
+                "Agent spine disabled by {AGENT_ENGINE_ENV}; using compatibility loop"
+            ));
+            return;
+        }
+        let config = SpineRuntimeConfig {
+            host: self.host.clone(),
+            model_capability: self.model_capability.clone(),
+            cwd: self.cwd.clone(),
+            shell_capability: self.shell_capability.clone(),
+            patch_capability: self.patch_capability.clone(),
+            files_capability: self.files_capability.clone(),
+            mcp_capability: self.mcp_capability.clone(),
+            mcp_tools: self.mcp_tools.clone(),
+            mcp_network_grant: self.mcp_network_grant.clone(),
+            mcp_secret_grant: self.mcp_secret_grant.clone(),
+            skill_tools: self.skill_tools.clone(),
+            multi_agent_capability: self.multi_agent_capability.clone(),
+            agent_session_id: self.agent_session_id.clone(),
+            agent_budget: self.agent_budget,
+            child_model_command: self.child_model_command.clone(),
+            child_model_required_grants: self.child_model_required_grants.clone(),
+            child_model_response_timeout: self.child_model_response_timeout,
+        };
+        match SpineController::new(config) {
+            Ok(spine) => self.spine = Some(spine),
+            Err(error) => self.push_notice(format!(
+                "Agent spine unavailable; using compatibility loop: {error}"
+            )),
+        }
+    }
+
+    fn sync_spine_notices(&mut self) {
+        let notices = self
+            .spine
+            .as_mut()
+            .map(SpineController::drain_notices)
+            .unwrap_or_default();
+        for notice in notices {
+            self.push_notice(notice);
+        }
+    }
+
+    pub(super) fn has_pending_action(&self) -> bool {
+        self.pending_action.is_some()
+            || self.tool_continuation.is_some()
+            || self
+                .spine
+                .as_ref()
+                .is_some_and(|spine| spine.pending().is_some())
+    }
+
+    pub(super) fn has_spine_pending_approval(&self) -> bool {
+        self.spine
+            .as_ref()
+            .is_some_and(|spine| spine.pending().is_some())
+    }
+
+    fn reset_spine(&mut self) {
+        if let Some(spine) = self.spine.as_mut()
+            && let Err(error) = spine.reset()
+        {
+            self.push_notice(format!("Agent spine session reset failed: {error}"));
+        }
+        self.sync_spine_notices();
     }
 
     pub(crate) fn web_projection(&mut self) -> GatewayProjection {
@@ -693,6 +940,13 @@ impl ChatSession {
     }
 
     pub(crate) fn pending_approval(&self) -> Option<PendingApprovalView> {
+        if let Some(request) = self.spine.as_ref().and_then(SpineController::pending) {
+            return Some(PendingApprovalView {
+                call_id: request.call_id().to_string(),
+                tool_name: request.tool_name().to_string(),
+                summary: request.summary().to_string(),
+            });
+        }
         let Some(PendingAction::ModelTool { call }) = self.pending_action.as_ref() else {
             return None;
         };
@@ -890,11 +1144,20 @@ impl ChatSession {
 
 impl ChatBackend for ChatSession {
     fn complete(&mut self, messages: &[ChatMessage]) -> Result<String, ChatFailure> {
-        if self.pending_action.is_some() || self.tool_continuation.is_some() {
+        if self.has_pending_action() {
+            let pending = self.pending_approval();
             return Err(ChatFailure::ToolApprovalRequired {
-                tool: "pending action".to_string(),
-                summary: "approve or deny the pending action before starting another turn"
-                    .to_string(),
+                tool: pending
+                    .as_ref()
+                    .map(|value| value.tool_name.clone())
+                    .unwrap_or_else(|| "pending action".to_string()),
+                summary: pending
+                    .as_ref()
+                    .map(|value| value.summary.clone())
+                    .unwrap_or_else(|| {
+                        "approve or deny the pending action before starting another turn"
+                            .to_string()
+                    }),
             });
         }
         self.prepare_agent_session();
@@ -902,6 +1165,46 @@ impl ChatBackend for ChatSession {
             .unwrap_or_default()
             .to_string();
         let assembled = self.assemble_messages(messages);
+
+        if let Some(spine) = self.spine.as_mut() {
+            spine.set_agent_session_id(self.agent_session_id.clone());
+            let mut seed = assembled.clone();
+            let current_index = seed
+                .iter()
+                .rposition(|message| {
+                    message.role() == yunxi_protocol::ChatRole::User && message.content() == prompt
+                })
+                .or_else(|| {
+                    seed.iter()
+                        .rposition(|message| message.role() == yunxi_protocol::ChatRole::User)
+                });
+            let Some(current_index) = current_index else {
+                self.sync_spine_notices();
+                return Err(ChatFailure::ProtocolViolation(
+                    "a chat turn requires a user message".to_string(),
+                ));
+            };
+            seed.remove(current_index);
+            let outcome = spine.start(ChatMessage::user(prompt.clone()), seed);
+            self.sync_spine_notices();
+            return match outcome {
+                Ok(yunxi_agent_spine::AgentTurnOutcome::Completed(result)) => {
+                    let reply = result.content().to_string();
+                    self.persist_turn(&prompt, &reply);
+                    self.extract_turn_memories(&prompt, &reply);
+                    self.evaluate_proactive(&prompt);
+                    Ok(reply)
+                }
+                Ok(yunxi_agent_spine::AgentTurnOutcome::AwaitingApproval(request)) => {
+                    Err(ChatFailure::ToolApprovalRequired {
+                        tool: request.tool_name().to_string(),
+                        summary: request.summary().to_string(),
+                    })
+                }
+                Err(error) => Err(spine_runtime::chat_failure_from_agent(error)),
+            };
+        }
+
         let history_prefix = vec![ChatMessage::user(prompt.clone())];
         self.run_model_loop(assembled, prompt, history_prefix, 1)
             .map(|reply| reply.content)
@@ -916,6 +1219,7 @@ impl ChatBackend for ChatSession {
     }
 
     fn status(&mut self) -> BackendStatus {
+        let cordis_ready = self.cordis.ready();
         let snapshot = self.host.snapshot();
         let plugin = snapshot
             .plugins()
@@ -923,12 +1227,13 @@ impl ChatBackend for ChatSession {
             .find(|plugin| plugin.id() == &self.model_plugin_id)
             .map(|plugin| plugin.state().to_string())
             .unwrap_or_else(|| "not registered".to_string());
-        let protocol_ready = self
-            .host
-            .catalog()
-            .providers(capabilities::MODEL_CHAT, capabilities::MODEL_CHAT_VERSION)
-            .iter()
-            .any(|provider| provider.id() == &self.model_plugin_id);
+        let protocol_ready = cordis_ready
+            && self
+                .host
+                .catalog()
+                .providers(capabilities::MODEL_CHAT, capabilities::MODEL_CHAT_VERSION)
+                .iter()
+                .any(|provider| provider.id() == &self.model_plugin_id);
         BackendStatus {
             kernel: snapshot.state().to_string(),
             plugin,
@@ -1163,6 +1468,9 @@ impl ChatSession {
     pub(super) fn approve_pending_model_tool(
         &mut self,
     ) -> Result<crate::management::ManagementResult, String> {
+        if self.has_spine_pending_approval() {
+            return self.resolve_spine_approval(true);
+        }
         let Some(PendingAction::ModelTool { call }) = self.pending_action.take() else {
             return Err("there is no pending model tool action".to_string());
         };
@@ -1181,6 +1489,9 @@ impl ChatSession {
     pub(super) fn deny_pending_model_tool(
         &mut self,
     ) -> Result<crate::management::ManagementResult, String> {
+        if self.has_spine_pending_approval() {
+            return self.resolve_spine_approval(false);
+        }
         let Some(PendingAction::ModelTool { call }) = self.pending_action.take() else {
             return Err("there is no pending model tool action".to_string());
         };
@@ -1195,6 +1506,12 @@ impl ChatSession {
     pub(super) fn cancel_pending_model_tool(
         &mut self,
     ) -> Result<crate::management::ManagementResult, String> {
+        if self.has_spine_pending_approval() {
+            return self.resolve_spine_approval_with_reason(
+                false,
+                "the user cancelled the pending tool call",
+            );
+        }
         let Some(PendingAction::ModelTool { call }) = self.pending_action.take() else {
             return Err("there is no pending model tool action".to_string());
         };
@@ -1220,6 +1537,66 @@ impl ChatSession {
             Err(error) => {
                 self.tool_continuation = None;
                 Err(error.to_string())
+            }
+        }
+    }
+
+    fn resolve_spine_approval(
+        &mut self,
+        approved: bool,
+    ) -> Result<crate::management::ManagementResult, String> {
+        let outcome = self
+            .spine
+            .as_mut()
+            .ok_or_else(|| "Agent spine is unavailable".to_string())?
+            .resolve(approved);
+        self.finish_spine_resolution(outcome)
+    }
+
+    fn resolve_spine_approval_with_reason(
+        &mut self,
+        approved: bool,
+        denial_reason: &str,
+    ) -> Result<crate::management::ManagementResult, String> {
+        let outcome = self
+            .spine
+            .as_mut()
+            .ok_or_else(|| "Agent spine is unavailable".to_string())?
+            .resolve_with_denial_reason(approved, denial_reason);
+        self.finish_spine_resolution(outcome)
+    }
+
+    fn finish_spine_resolution(
+        &mut self,
+        outcome: Result<yunxi_agent_spine::AgentTurnOutcome, yunxi_agent_spine::AgentError>,
+    ) -> Result<crate::management::ManagementResult, String> {
+        self.sync_spine_notices();
+        match outcome {
+            Ok(yunxi_agent_spine::AgentTurnOutcome::Completed(result)) => {
+                let reply = result.content().to_string();
+                let prompt = self
+                    .spine
+                    .as_mut()
+                    .and_then(SpineController::take_prompt)
+                    .unwrap_or_default();
+                self.persist_turn(&prompt, &reply);
+                self.extract_turn_memories(&prompt, &reply);
+                self.evaluate_proactive(&prompt);
+                Ok(crate::management::ManagementResult::assistant_reply(
+                    reply.clone(),
+                    vec![ChatMessage::user(prompt), ChatMessage::assistant(reply)],
+                ))
+            }
+            Ok(yunxi_agent_spine::AgentTurnOutcome::AwaitingApproval(request)) => {
+                Ok(crate::management::ManagementResult::lines(
+                    tool_approval_lines(request.tool_name().as_str(), request.summary()),
+                ))
+            }
+            Err(error) => {
+                if let Some(spine) = self.spine.as_mut() {
+                    let _ = spine.take_prompt();
+                }
+                Err(spine_runtime::chat_failure_from_agent(error).to_string())
             }
         }
     }
@@ -1572,10 +1949,46 @@ fn descriptor(id: &str, version: u32) -> Result<CapabilityDescriptor, Capability
 }
 
 fn optional_command(executable: &Path, internal_argument: &str, path_env: &str) -> PluginCommand {
-    match env::var_os(path_env).filter(|value| !value.is_empty()) {
-        Some(path) => PluginCommand::new(PathBuf::from(path)),
-        None => PluginCommand::new(executable).arg(internal_argument),
+    isolate_plugin_command(
+        match env::var_os(path_env).filter(|value| !value.is_empty()) {
+            Some(path) => PluginCommand::new(PathBuf::from(path)),
+            None => PluginCommand::new(executable).arg(internal_argument),
+        },
+    )
+}
+
+fn optional_mcp_command(
+    executable: &Path,
+    internal_argument: &str,
+    path_env: &str,
+) -> PluginCommand {
+    with_process_environment(
+        optional_command(executable, internal_argument, path_env),
+        MCP_ENVIRONMENT,
+    )
+}
+
+fn isolate_plugin_command(command: PluginCommand) -> PluginCommand {
+    with_process_environment(command.clear_environment(), SAFE_PLUGIN_ENVIRONMENT)
+}
+
+fn with_process_environment(mut command: PluginCommand, names: &[&str]) -> PluginCommand {
+    for name in names {
+        if let Some(value) = env::var_os(name) {
+            command = command.env(*name, value);
+        }
     }
+    command
+}
+
+fn with_model_environment(command: PluginCommand) -> PluginCommand {
+    let mut command = with_process_environment(isolate_plugin_command(command), MODEL_ENVIRONMENT);
+    if let Some(name) = env::var_os("YUNXI_PROVIDER_API_KEY_ENV").filter(|value| !value.is_empty())
+        && let Some(value) = env::var_os(&name)
+    {
+        command = command.env(name, value);
+    }
+    command
 }
 
 fn optional_skills_command(executable: &Path, root: &Path) -> PluginCommand {
@@ -1584,13 +1997,7 @@ fn optional_skills_command(executable: &Path, root: &Path) -> PluginCommand {
         INTERNAL_SKILLS_PLUGIN_ARGUMENT,
         SKILLS_PLUGIN_PATH_ENV,
     )
-    .clear_environment()
     .env(SKILLS_ROOT_ENV, root.as_os_str());
-    for name in ["PATH", "SystemRoot", "WINDIR", "TEMP", "TMP"] {
-        if let Some(value) = env::var_os(name) {
-            command = command.env(name, value);
-        }
-    }
     if let Some(value) = env::var_os(SKILLS_DISABLED_ENV) {
         command = command.env(SKILLS_DISABLED_ENV, value);
     }
@@ -1666,12 +2073,13 @@ fn launch_optional(
     capability: &CapabilityDescriptor,
     notices: &mut Vec<String>,
 ) -> bool {
-    launch_optional_with_timeout(
+    launch_optional_with_expected_capabilities(
         host,
         id,
         display_name,
         command,
         capability,
+        std::slice::from_ref(capability),
         OptionalLaunchPolicy {
             required_grants: &[],
             read_timeout: READ_ONLY_RESPONSE_TIMEOUT,
@@ -1689,12 +2097,13 @@ fn launch_action_optional(
     required_grants: &[GrantKind],
     notices: &mut Vec<String>,
 ) -> bool {
-    launch_optional_with_timeout(
+    launch_optional_with_expected_capabilities(
         host,
         id,
         display_name,
         command,
         capability,
+        std::slice::from_ref(capability),
         OptionalLaunchPolicy {
             required_grants,
             read_timeout: ACTION_RESPONSE_TIMEOUT,
@@ -1711,12 +2120,13 @@ fn launch_files_optional(
     capability: &CapabilityDescriptor,
     notices: &mut Vec<String>,
 ) -> bool {
-    launch_optional_with_timeout(
+    launch_optional_with_expected_capabilities(
         host,
         id,
         display_name,
         command,
         capability,
+        std::slice::from_ref(capability),
         OptionalLaunchPolicy {
             required_grants: &[GrantKind::WorkspaceRead],
             read_timeout: READ_ONLY_RESPONSE_TIMEOUT,
@@ -1732,12 +2142,13 @@ fn launch_skills_optional(
     capability: &CapabilityDescriptor,
     notices: &mut Vec<String>,
 ) -> bool {
-    launch_optional_with_timeout(
+    launch_optional_with_expected_capabilities(
         host,
         id,
         "Read-only Skills metadata and context",
         command,
         capability,
+        std::slice::from_ref(capability),
         OptionalLaunchPolicy {
             required_grants: &[GrantKind::WorkspaceRead],
             read_timeout: READ_ONLY_RESPONSE_TIMEOUT,
@@ -1855,12 +2266,14 @@ struct OptionalLaunchPolicy<'a> {
     read_timeout: Duration,
 }
 
-fn launch_optional_with_timeout(
+#[allow(clippy::too_many_arguments)]
+fn launch_optional_with_expected_capabilities(
     host: &mut ProcessPluginHost,
     id: PluginId,
     display_name: &str,
     command: PluginCommand,
     capability: &CapabilityDescriptor,
+    expected_capabilities: &[CapabilityDescriptor],
     policy: OptionalLaunchPolicy<'_>,
     notices: &mut Vec<String>,
 ) -> bool {
@@ -1868,7 +2281,8 @@ fn launch_optional_with_timeout(
         .with_display_name(display_name)
         .with_handshake_timeout(HANDSHAKE_TIMEOUT)
         .with_io_timeouts(Some(policy.read_timeout), Some(WRITE_TIMEOUT))
-        .with_required_grants(policy.required_grants.iter().copied());
+        .with_required_grants(policy.required_grants.iter().copied())
+        .with_expected_capabilities(expected_capabilities.iter().cloned());
     if let Err(error) = host.launch(launch) {
         notices.push(format!("optional plugin `{id}` failed to start: {error}"));
         return false;
@@ -1959,6 +2373,15 @@ fn call_lost_route(error: &PluginCallError) -> bool {
     )
 }
 
+fn legacy_engine_requested() -> bool {
+    env::var(AGENT_ENGINE_ENV).is_ok_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "legacy" | "compat" | "compatibility"
+        )
+    })
+}
+
 fn memory_recall_query(messages: &[ChatMessage]) -> String {
     const RECENT_CONTEXT_BUDGET_CHARS: usize = 600;
     const RECENT_MESSAGE_MAX_CHARS: usize = 200;
@@ -2006,12 +2429,10 @@ fn latest_user_message(messages: &[ChatMessage]) -> Option<&str> {
         .map(ChatMessage::content)
 }
 
-fn build_composition(
-    switches: &CapabilitySwitches,
-) -> Result<CompositionSnapshot, CompositionError> {
+fn build_composition(switches: &PluginSwitches) -> Result<CompositionSnapshot, CompositionError> {
     let mut profile = Profile::new("yunxi-next")?;
     let mut builtin = ConfigLayer::new("yunxi-next.builtin")?;
-    let persona_process_needed = switches.persona || switches.memory;
+    let persona_process_needed = switches.persona;
     let entries = [
         (MODEL_PLUGIN_ID, true),
         (CONTEXT_PLUGIN_ID, switches.context),
@@ -2027,10 +2448,18 @@ fn build_composition(
         (MCP_PLUGIN_ID, switches.mcp),
         (SKILLS_PLUGIN_ID, switches.skills),
         (MULTI_AGENT_PLUGIN_ID, switches.multi_agent),
+        (VOICE_FIXTURE_PLUGIN_ID, switches.voice),
+        (WEIXIN_PLUGIN_ID, switches.weixin),
     ]
     .into_iter()
-    .map(|(id, enabled)| {
-        CompositionEntry::new(id, format!("yunxi.plugin.{id}"))
+    .map(|(id, requested_enabled)| {
+        let manifest = plugin_policy::manifest_for(id);
+        let enabled = if manifest.role().is_user_toggleable() {
+            requested_enabled
+        } else {
+            true
+        };
+        CompositionEntry::new_with_manifest(id, format!("yunxi.plugin.{id}"), manifest)
             .map(|entry| entry.with_enabled(enabled))
     })
     .collect::<Result<Vec<_>, _>>()?;
@@ -2048,6 +2477,7 @@ pub(crate) enum SessionError {
     Catalog(CatalogError),
     Host(PluginHostError),
     Composition(CompositionError),
+    Cordis(RuntimeError),
     ProviderMismatch {
         capability: CapabilityDescriptor,
         expected: PluginId,
@@ -2065,6 +2495,7 @@ impl fmt::Display for SessionError {
             Self::Catalog(error) => write!(formatter, "capability routing failed: {error}"),
             Self::Host(error) => write!(formatter, "plugin host failed: {error}"),
             Self::Composition(error) => write!(formatter, "plugin composition failed: {error}"),
+            Self::Cordis(error) => write!(formatter, "Cordis runtime failed: {error}"),
             Self::ProviderMismatch {
                 capability,
                 expected,
@@ -2089,6 +2520,7 @@ impl Error for SessionError {
             Self::Catalog(error) => Some(error),
             Self::Host(error) => Some(error),
             Self::Composition(error) => Some(error),
+            Self::Cordis(error) => Some(error),
             Self::ProviderMismatch { .. } => None,
         }
     }
@@ -2133,6 +2565,12 @@ impl From<PluginHostError> for SessionError {
 impl From<CompositionError> for SessionError {
     fn from(error: CompositionError) -> Self {
         Self::Composition(error)
+    }
+}
+
+impl From<RuntimeError> for SessionError {
+    fn from(error: RuntimeError) -> Self {
+        Self::Cordis(error)
     }
 }
 
@@ -2193,5 +2631,32 @@ mod tests {
             ChatMessage::user("current"),
         ];
         assert_eq!(memory_recall_query(&messages), "first\nsecond\ncurrent");
+    }
+
+    #[test]
+    fn optional_plugin_commands_are_cleared_and_mcp_keeps_only_explicit_configuration() {
+        let optional = optional_command(Path::new("yunxi-next"), "__fixture", "__missing_path");
+        assert!(optional.environment_is_cleared());
+        assert!(
+            !optional
+                .environment()
+                .contains_key(std::ffi::OsStr::new("DEEPSEEK_API_KEY"))
+        );
+        assert!(
+            !optional
+                .environment()
+                .contains_key(std::ffi::OsStr::new("OPENAI_API_KEY"))
+        );
+
+        let mcp = optional_mcp_command(Path::new("yunxi-next"), "__fixture", "__missing_path");
+        assert!(mcp.environment_is_cleared());
+        assert!(
+            !mcp.environment()
+                .contains_key(std::ffi::OsStr::new("DEEPSEEK_API_KEY"))
+        );
+        assert!(
+            !mcp.environment()
+                .contains_key(std::ffi::OsStr::new("OPENAI_API_KEY"))
+        );
     }
 }

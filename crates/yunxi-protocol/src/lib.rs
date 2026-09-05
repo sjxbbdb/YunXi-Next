@@ -57,7 +57,8 @@ pub use mailbox::{
     MailboxListResult, MailboxMarkReadRequest, MailboxMutationResult, MailboxSummary,
 };
 pub use manifest::{
-    GrantKind, GrantRequirement, MANIFEST_SCHEMA_VERSION, ManifestError, PluginManifest,
+    DEFAULT_HOST_GROUP, GrantKind, GrantRequirement, MANIFEST_SCHEMA_VERSION, MAX_HOST_GROUP_BYTES,
+    ManifestError, PluginManifest, PluginRiskLevel, PluginRuntimeMetadata,
 };
 pub use mcp::{
     MCP_PROTOCOL_VERSION, McpProtocolError, McpServerState, McpStatusRequest, McpStatusResult,

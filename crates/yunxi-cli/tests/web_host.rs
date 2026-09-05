@@ -333,7 +333,7 @@ fn web_projects_isolated_multi_agent_tree_and_history() {
 }
 
 #[test]
-fn capability_settings_persist_and_apply_only_after_host_restart() {
+fn capability_settings_apply_live_and_persist() {
     let workspace = unique_temp_dir("yunxi-web-settings");
     fs::create_dir_all(&workspace).expect("create settings workspace");
 
@@ -361,12 +361,18 @@ fn capability_settings_persist_and_apply_only_after_host_restart() {
             .as_object()
             .expect("capability values")
             .len(),
-        13
+        15
     );
-    assert_eq!(capabilities["applies"], "restart");
+    assert_eq!(capabilities["applies"], "live");
     let encoded_description = described.to_string();
     assert!(!encoded_description.contains("fixture-secret"));
     assert!(!encoded_description.contains(&workspace.to_string_lossy().to_string()));
+
+    let created = rpc_call(address, "settings-session", "session.create", json!({}));
+    let session_id = created["sessionId"]
+        .as_str()
+        .expect("settings session id")
+        .to_string();
 
     let updated = rpc_call(
         address,
@@ -381,6 +387,41 @@ fn capability_settings_persist_and_apply_only_after_host_restart() {
     assert_eq!(updated["revision"], 1);
     assert_eq!(updated["value"]["context"], false);
     assert_eq!(updated["user"]["context"], false);
+
+    let live_health_after_update =
+        rpc_call(address, "health-after-update", "health.status", json!({}));
+    assert_eq!(
+        live_health_after_update["capabilities"],
+        initial_capabilities - 1
+    );
+    let live_inventory_after_update = rpc_call(
+        address,
+        "inventory-after-update",
+        "pluginInventory/list",
+        json!({}),
+    );
+    let live_context = inventory_entry(&live_inventory_after_update, "yunxi.context");
+    assert_eq!(live_context["enabled"], false);
+    assert_eq!(live_context["fiberPhase"], Value::Null);
+
+    let sessions_after_update =
+        rpc_call(address, "sessions-after-update", "session.list", json!({}));
+    assert!(
+        sessions_after_update["items"]
+            .as_array()
+            .expect("session list")
+            .iter()
+            .any(|item| item["sessionId"] == session_id)
+    );
+    assert_eq!(
+        rpc_call(
+            address,
+            "history-after-update",
+            "session.history",
+            json!({ "sessionId": session_id }),
+        )["events"],
+        json!([])
+    );
 
     let settings_path = workspace.join("next-home").join("settings.json");
     let persisted: Value = serde_json::from_slice(
@@ -483,11 +524,11 @@ fn capability_settings_persist_and_apply_only_after_host_restart() {
     assert_eq!(unset["user"], json!({ "context": false }));
 
     let live_health = rpc_call(address, "health-live", "health.status", json!({}));
-    assert_eq!(live_health["capabilities"], initial_capabilities);
+    assert_eq!(live_health["capabilities"], initial_capabilities - 1);
     let live_inventory = rpc_call(address, "inventory-live", "pluginInventory/list", json!({}));
     assert_eq!(
         inventory_entry(&live_inventory, "yunxi.context")["enabled"],
-        true
+        false
     );
     web.stop();
 
@@ -527,6 +568,7 @@ fn capability_settings_persist_and_apply_only_after_host_restart() {
     let context = inventory_entry(&restarted_inventory, "yunxi.context");
     assert_eq!(context["enabled"], false);
     assert_eq!(context["fiberPhase"], Value::Null);
+    assert!(context.get("manifest").is_none());
     let restarted_health = rpc_call(
         restarted_address,
         "health-restarted",
@@ -565,6 +607,127 @@ fn capability_settings_persist_and_apply_only_after_host_restart() {
 
     restarted.stop();
     model_server.join().expect("join restarted model fixture");
+    remove_workspace(&workspace);
+}
+
+#[test]
+fn voice_and_weixin_plugins_are_projected_only_when_enabled() {
+    let workspace = unique_temp_dir("yunxi-web-auxiliary-plugins");
+    fs::create_dir_all(&workspace).expect("create auxiliary plugin workspace");
+
+    // Startup only needs the model plugin handshake. Keep the provider
+    // listener open without serving requests because this test exercises the
+    // inventory and plugin boundaries, not model completion.
+    let model_listener = TcpListener::bind("127.0.0.1:0").expect("bind model fixture");
+    model_listener
+        .set_nonblocking(true)
+        .expect("make model fixture nonblocking");
+    let model_address = model_listener.local_addr().expect("model fixture address");
+
+    let mut command = WebChild::command(&workspace, model_address);
+    for (name, value) in [
+        ("YUNXI_NEXT_CONTEXT_ENABLED", "false"),
+        ("YUNXI_NEXT_PERSONA_ENABLED", "false"),
+        ("YUNXI_NEXT_MEMORY_ENABLED", "false"),
+        ("YUNXI_NEXT_COMPANION_ENABLED", "false"),
+        ("YUNXI_NEXT_STORAGE_ENABLED", "false"),
+        ("YUNXI_NEXT_MAILBOX_ENABLED", "false"),
+        ("YUNXI_NEXT_SCHEDULER_ENABLED", "false"),
+        ("YUNXI_NEXT_SHELL_ENABLED", "false"),
+        ("YUNXI_NEXT_PATCH_ENABLED", "false"),
+        ("YUNXI_NEXT_FILES_ENABLED", "false"),
+        ("YUNXI_NEXT_MCP_ENABLED", "false"),
+        ("YUNXI_NEXT_SKILLS_ENABLED", "false"),
+        ("YUNXI_NEXT_MULTI_AGENT_ENABLED", "false"),
+        ("YUNXI_NEXT_VOICE_ENABLED", "true"),
+        ("YUNXI_NEXT_WEIXIN_ENABLED", "true"),
+    ] {
+        command.env(name, value);
+    }
+    let mut web = WebChild::start(command);
+    let address = web.wait_for_address();
+    let inventory = rpc_call(
+        address,
+        "auxiliary-inventory",
+        "pluginInventory/list",
+        json!({}),
+    );
+
+    let voice = inventory_entry(&inventory, "yunxi.voice.fixture");
+    assert_eq!(voice["enabled"], true);
+    assert_eq!(voice["fiberPhase"], "active");
+    assert!(voice.get("manifest").is_none());
+
+    let weixin = inventory_entry(&inventory, "yunxi.channel.weixin");
+    assert_eq!(weixin["enabled"], true);
+    assert_eq!(weixin["fiberPhase"], "active");
+    assert!(weixin.get("manifest").is_none());
+
+    web.stop();
+    drop(model_listener);
+    remove_workspace(&workspace);
+}
+
+#[test]
+fn plugin_setting_rebuild_failure_rolls_back_without_losing_web_session() {
+    let workspace = unique_temp_dir("yunxi-web-settings-rollback");
+    fs::create_dir_all(&workspace).expect("create rollback workspace");
+
+    let model_listener = TcpListener::bind("127.0.0.1:0").expect("bind model fixture");
+    model_listener
+        .set_nonblocking(true)
+        .expect("make model fixture nonblocking");
+    let model_address = model_listener.local_addr().expect("model fixture address");
+
+    let mut web = WebChild::spawn_settings(&workspace, model_address);
+    let address = web.wait_for_address();
+    let created = rpc_call(address, "rollback-session", "session.create", json!({}));
+    let session_id = created["sessionId"]
+        .as_str()
+        .expect("rollback session id")
+        .to_string();
+
+    let RpcResult::Failure(error) = rpc_result(
+        address,
+        "storage-disable",
+        "settings.update",
+        json!({
+            "ns": "yunxi-capabilities",
+            "patch": { "plugins": { "yunxi.storage": false } },
+            "expectedRevision": 0,
+        }),
+    ) else {
+        panic!("disabling active session storage must fail the live rebuild");
+    };
+    assert_eq!(error.code(), "settings-apply-failed");
+    assert_eq!(error.details()["rolledBack"], true);
+
+    let settings = rpc_call(address, "rollback-settings", "settings.describe", json!({}));
+    let namespace = settings_namespace(&settings);
+    assert_eq!(namespace["revision"], 0);
+    assert_eq!(namespace["value"]["storage"], true);
+    assert!(namespace.get("user").is_none());
+
+    let inventory = rpc_call(
+        address,
+        "rollback-inventory",
+        "pluginInventory/list",
+        json!({}),
+    );
+    assert_eq!(
+        inventory_entry(&inventory, "yunxi.storage")["enabled"],
+        true
+    );
+    let sessions = rpc_call(address, "rollback-sessions", "session.list", json!({}));
+    assert!(
+        sessions["items"]
+            .as_array()
+            .expect("rollback session list")
+            .iter()
+            .any(|item| item["sessionId"] == session_id)
+    );
+
+    web.stop();
     remove_workspace(&workspace);
 }
 

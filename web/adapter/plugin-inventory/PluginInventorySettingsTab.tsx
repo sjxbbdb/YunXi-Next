@@ -24,6 +24,8 @@ export type CapabilityField =
   | 'mcp'
   | 'skills'
   | 'multi_agent'
+  | 'voice'
+  | 'weixin'
 
 export type CapabilitySettings = Record<CapabilityField, boolean>
 
@@ -41,7 +43,7 @@ export interface PluginInventorySettingsTabInjected {
   getCapabilities: () => CapabilitySettingsSnapshot
   /** Subscribe to persistent capability-view replacements. */
   subscribeCapabilities: (listener: () => void) => () => void
-  /** Persist one restart-scoped capability choice. */
+  /** Persist one composition-scoped capability choice. */
   setCapability: (field: CapabilityField, enabled: boolean) => Promise<void>
 }
 
@@ -80,6 +82,8 @@ const CAPABILITY_BY_ENTRY: Readonly<Record<string, CapabilityField>> = {
   'yunxi.tool.mcp': 'mcp',
   'yunxi.tool.skills': 'skills',
   'yunxi.multi-agent': 'multi_agent',
+  'yunxi.voice.fixture': 'voice',
+  'yunxi.channel.weixin': 'weixin',
 }
 
 function phaseLabel(
@@ -104,7 +108,7 @@ function matches(entry: PluginInventoryEntry, normalizedQuery: string): boolean 
     .some(value => value.toLocaleLowerCase().includes(normalizedQuery))
 }
 
-/** Render the current inventory with restart-scoped YunXi capability switches. */
+/** Render the current inventory with composition-scoped YunXi capability switches. */
 export function PluginInventorySettingsTab({
   list,
   getCapabilities,

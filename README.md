@@ -14,7 +14,20 @@ runnable fallback while the new architecture is developed and verified.
 
 ## Current Baseline
 
-The repository now has three explicit layers.
+The repository now has three explicit layers, plus a Cordis runtime foundation.
+The default CLI and Web turn path uses the Rust Agent spine. `ChatSession`
+retains application lifecycle, durable storage, post-response hooks, and Web
+projection responsibilities around that loop; the old compatibility loop is
+kept only as an explicit recovery path.
+
+`yunxi-cordis-core` is the small trusted, dependency-free Rust meta-kernel:
+scoped Context/Service lookup, typed events, reversible Effects, and Fiber
+lifecycle. `yunxi-cordis-runtime` adds a bounded static registry and coarse
+enable/disable lifecycle. `yunxi-agent-spine` is a separate replaceable Agent
+loop with bounded sessions, context/model/tool seams, cancellation, budgets,
+and fail-closed tool approval. The CLI supplies these seams through the process
+Host, so model/tool turns use the spine while application hooks remain outside
+the trusted loop.
 
 The L0 kernel owns only the minimum lifecycle needed to run plugins safely:
 
@@ -22,7 +35,10 @@ The L0 kernel owns only the minimum lifecycle needed to run plugins safely:
 - start and observe it;
 - contain an unexpected process exit;
 - keep the kernel and sibling plugins running;
-- stop supervised processes during shutdown.
+- stop supervised processes during shutdown;
+- retry an unexpectedly failed optional Host with bounded backoff, up to three
+  times per enable cycle, then leave it disabled until the user enables it
+  again.
 
 The L1 capability platform adds:
 
@@ -44,8 +60,9 @@ The connected identity and stateful paths add:
   on first write instead of overwritten;
 - `companion.decide@1`, `scheduler.proactive@1`, and an encrypted
   `companion.mailbox@1` path;
-- optional capability launch switches, with context and persona enabled by
-  default and memory disabled by default, including a read-only Files tool;
+- persisted plugin launch switches: Model/Agent spine are always on, Context,
+  Persona, and Storage are enabled by default, while external or side-effecting
+  capabilities are disabled by default;
 - inherited YunXi/DeepSeek/OpenAI environment configuration;
 - an interactive CLI with bounded working history backed by persistent
   sessions;
@@ -53,8 +70,15 @@ The connected identity and stateful paths add:
   commands;
 - `--once` mode for scripts and health checks;
 - the pinned DeepSeek Harness Web client, served from the Rust binary with a
-  bounded HTTP/SSE adapter, real session chat, and restart-scoped capability
+  bounded HTTP/SSE adapter, real session chat, and composition-scoped capability
   switches.
+
+Voice and Weixin now have Rust contract crates, process-host fixtures, and
+launch-wired optional entries. When enabled, `yunxi-voice` exposes bounded
+transcribe/synthesize routes and `yunxi-weixin` exposes a bounded
+`channel.weixin@1` route with idempotent inbound/outbound delivery state. The
+current implementations are deterministic fixtures: they do not provide a
+real microphone, speaker, Weixin login, or Weixin network transport.
 
 When enabled, the Files tool exposes bounded `file.search` and `file.read`
 model calls under a read-only workspace grant. Shell and Patch model calls
@@ -72,28 +96,41 @@ remain Phase 4 work.
 
 API failures are returned per request and do not terminate the model plugin.
 An optional capability failure produces a visible warning and falls back to
-the remaining route set. Plugin process failures remain visible until an
-explicit restart; the kernel does not automatically restart a crashing plugin.
+the remaining route set. `yunxi-plugin-host` performs bounded automatic
+recovery for an unexpectedly failed plugin, at most three retries per enable
+cycle. Recovery advances at its synchronous `refresh()` boundary; after the
+limit, the plugin is disabled until explicit user enable or manual restart.
 
 Process isolation protects the kernel from plugin crashes. It is not yet a
 filesystem, network, or resource-usage sandbox.
 
-The remaining inheritance plan for model-based memory extraction, richer
-companion automation, tools, Weixin, voice, and management UI is tracked in
+The remaining inheritance plan for richer model-based memory extraction,
+companion automation, production Voice/Weixin adapters, streaming, and
+management parity is tracked in
 [`docs/capability-migration.md`](docs/capability-migration.md). A capability is
 counted as migrated only after it has a real process boundary, versioned
 contract, explicit grants, and failure-containment tests.
 
-The dsh-inspired composition layer is now represented by
+The dsh-inspired composition layer and the initial Cordis primitives are now
+represented by
 [`yunxi-composition`](crates/yunxi-composition/README.md). It keeps ordered
 bundle/profile/overlay configuration separate from process supervision and
 projects the current plugin set into the inventory shape needed by the dsh Web
-client. The upstream record and reuse boundary are documented in
+client. `yunxi-cordis-core` provides generic Context, Service, Event, Effect,
+and Fiber primitives; `yunxi-cordis-runtime` adds a static registry and
+enable/disable lifecycle for in-process composition. The runtime is the trusted
+bootstrap and the spine is the default turn loop, while dynamic Rust plugin
+loading and live in-place Web unmounting remain later work. The upstream record
+and reuse boundary are documented in
 [`docs/dsh-web-compatibility.md`](docs/dsh-web-compatibility.md).
 User capability choices are stored by
 [`yunxi-settings`](crates/yunxi-settings/README.md) in a bounded, versioned
-document. Explicit environment variables remain the highest-precedence
-operator override.
+document. An explicit `settings.plugins` value is resolved first; legacy
+capability environment/file settings are retained as compatibility fallbacks.
+The settings crate knows 15 built-in optional keys, including `voice` and
+`weixin`, and the current CLI Host and Web schema expose all 15 launch-wired
+optional entries alongside the required Model entry. Voice and Weixin remain
+off by default and use fixture implementations until their real adapters land.
 
 ## Run
 
@@ -138,9 +175,9 @@ command's standard input performs an explicit Host shutdown. Open
 `http://127.0.0.1:8787` to use the embedded dsh workbench. The current Web
 surface supports text sessions, model selection projection, history, real
 chat replies, Host approvals, plugin inventory, and capability switches in
-Settings > Plugins. Switch changes are persisted immediately and applied when
-the Host is restarted; provider credentials stay in the Host process
-environment.
+Settings > Plugins. Switch changes are persisted immediately; WebHost applies
+them by rebuilding its current Host, while a standalone CLI applies them on its
+next Host launch. Provider credentials stay in the Host process environment.
 
 See [`docs/provider-configuration.md`](docs/provider-configuration.md) for
 custom OpenAI-compatible endpoints and the complete resolution order. The

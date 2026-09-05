@@ -10,5 +10,6 @@ stays beside the crate that owns it.
 | [`project-structure.md`](project-structure.md) | Canonical directory and file ownership map |
 | [`kernel-architecture.md`](kernel-architecture.md) | Trusted boundary, runtime flow, and non-goals |
 | [`chat-runtime.md`](chat-runtime.md) | CLI, local protocol, model process, and failure flow |
+| [`cordis-rust-architecture.md`](cordis-rust-architecture.md) | Cordis Rust meta-kernel, Agent spine, plugin isolation, and integration boundary |
 | [`provider-configuration.md`](provider-configuration.md) | Provider configuration, persisted capability settings, and environment precedence |
 | [`dsh-web-compatibility.md`](dsh-web-compatibility.md) | dsh upstream record, MIT attribution, and Web compatibility boundary |

@@ -5,12 +5,14 @@ mod entry;
 mod error;
 mod inventory;
 mod layer;
+mod manifest;
 mod profile;
 
 pub use entry::{CompositionEntry, EntryError, EntryId, EntryIdError};
 pub use error::CompositionError;
 pub use inventory::{PluginFiberPhase, PluginInventoryEntry, PluginInventorySnapshot};
 pub use layer::{ConfigLayer, LayerOperation};
+pub use manifest::{DefaultEnablement, PluginManifest, PluginRisk, PluginRole};
 pub use profile::{CompositionSnapshot, Profile};
 
 /// Maximum number of entries in one effective profile.

@@ -1685,15 +1685,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "yunxi-agent-spine"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "yunxi-protocol",
+]
+
+[[package]]
 name = "yunxi-cli"
 version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
+ "yunxi-agent-spine",
  "yunxi-companion",
  "yunxi-companion-mailbox",
  "yunxi-composition",
  "yunxi-context",
+ "yunxi-cordis-core",
+ "yunxi-cordis-runtime",
  "yunxi-kernel",
  "yunxi-memory",
  "yunxi-model-openai",
@@ -1709,8 +1721,10 @@ dependencies = [
  "yunxi-tool-patch",
  "yunxi-tool-shell",
  "yunxi-tool-skills",
+ "yunxi-voice",
  "yunxi-web-contract",
  "yunxi-web-gateway",
+ "yunxi-weixin",
 ]
 
 [[package]]
@@ -1745,6 +1759,17 @@ name = "yunxi-context"
 version = "0.1.0"
 dependencies = [
  "yunxi-protocol",
+]
+
+[[package]]
+name = "yunxi-cordis-core"
+version = "0.1.0"
+
+[[package]]
+name = "yunxi-cordis-runtime"
+version = "0.1.0"
+dependencies = [
+ "yunxi-cordis-core",
 ]
 
 [[package]]
@@ -1875,6 +1900,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "yunxi-voice"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "yunxi-kernel",
+ "yunxi-plugin-host",
+ "yunxi-protocol",
+]
+
+[[package]]
 name = "yunxi-web-contract"
 version = "0.1.0"
 dependencies = [
@@ -1890,6 +1926,17 @@ dependencies = [
  "serde_json",
  "yunxi-composition",
  "yunxi-web-contract",
+]
+
+[[package]]
+name = "yunxi-weixin"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "yunxi-kernel",
+ "yunxi-plugin-host",
+ "yunxi-protocol",
 ]
 
 [[package]]

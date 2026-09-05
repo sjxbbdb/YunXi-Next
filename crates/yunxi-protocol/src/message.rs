@@ -173,6 +173,9 @@ pub enum HostMessage {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+// Keep the manifest inline to preserve the existing public Hello shape and
+// wire representation; this enum is short-lived at the handshake boundary.
+#[allow(clippy::large_enum_variant)]
 pub enum PluginMessage {
     Hello {
         protocol_version: u32,

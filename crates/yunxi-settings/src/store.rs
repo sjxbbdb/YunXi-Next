@@ -1,5 +1,6 @@
-//! Versioned, bounded, and atomically replaced capability settings document.
+//! Versioned, bounded, and atomically replaced capability and plugin settings.
 
+use std::collections::BTreeMap;
 use std::env;
 use std::error::Error;
 use std::fmt;
@@ -16,6 +17,8 @@ use crate::{CapabilityOverrides, CapabilitySetting, CapabilitySwitches};
 
 pub const SETTINGS_FILE_NAME: &str = "settings.json";
 pub const MAX_SETTINGS_FILE_BYTES: usize = 64 * 1024;
+pub const MAX_PLUGIN_ID_BYTES: usize = 128;
+pub const MAX_PLUGIN_OVERRIDES: usize = 256;
 const SETTINGS_DOCUMENT_VERSION: u32 = 1;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -24,10 +27,17 @@ pub enum CapabilityEdit {
     Unset(CapabilitySetting),
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PluginEdit {
+    Set(String, bool),
+    Unset(String),
+}
+
 #[derive(Clone, Debug)]
 pub struct CapabilitySettingsStore {
     path: PathBuf,
     overrides: CapabilityOverrides,
+    plugin_overrides: BTreeMap<String, bool>,
     revision: u64,
     warnings: Vec<String>,
 }
@@ -75,6 +85,16 @@ impl CapabilitySettingsStore {
         &self.overrides
     }
 
+    /// Returns persisted user choices keyed by plugin id.
+    pub fn plugin_overrides(&self) -> &BTreeMap<String, bool> {
+        &self.plugin_overrides
+    }
+
+    /// Resolves a plugin choice without assuming that the plugin is installed.
+    pub fn plugin_enabled(&self, id: &str, default: bool) -> bool {
+        self.plugin_overrides.get(id).copied().unwrap_or(default)
+    }
+
     pub fn resolved(&self) -> CapabilitySwitches {
         CapabilitySwitches::from_overrides(&self.overrides)
     }
@@ -95,7 +115,7 @@ impl CapabilitySettingsStore {
         self.check_revision(expected_revision)?;
         let mut next = self.overrides.clone();
         next.merge(&patch);
-        self.commit(next)
+        self.commit(next, self.plugin_overrides.clone())
     }
 
     pub fn replace(
@@ -104,7 +124,7 @@ impl CapabilitySettingsStore {
         expected_revision: Option<u64>,
     ) -> Result<bool, CapabilitySettingsError> {
         self.check_revision(expected_revision)?;
-        self.commit(section)
+        self.commit(section, self.plugin_overrides.clone())
     }
 
     pub fn mutate(
@@ -120,7 +140,75 @@ impl CapabilitySettingsStore {
                 CapabilityEdit::Unset(setting) => next.unset(setting),
             }
         }
-        self.commit(next)
+        self.commit(next, self.plugin_overrides.clone())
+    }
+
+    pub fn set_plugin(
+        &mut self,
+        id: impl Into<String>,
+        enabled: bool,
+        expected_revision: Option<u64>,
+    ) -> Result<bool, CapabilitySettingsError> {
+        self.mutate_plugins([PluginEdit::Set(id.into(), enabled)], expected_revision)
+    }
+
+    pub fn unset_plugin(
+        &mut self,
+        id: impl Into<String>,
+        expected_revision: Option<u64>,
+    ) -> Result<bool, CapabilitySettingsError> {
+        self.mutate_plugins([PluginEdit::Unset(id.into())], expected_revision)
+    }
+
+    pub fn update_plugins(
+        &mut self,
+        patch: BTreeMap<String, bool>,
+        expected_revision: Option<u64>,
+    ) -> Result<bool, CapabilitySettingsError> {
+        self.check_revision(expected_revision)?;
+        validate_plugin_overrides(&patch)?;
+        let mut next = self.plugin_overrides.clone();
+        next.extend(patch);
+        validate_plugin_overrides(&next)?;
+        self.commit(self.overrides.clone(), next)
+    }
+
+    pub fn replace_plugins(
+        &mut self,
+        plugins: BTreeMap<String, bool>,
+        expected_revision: Option<u64>,
+    ) -> Result<bool, CapabilitySettingsError> {
+        self.check_revision(expected_revision)?;
+        validate_plugin_overrides(&plugins)?;
+        self.commit(self.overrides.clone(), plugins)
+    }
+
+    pub fn mutate_plugins(
+        &mut self,
+        edits: impl IntoIterator<Item = PluginEdit>,
+        expected_revision: Option<u64>,
+    ) -> Result<bool, CapabilitySettingsError> {
+        self.check_revision(expected_revision)?;
+        let mut next = self.plugin_overrides.clone();
+        for edit in edits {
+            match edit {
+                PluginEdit::Set(id, enabled) => {
+                    validate_plugin_id(&id)?;
+                    if !next.contains_key(&id) && next.len() >= MAX_PLUGIN_OVERRIDES {
+                        return Err(CapabilitySettingsError::TooManyPluginOverrides {
+                            count: next.len().saturating_add(1),
+                            maximum: MAX_PLUGIN_OVERRIDES,
+                        });
+                    }
+                    next.insert(id, enabled);
+                }
+                PluginEdit::Unset(id) => {
+                    validate_plugin_id(&id)?;
+                    next.remove(&id);
+                }
+            }
+        }
+        self.commit(self.overrides.clone(), next)
     }
 
     pub fn parse_section(value: &Value) -> Result<CapabilityOverrides, CapabilitySettingsError> {
@@ -136,10 +224,26 @@ impl CapabilitySettingsStore {
         })
     }
 
+    pub fn parse_plugins(value: &Value) -> Result<BTreeMap<String, bool>, CapabilitySettingsError> {
+        if !value.is_object() {
+            return Err(CapabilitySettingsError::InvalidPluginSection(
+                "plugin settings section must be an object".to_string(),
+            ));
+        }
+        let plugins = serde_json::from_value(value.clone()).map_err(|error| {
+            CapabilitySettingsError::InvalidPluginSection(format!(
+                "plugin settings section is invalid: {error}"
+            ))
+        })?;
+        validate_plugin_overrides(&plugins)?;
+        Ok(plugins)
+    }
+
     fn from_document(path: PathBuf, document: SettingsDocument, warnings: Vec<String>) -> Self {
         Self {
             path,
             overrides: document.capabilities,
+            plugin_overrides: document.plugins,
             revision: document.revision,
             warnings,
         }
@@ -149,6 +253,7 @@ impl CapabilitySettingsStore {
         Self {
             path,
             overrides: CapabilityOverrides::default(),
+            plugin_overrides: BTreeMap::new(),
             revision: 0,
             warnings,
         }
@@ -166,8 +271,12 @@ impl CapabilitySettingsStore {
         Ok(())
     }
 
-    fn commit(&mut self, next: CapabilityOverrides) -> Result<bool, CapabilitySettingsError> {
-        if next == self.overrides {
+    fn commit(
+        &mut self,
+        next: CapabilityOverrides,
+        next_plugins: BTreeMap<String, bool>,
+    ) -> Result<bool, CapabilitySettingsError> {
+        if next == self.overrides && next_plugins == self.plugin_overrides {
             return Ok(false);
         }
         let revision = self
@@ -178,6 +287,7 @@ impl CapabilitySettingsStore {
             version: SETTINGS_DOCUMENT_VERSION,
             revision,
             capabilities: next.clone(),
+            plugins: next_plugins.clone(),
         };
         let mut content =
             serde_json::to_vec_pretty(&document).map_err(CapabilitySettingsError::Serialize)?;
@@ -190,6 +300,7 @@ impl CapabilitySettingsStore {
         }
         replace_file(&self.path, &content)?;
         self.overrides = next;
+        self.plugin_overrides = next_plugins;
         self.revision = revision;
         Ok(true)
     }
@@ -202,6 +313,8 @@ struct SettingsDocument {
     revision: u64,
     #[serde(default)]
     capabilities: CapabilityOverrides,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    plugins: BTreeMap<String, bool>,
 }
 
 fn load_document(path: &Path) -> Result<Option<SettingsDocument>, CapabilitySettingsError> {
@@ -237,6 +350,7 @@ fn load_document(path: &Path) -> Result<Option<SettingsDocument>, CapabilitySett
             message: error.to_string(),
         }
     })?;
+    validate_plugin_overrides(&document.plugins)?;
     if document.version != SETTINGS_DOCUMENT_VERSION {
         return Err(CapabilitySettingsError::UnsupportedVersion {
             path: path.to_path_buf(),
@@ -244,6 +358,33 @@ fn load_document(path: &Path) -> Result<Option<SettingsDocument>, CapabilitySett
         });
     }
     Ok(Some(document))
+}
+
+fn validate_plugin_overrides(
+    plugins: &BTreeMap<String, bool>,
+) -> Result<(), CapabilitySettingsError> {
+    if plugins.len() > MAX_PLUGIN_OVERRIDES {
+        return Err(CapabilitySettingsError::TooManyPluginOverrides {
+            count: plugins.len(),
+            maximum: MAX_PLUGIN_OVERRIDES,
+        });
+    }
+    for id in plugins.keys() {
+        validate_plugin_id(id)?;
+    }
+    Ok(())
+}
+
+fn validate_plugin_id(id: &str) -> Result<(), CapabilitySettingsError> {
+    if id.is_empty()
+        || id.len() > MAX_PLUGIN_ID_BYTES
+        || id.chars().any(|character| {
+            !character.is_ascii() || character.is_control() || character.is_whitespace()
+        })
+    {
+        return Err(CapabilitySettingsError::InvalidPluginId { id: id.to_string() });
+    }
+    Ok(())
 }
 
 fn replace_file(target: &Path, content: &[u8]) -> Result<(), CapabilitySettingsError> {
@@ -332,6 +473,14 @@ pub enum CapabilitySettingsError {
         current: u64,
     },
     InvalidSection(String),
+    InvalidPluginSection(String),
+    InvalidPluginId {
+        id: String,
+    },
+    TooManyPluginOverrides {
+        count: usize,
+        maximum: usize,
+    },
     InvalidDocument {
         path: PathBuf,
         message: String,
@@ -360,6 +509,14 @@ impl fmt::Display for CapabilitySettingsError {
                 "settings revision conflict: expected {expected}, current {current}"
             ),
             Self::InvalidSection(message) => formatter.write_str(message),
+            Self::InvalidPluginSection(message) => formatter.write_str(message),
+            Self::InvalidPluginId { id } => {
+                write!(formatter, "invalid plugin id `{id}` in settings")
+            }
+            Self::TooManyPluginOverrides { count, maximum } => write!(
+                formatter,
+                "settings contain {count} plugin overrides; maximum is {maximum}"
+            ),
             Self::InvalidDocument { path, message } => {
                 write!(
                     formatter,
@@ -431,6 +588,88 @@ mod tests {
     }
 
     #[test]
+    fn legacy_document_without_voice_or_weixin_loads_with_external_capabilities_off() {
+        let root = test_root("legacy-capabilities");
+        let path = root.join(SETTINGS_FILE_NAME);
+        fs::create_dir_all(&root).expect("create root");
+        fs::write(
+            &path,
+            serde_json::to_vec(&json!({
+                "version": SETTINGS_DOCUMENT_VERSION,
+                "revision": 3,
+                "capabilities": {
+                    "context": true,
+                    "persona": true,
+                    "storage": true,
+                    "memory": true
+                }
+            }))
+            .expect("legacy settings JSON"),
+        )
+        .expect("write legacy settings");
+
+        let loaded = CapabilitySettingsStore::load(&path);
+        assert_eq!(loaded.revision(), 3);
+        assert!(loaded.resolved().memory);
+        assert!(!loaded.resolved().voice);
+        assert!(!loaded.resolved().weixin);
+        fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    #[test]
+    fn plugin_switches_persist_even_when_the_plugin_is_not_installed() {
+        let root = test_root("plugin-switch");
+        let path = root.join(SETTINGS_FILE_NAME);
+        let mut store = CapabilitySettingsStore::load(&path);
+
+        assert!(
+            store
+                .set_plugin("not-installed", true, Some(0))
+                .expect("persist plugin choice")
+        );
+        assert!(store.plugin_enabled("not-installed", false));
+        assert!(!store.plugin_enabled("missing", false));
+
+        let loaded = CapabilitySettingsStore::load(&path);
+        assert_eq!(loaded.plugin_overrides().get("not-installed"), Some(&true));
+        assert!(loaded.plugin_enabled("not-installed", false));
+        assert!(
+            serde_json::from_slice::<Value>(&fs::read(&path).expect("settings"))
+                .expect("JSON")
+                .get("plugins")
+                .is_some()
+        );
+        fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    #[test]
+    fn plugin_switch_can_be_disabled_and_removed_with_revision_fencing() {
+        let root = test_root("plugin-disable");
+        let path = root.join(SETTINGS_FILE_NAME);
+        let mut store = CapabilitySettingsStore::load(&path);
+
+        assert!(
+            store
+                .set_plugin("optional.plugin", true, Some(0))
+                .expect("enable plugin")
+        );
+        assert!(store.plugin_enabled("optional.plugin", false));
+        assert!(
+            store
+                .set_plugin("optional.plugin", false, Some(1))
+                .expect("disable plugin")
+        );
+        assert!(!store.plugin_enabled("optional.plugin", true));
+        assert!(
+            store
+                .unset_plugin("optional.plugin", Some(2))
+                .expect("remove plugin override")
+        );
+        assert!(store.plugin_enabled("optional.plugin", true));
+        fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    #[test]
     fn stale_revision_is_rejected_before_the_document_changes() {
         let root = test_root("conflict");
         let path = root.join(SETTINGS_FILE_NAME);
@@ -455,6 +694,10 @@ mod tests {
         assert!(CapabilitySettingsStore::parse_section(&json!([])).is_err());
         assert!(CapabilitySettingsStore::parse_section(&json!({ "unknown": true })).is_err());
         assert!(CapabilitySettingsStore::parse_section(&json!({ "memory": "yes" })).is_err());
+        assert!(CapabilitySettingsStore::parse_plugins(&json!({ "bad id": true })).is_err());
+        assert!(
+            CapabilitySettingsStore::parse_plugins(&json!({ "unknown.plugin": false })).is_ok()
+        );
     }
 
     #[test]
@@ -472,6 +715,7 @@ mod tests {
                     "files": true
                 }))
                 .expect("section"),
+                plugins: BTreeMap::from([(String::from("recovered.plugin"), true)]),
             })
             .expect("backup JSON"),
         )
@@ -480,6 +724,7 @@ mod tests {
         let mut store = CapabilitySettingsStore::load(&path);
         assert_eq!(store.revision(), 7);
         assert!(store.resolved().files);
+        assert!(store.plugin_enabled("recovered.plugin", false));
         assert_eq!(store.take_warnings().len(), 2);
         fs::remove_dir_all(root).expect("remove fixture");
     }

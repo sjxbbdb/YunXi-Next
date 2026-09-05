@@ -38,7 +38,11 @@ checks above this kernel boundary.
 - One plugin failure does not stop sibling plugin processes.
 - Spawn failures are contained as plugin failures.
 - Shutdown requests termination and joins every active supervisor thread.
-- Failed plugins remain failed until an explicit restart.
+- Failed plugins are retried by `yunxi-plugin-host` with bounded backoff, up to
+  three automatic restarts per enable cycle; after exhaustion they remain
+  disabled until an explicit enable or manual restart.
+- `yunxi-plugin-host` can bind a launch to an exact expected capability set;
+  an unexpected declaration is rejected before the route becomes available.
 - Host-detected transport or malformed-frame failures remain `Failed` even
   after the supervisor finishes terminating that process.
 - A protocol or API implementation cannot panic inside the kernel process.
@@ -48,8 +52,11 @@ checks above this kernel boundary.
 - Filesystem, network, CPU, and memory sandboxing.
 - Plugin wire formats and readiness handshakes; these belong to
   `yunxi-protocol` outside the kernel.
-- Automatic restart and backoff policy.
+- The Cordis Context/Service/Event/Effect runtime; those generic primitives are
+  implemented in `yunxi-cordis-core` and composed above the process kernel.
 - Models, tools, memory, voice, channels, terminal rendering, or Web UI logic.
 
 These capabilities require separate contracts and must not expand the trusted
-kernel without an explicit design decision.
+kernel without an explicit design decision. Restart recovery is deliberately in
+the Plugin Host, not in the minimal kernel state machine. Recovery is
+synchronous and `refresh()`-driven in the current implementation.

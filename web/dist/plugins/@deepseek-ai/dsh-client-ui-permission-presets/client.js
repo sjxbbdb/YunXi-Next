@@ -30,8 +30,8 @@ window.__ModuleLoader__.load({
 			return value === "danger-full-access" ? "Full access" : displayPresetName(name);
 		}
 		//#endregion
-		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-0a50875c14b34d63b17f6522f5dab19c\packages\client\ui-permission-presets\src\client\PermissionRow.module.css.mjs
-		const css = ".f6xvVW_row{border-bottom:1px solid var(--dsw-alias-border-l2);align-items:center;gap:8px;padding:16px 0;display:flex}.f6xvVW_rowText{flex-direction:column;flex:1;gap:4px;min-width:0;padding-right:48px;display:flex}.f6xvVW_title{color:var(--dsw-alias-label-primary);font-size:14px;font-weight:400;line-height:22px}.f6xvVW_desc{color:var(--dsw-alias-label-tertiary);font-size:12px;font-weight:400;line-height:18px}.f6xvVW_selector{background:var(--dsw-alias-bg-module-platform);height:36px;font:inherit;color:var(--dsw-alias-label-primary);cursor:pointer;border:none;border-radius:18px;align-items:center;gap:12px;padding:0 14px;font-size:14px;line-height:22px;display:inline-flex}.f6xvVW_selector:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.f6xvVW_selector:disabled{cursor:default}.f6xvVW_chevron{flex:none}";
+		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-ab5a0433e27742b99ef765dc97041378\packages\client\ui-permission-presets\src\client\PermissionRow.module.css.mjs
+		const css = "._6onGDq_row{border-bottom:1px solid var(--dsw-alias-border-l2);align-items:center;gap:8px;padding:16px 0;display:flex}._6onGDq_rowText{flex-direction:column;flex:1;gap:4px;min-width:0;padding-right:48px;display:flex}._6onGDq_title{color:var(--dsw-alias-label-primary);font-size:14px;font-weight:400;line-height:22px}._6onGDq_desc{color:var(--dsw-alias-label-tertiary);font-size:12px;font-weight:400;line-height:18px}._6onGDq_selector{background:var(--dsw-alias-bg-module-platform);height:36px;font:inherit;color:var(--dsw-alias-label-primary);cursor:pointer;border:none;border-radius:18px;align-items:center;gap:12px;padding:0 14px;font-size:14px;line-height:22px;display:inline-flex}._6onGDq_selector:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}._6onGDq_selector:disabled{cursor:default}._6onGDq_chevron{flex:none}";
 		const tagId = "@deepseek-ai/dsh-client-ui-permission-presets/PermissionRow.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -41,12 +41,12 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var PermissionRow_module_css_default = {
-			"chevron": "f6xvVW_chevron",
-			"desc": "f6xvVW_desc",
-			"row": "f6xvVW_row",
-			"rowText": "f6xvVW_rowText",
-			"selector": "f6xvVW_selector",
-			"title": "f6xvVW_title"
+			"chevron": "_6onGDq_chevron",
+			"desc": "_6onGDq_desc",
+			"row": "_6onGDq_row",
+			"rowText": "_6onGDq_rowText",
+			"selector": "_6onGDq_selector",
+			"title": "_6onGDq_title"
 		};
 		//#endregion
 		//#region lib/types/client/PermissionRow.js

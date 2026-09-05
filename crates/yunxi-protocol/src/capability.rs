@@ -43,8 +43,11 @@ pub mod capabilities {
     pub const TOOL_MULTI_AGENT: &str = "tool.multi-agent";
     pub const TOOL_MULTI_AGENT_VERSION: u32 = 1;
     pub const CHANNEL_WEIXIN: &str = "channel.weixin";
+    pub const CHANNEL_WEIXIN_VERSION: u32 = 1;
     pub const VOICE_TRANSCRIBE: &str = "voice.transcribe";
+    pub const VOICE_TRANSCRIBE_VERSION: u32 = 1;
     pub const VOICE_SYNTHESIZE: &str = "voice.synthesize";
+    pub const VOICE_SYNTHESIZE_VERSION: u32 = 1;
 
     pub const ALL: &[&str] = &[
         MODEL_CHAT,
@@ -324,5 +327,76 @@ mod tests {
             .map(|value| CapabilityId::new(*value).expect("valid built-in capability"))
             .collect::<std::collections::BTreeSet<_>>();
         assert_eq!(ids.len(), capabilities::ALL.len());
+    }
+
+    #[test]
+    fn built_in_capability_contracts_export_stable_names_and_versions() {
+        let contracts = [
+            (capabilities::MODEL_CHAT, capabilities::MODEL_CHAT_VERSION),
+            (
+                capabilities::CONTEXT_COMPOSE,
+                capabilities::CONTEXT_COMPOSE_VERSION,
+            ),
+            (
+                capabilities::PERSONA_CONTEXT,
+                capabilities::PERSONA_CONTEXT_VERSION,
+            ),
+            (
+                capabilities::MEMORY_RECALL,
+                capabilities::MEMORY_RECALL_VERSION,
+            ),
+            (
+                capabilities::MEMORY_WRITE,
+                capabilities::MEMORY_WRITE_VERSION,
+            ),
+            (
+                capabilities::COMPANION_DECIDE,
+                capabilities::COMPANION_DECIDE_VERSION,
+            ),
+            (
+                capabilities::COMPANION_MAILBOX,
+                capabilities::COMPANION_MAILBOX_VERSION,
+            ),
+            (
+                capabilities::SCHEDULER_PROACTIVE,
+                capabilities::SCHEDULER_PROACTIVE_VERSION,
+            ),
+            (
+                capabilities::STORAGE_SESSIONS,
+                capabilities::STORAGE_SESSIONS_VERSION,
+            ),
+            (capabilities::TOOL_SHELL, capabilities::TOOL_SHELL_VERSION),
+            (capabilities::TOOL_PATCH, capabilities::TOOL_PATCH_VERSION),
+            (capabilities::TOOL_FILES, capabilities::TOOL_FILES_VERSION),
+            (capabilities::TOOL_MCP, capabilities::TOOL_MCP_VERSION),
+            (capabilities::TOOL_SKILLS, capabilities::TOOL_SKILLS_VERSION),
+            (
+                capabilities::TOOL_MULTI_AGENT,
+                capabilities::TOOL_MULTI_AGENT_VERSION,
+            ),
+            (
+                capabilities::CHANNEL_WEIXIN,
+                capabilities::CHANNEL_WEIXIN_VERSION,
+            ),
+            (
+                capabilities::VOICE_TRANSCRIBE,
+                capabilities::VOICE_TRANSCRIBE_VERSION,
+            ),
+            (
+                capabilities::VOICE_SYNTHESIZE,
+                capabilities::VOICE_SYNTHESIZE_VERSION,
+            ),
+        ];
+
+        assert_eq!(contracts.len(), capabilities::ALL.len());
+        assert_eq!(
+            contracts.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            capabilities::ALL
+        );
+        assert!(contracts.iter().all(|(_, version)| *version == 1));
+        assert_eq!(crate::capabilities::ALL, capabilities::ALL);
+        assert_eq!(crate::capabilities::CHANNEL_WEIXIN_VERSION, 1);
+        assert_eq!(crate::capabilities::VOICE_TRANSCRIBE_VERSION, 1);
+        assert_eq!(crate::capabilities::VOICE_SYNTHESIZE_VERSION, 1);
     }
 }

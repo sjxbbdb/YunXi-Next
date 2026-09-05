@@ -2,8 +2,9 @@
 
 > 版本：v1.2
 > 基线提交：`0a73001`
-> 制定日期：2026-08-22；更新日期：2026-08-28
-> 状态：Phase 4 多智能体隔离基线已接入；异步并行和执行中即时中断仍在开发
+> 制定日期：2026-08-22；更新日期：2026-09-06
+> 状态：Cordis core/runtime、Agent spine、CLI/Web 默认执行链和 Voice/Weixin
+> fixture 接线已完成基线；异步多智能体、真实语音/微信适配和完整 parity 仍在开发
 
 这份文档是 YunXi Next 后续开发的排序、范围和完成判定。它不是功能愿望
 清单。没有通过本文件规定的验收门槛，能力只能标记为 `planned` 或
@@ -25,7 +26,9 @@ YunXi Next 最终应成为一个以 Rust trusted kernel 为中心、所有业务
 
 | 领域 | 当前状态 | 说明 |
 | --- | --- | --- |
-| Kernel / Plugin Host | 已接入 | 进程监督、握手、能力路由、崩溃隔离和兄弟插件存活测试已完成。 |
+| Cordis core / runtime | 基础版已接入 | `Context`、`Service`、`inject`、`Event`、`Effect`、Fiber 生命周期，以及静态插件注册、开关和失败隔离；尚未替换全部 CLI 编排或支持动态加载。 |
+| Agent spine | 默认执行链已接入 | 独立 Rust loop、bounded session/context/model/tool seams、cancellation、budget 和 fail-closed approval continuation 已接入 CLI/Web；`ChatSession` 保留应用生命周期、持久化和 Web projection，不再承担第二套模型工具循环。 |
+| Kernel / Plugin Host | 已接入 | 进程监督、握手、能力路由、崩溃隔离、兄弟插件存活，以及每次启用最多 3 次的 refresh 驱动自动恢复。 |
 | Model Chat | 基础版已接入 | OpenAI/DeepSeek 兼容 Chat Completions；当前是完整响应，不是 token streaming。 |
 | Context / Persona | 基础版已接入 | `AGENTS.md`、Persona profile 和 `soul.txt` 的受限读取与组合。 |
 | Memory | 基础版已接入 | 召回、规则提取、隐私过滤、去重、待审核写入；默认关闭。 |
@@ -37,14 +40,18 @@ YunXi Next 最终应成为一个以 Rust trusted kernel 为中心、所有业务
 | MCP stdio/HTTP bridge | 基础版已接入 | 独立二层进程、MCP initialize/list/call/cancel、JSON/SSE、session id、动态工具投影、Host approval 和崩溃恢复；默认关闭。HTTP 需要显式 network scope，Secret 只通过 reference grant 发放。 |
 | Skills | 基础版已接入 | 独立只读进程、受限发现/上下文、禁用过滤和 metadata-only 动态工具声明；默认关闭。 |
 | Multi-agent | 基础版已接入 | 独立协调进程、父子图、预算、持久化、恢复和独立子模型进程；默认关闭。当前子回合同步执行，不宣称后台并行或执行中即时中断。 |
-| Composition | 基础版已接入 | Profile、Bundle、Layer 和插件 inventory 已有；13 个可选能力支持版本化持久化开关，顺序和任意第三方 bundle 配置仍未开放。 |
-| Web | Phase 3 本地基线已接入 | 固定 dsh Web 客户端、session create/history/prompt、审批响应、mux/host 事件、健康/inventory/session projection 和 Settings > Plugins 能力开关共用同一个 CLI Host；当前仍是 loopback、单 Host、完整响应模式。 |
+| Composition | 基础版已接入 | Profile、Bundle、Layer 和插件 inventory 已有；settings crate 的 15 个内置可选键全部进入 CLI/Web 启动组合，顺序和任意第三方 bundle 配置仍未开放。 |
+| Voice / Weixin contracts | fixture 接线已接入 | `yunxi-voice` 和 `yunxi-weixin` 已有版本化 Rust 契约、loopback process fixture、Host 边界测试，并在开关开启时进入 CLI/Web inventory；仍不提供真实设备、登录或网络能力。 |
+| Web | Phase 3 本地基线已接入 | 固定 dsh Web 客户端、session create/history/prompt、审批响应、mux/host 事件、健康/inventory/session projection 和 Settings > Plugins 能力开关共用同一个 CLI Host；当前仍是 loopback、单 Host、完整响应模式，Voice/Weixin 为默认关闭的 fixture route。 |
 
 当前默认开关由 `yunxi-settings` 定义：Context、Persona、Storage 开启；Memory、
-Companion、Mailbox、Scheduler、Shell、Patch、Files、MCP、Skills、Multi-agent
-关闭。Web 写入
-`YUNXI_NEXT_HOME\settings.json` 并在下一次 Host 启动时应用；显式环境变量拥有
-更高优先级，作为 CI 和故障恢复入口。
+Companion、Mailbox、Scheduler、Shell、Patch、Files、MCP、Skills、Multi-agent、
+Voice、Weixin 关闭。Web 当前写入
+`YUNXI_NEXT_HOME\settings.json`；WebHost 在写入后重建当前 Host，独立 CLI
+在下一次 Host 启动时应用；`settings.plugins`
+的显式值优先于旧 capability 环境/文件设置，后者作为兼容性回退入口。
+Voice/Weixin 开关现在会建立对应的隔离 fixture launch/route；打开它们不会
+授予真实设备、登录或网络后端权限，生产适配器仍按 Phase 5 交付。
 
 ## 3. 开发排序
 
@@ -159,7 +166,11 @@ HTTP 请求；Web 端暂只支持 one-shot 子会话查看，不支持 continuab
 **目标：** 把语音和微信做成可替换的媒体/渠道适配器，文字聊天始终保持
 独立可用。
 
-**建议包：** `yunxi-voice`、`yunxi-channel-weixin`。
+**当前基线：** `yunxi-voice` 和 `yunxi-weixin` 已完成契约与 fixture 切片，
+但尚未达到产品能力完成门槛。两者都必须继续复用现有 Plugin Host、审批和
+故障隔离边界。
+
+**实现包：** `yunxi-voice`、`yunxi-weixin`。
 
 **交付物：**
 
@@ -170,6 +181,10 @@ HTTP 请求；Web 端暂只支持 one-shot 子会话查看，不支持 continuab
 - 微信 login/status/doctor/serve/pair/session/logout 和文字收发。
 - 微信语音输入复用 Voice plugin 和同一个 YunXi session；渠道不嵌入第二套
   Agent runtime。
+
+当前 fixture 只证明协议和进程边界：Voice fixture 的音频是合成标记且无
+`Device` grant；Weixin fixture 只在内存中处理消息，虽声明所需
+`Network`/`Secret` grant，但没有登录、SDK 或网络传输。
 
 **退出门槛：** 设备拒绝、服务超时、坏音频、插件崩溃、取消和背压都有可见
 回退；微信网关或 Voice 失败时，CLI 文本聊天仍能继续。
@@ -199,8 +214,8 @@ HTTP 请求；Web 端暂只支持 one-shot 子会话查看，不支持 continuab
 - update、doctor、completion、marketplace。
 - 完整 app-server、remote-control 和云端任务面。
 - `yunxi-agent-eval` 运行时能力；它只作为开发期 acceptance fixtures。
-- 操作系统级文件、网络、CPU、内存沙箱，以及自动重启和 backoff。它们需要
-  单独的平台方案，不能把当前 workspace grant 误称为系统沙箱。
+- 操作系统级文件、网络、CPU、内存沙箱。当前 workspace grant 不能被
+  误称为系统沙箱；Plugin Host 的三次有界恢复不等于系统级资源隔离。
 
 ## 5. 通用完成门槛
 
@@ -253,7 +268,15 @@ Phase 0 和 Phase 1 已按下列顺序完成。后续仍保持一次只推进一
 7. `P4-01` 已完成：冻结多智能体协议、grant 子集、预算、父子图、持久化和重启恢复。
 8. `P4-02` 基线已完成：接入 Host 审批、独立子 Model 进程及
    `agent.spawn/list/message/interrupt` 模型工具。
-9. `P4-03` 进行中：增加后台并行、执行中即时取消、Web 分支视图和受限子工具授权。
+9. `P4-03` 首个 Web 只读切片已完成；后台并行、执行中即时取消、子工具 grant
+   和可续写子会话仍未完成。
+10. `P5-01` fixture 接线已完成：Voice transcribe/synthesize 契约、process
+     fixture、CLI/Web composition 和开关路由已有；待 Device grant、真实音频
+     后端和失败回退。
+11. `P5-02` fixture 接线已完成：Weixin channel 契约、process fixture、CLI/Web
+     composition 和开关路由已有；待登录/网络适配、Secret broker 和失败回退。
+12. `P6-01` 已完成首版：Agent spine 已成为 CLI/Web 默认模型工具编排路径；
+     后续继续收敛 Cordis service discovery、应用钩子和动态插件装载。
 
 ### 执行记录：2026-08-23
 
@@ -274,7 +297,7 @@ Phase 0 和 Phase 1 已按下列顺序完成。后续仍保持一次只推进一
 | `P3-02` 独立 HTTP/SSE carrier | 已完成 | `yunxi-web-gateway` 新增有界 HTTP/1.1 parser、固定 `/api` unary 路由、JSON content-type/size/framing 校验、`events.mux`/`events.host` SSE carrier、`ShutdownToken` 和 TCP serving helper；9 项 carrier 集成测试覆盖 malformed envelope、channel isolation、wire bytes 和 loopback TCP；Gateway 与 CLI 定向 Clippy 通过 |
 | `P3-03` WebHost session RPC 与审批事件 | 已完成 | `WebHost` 接入 `session.create/history/prompt`、`POST /api/respond`、审批 rpcId 回显校验、session/event 与 approval requested/resolved 事件；carrier 测试覆盖 session 路由、receipt、坏响应和既有 HTTP 边界 |
 | `P3-04` dsh Web 服务入口与共享 Host 生命周期 | 已完成 | `yunxi-next web` 默认 loopback 绑定、`--bind` 参数、标准输入 EOF 优雅关闭；固定上游 commit 的 dsh shell、字体、语言包和 42 个客户端 bundle 由 Rust executable 嵌入；YunXi adapter 只替换 bounded SSE carrier，并保留真实 session、history、approval 和 inventory 路径 |
-| `P3-05` 持久化能力设置 | 已完成 | `yunxi-settings` 提供 64 KiB 上限、严格 schema、revision fence、备份恢复和同目录原子替换；WebHost 只允许 `yunxi-capabilities` 的 13 个已知布尔字段，成功写入发送 Host event；dsh Plugins 页显示 restart-scoped switch，Model 保持只读；真实 Host 重启测试验证 disabled-no-launch、无路由和聊天存活 |
+| `P3-05` 持久化能力设置 | 已完成 | `yunxi-settings` 提供 64 KiB 上限、严格 schema、revision fence、备份恢复和同目录原子替换；WebHost 当前允许 `yunxi-capabilities` 的 15 个 launch-wired 布尔字段，成功写入后重建当前 Host 并发送 Host event；dsh Plugins 页显示 composition-scoped switch，Model 保持只读；真实 Host 重建测试验证 disabled-no-launch、无路由和聊天存活 |
 
 ### 执行记录：2026-08-28
 
@@ -289,6 +312,15 @@ Phase 0 和 Phase 1 已按下列顺序完成。后续仍保持一次只推进一
 | 项目 | 状态 | 证据 |
 | --- | --- | --- |
 | `P4-03` Web 子 Agent 目录与历史 | 已完成首个切片 | `AgentInspectRequest/Result` 与协调器 `inspect` 仅返回受限 transcript；`subagent.list` 支持根及已知子父级，`subagent.history` 输出 dsh `HistoryEntry` 分页；只读重启恢复、HTTP 路由和 `yunxi-cli/tests/web_host.rs` 进程回归均通过 |
+
+### 执行记录：2026-09-06
+
+| 项目 | 状态 | 证据 |
+| --- | --- | --- |
+| Cordis Rust foundation | 基线已完成 | `yunxi-cordis-core` 覆盖 scoped Context/Service、typed Event、Effect、Fiber 和 panic-contained callbacks；`yunxi-cordis-runtime` 覆盖 static registry、manifest policy、enable/disable、dependency resolution、local failure snapshots；两者均不负责进程/IPC。 |
+| Agent spine approval slice | 默认路径已完成 | `yunxi-agent-spine` 覆盖 bounded session、model/context/tool seams、loop budgets、cancellation、`AwaitingApproval` continuation、approval decision validation 和 denied tool results；CLI 默认 Chat/Web turn 已通过 spine-backed Host adapter，兼容循环仅由显式环境变量启用。 |
+| Voice process fixture | 接线基线已完成 | `yunxi-voice` Host tests 覆盖 protocol-v2 handshake、exact capability set、transcribe/synthesize/cancel、bounds 和 disable route removal；CLI/Web 开关开启时会启动并投影 fixture；无 device/backend/runtime。 |
+| Weixin process fixture | 接线基线已完成 | `yunxi-weixin` Host tests 覆盖 `channel.weixin@1`、required Network/Secret declarations、inbound idempotency/ACK、malformed payload and disable route removal；CLI/Web 开关开启时会启动并投影 fixture；无 login/SDK/network runtime。 |
 
 本批次已改变 Model 的可选工具运行时行为，但没有把 manifest 声明误当作
 实际 Secret broker 或操作系统沙箱。Phase 1 的文字 Action Path 已完成
@@ -307,7 +339,9 @@ Phase 4 已形成第一版隔离基线：协调状态和子模型都位于受监
 Agent grant 不能超过父级，单个子模型 API 失败只结束对应分支。当前仍按同步回合
 执行，不具备后台并行和执行中即时取消，因此不能视为多智能体阶段全部完成。
 
-这不代表生产 Web 服务已经完成。当前没有认证和非 loopback 监听策略，WebHost
-仍是文本内容、单实例活动会话、完整响应和轮询式事件，不宣称 token streaming、
-多会话并发或真正多客户端 fan-out。继续推进 Phase 4 时仍应保持旧版 fallback、
-文字 CLI 和 trusted kernel 的独立验证。
+Cordis runtime 当前是 trusted bootstrap，Agent spine 已成为 CLI/Web 的默认
+模型工具编排入口；`ChatSession` 仍负责应用钩子和投影。这不代表生产 Web
+服务已经完成。当前没有认证和非 loopback 监听策略，WebHost 仍是文本内容、
+单实例活动会话、完整响应和轮询式事件，不宣称 token streaming、多会话并发
+或真正多客户端 fan-out。继续推进后续阶段时仍应保持旧版 fallback、文字 CLI
+和 trusted kernel 的独立验证。

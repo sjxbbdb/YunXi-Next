@@ -713,8 +713,8 @@ window.__ModuleLoader__.load({
 			return n;
 		}
 		//#endregion
-		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-0a50875c14b34d63b17f6522f5dab19c\packages\client\ui-input-trigger\src\client\MenuView.module.css.mjs
-		const css = ".oOgz5W_menu{z-index:100;--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);border:1px solid var(--dsw-alias-border-inverted);background:var(--dsw-specific-menu);min-width:min(260px,100%);max-width:min(537px,100%);max-height:320px;box-shadow:var(--dsw-shadow-lv3);border-radius:12px;flex-direction:column;padding:4px;display:flex;position:absolute;bottom:calc(100% + 4px);left:0;overflow:hidden}.oOgz5W_viewport{flex-direction:column;min-height:0;display:flex;overflow-y:auto}.oOgz5W_item{cursor:pointer;width:100%;min-height:40px;color:var(--dsw-alias-label-primary);text-align:left;background:0 0;border:none;border-radius:10px;align-items:center;gap:8px;padding:8px 10px;font-size:14px;line-height:22px;display:flex}.oOgz5W_item:hover,.oOgz5W_item.oOgz5W_active{background:var(--dsw-alias-interactive-bg-hover)}.oOgz5W_sectionTitle{min-height:26px;color:var(--dsw-alias-label-tertiary);flex:none;padding:6px 10px 2px;font-size:12px;font-weight:500;line-height:18px}.oOgz5W_sectionTitle:not(:first-child){margin-top:4px}.oOgz5W_itemIcon{width:16px;height:16px;color:var(--dsw-alias-label-tertiary);flex:none;justify-content:center;align-items:center;display:inline-flex}.oOgz5W_itemName{text-overflow:ellipsis;white-space:nowrap;flex:none;max-width:40%;overflow:hidden}.oOgz5W_itemDescription{text-overflow:ellipsis;white-space:nowrap;min-width:0;color:var(--dsw-alias-label-tertiary);flex:1;overflow:hidden}.oOgz5W_groupTitle{color:var(--dsw-alias-label-tertiary);padding:8px 10px;font-size:12px;line-height:16px}.oOgz5W_loading{min-height:40px;color:var(--dsw-alias-label-dimmed);align-items:center;padding:8px 10px;font-size:14px;line-height:22px;display:flex}";
+		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-ab5a0433e27742b99ef765dc97041378\packages\client\ui-input-trigger\src\client\MenuView.module.css.mjs
+		const css = ".CsBnwq_menu{z-index:100;--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);border:1px solid var(--dsw-alias-border-inverted);background:var(--dsw-specific-menu);min-width:min(260px,100%);max-width:min(537px,100%);max-height:320px;box-shadow:var(--dsw-shadow-lv3);border-radius:12px;flex-direction:column;padding:4px;display:flex;position:absolute;bottom:calc(100% + 4px);left:0;overflow:hidden}.CsBnwq_viewport{flex-direction:column;min-height:0;display:flex;overflow-y:auto}.CsBnwq_item{cursor:pointer;width:100%;min-height:40px;color:var(--dsw-alias-label-primary);text-align:left;background:0 0;border:none;border-radius:10px;align-items:center;gap:8px;padding:8px 10px;font-size:14px;line-height:22px;display:flex}.CsBnwq_item:hover,.CsBnwq_item.CsBnwq_active{background:var(--dsw-alias-interactive-bg-hover)}.CsBnwq_sectionTitle{min-height:26px;color:var(--dsw-alias-label-tertiary);flex:none;padding:6px 10px 2px;font-size:12px;font-weight:500;line-height:18px}.CsBnwq_sectionTitle:not(:first-child){margin-top:4px}.CsBnwq_itemIcon{width:16px;height:16px;color:var(--dsw-alias-label-tertiary);flex:none;justify-content:center;align-items:center;display:inline-flex}.CsBnwq_itemName{text-overflow:ellipsis;white-space:nowrap;flex:none;max-width:40%;overflow:hidden}.CsBnwq_itemDescription{text-overflow:ellipsis;white-space:nowrap;min-width:0;color:var(--dsw-alias-label-tertiary);flex:1;overflow:hidden}.CsBnwq_groupTitle{color:var(--dsw-alias-label-tertiary);padding:8px 10px;font-size:12px;line-height:16px}.CsBnwq_loading{min-height:40px;color:var(--dsw-alias-label-dimmed);align-items:center;padding:8px 10px;font-size:14px;line-height:22px;display:flex}";
 		const tagId = "@deepseek-ai/dsh-client-ui-input-trigger/MenuView.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -724,16 +724,16 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var MenuView_module_css_default = {
-			"active": "oOgz5W_active",
-			"groupTitle": "oOgz5W_groupTitle",
-			"item": "oOgz5W_item",
-			"itemDescription": "oOgz5W_itemDescription",
-			"itemIcon": "oOgz5W_itemIcon",
-			"itemName": "oOgz5W_itemName",
-			"loading": "oOgz5W_loading",
-			"menu": "oOgz5W_menu",
-			"sectionTitle": "oOgz5W_sectionTitle",
-			"viewport": "oOgz5W_viewport"
+			"active": "CsBnwq_active",
+			"groupTitle": "CsBnwq_groupTitle",
+			"item": "CsBnwq_item",
+			"itemDescription": "CsBnwq_itemDescription",
+			"itemIcon": "CsBnwq_itemIcon",
+			"itemName": "CsBnwq_itemName",
+			"loading": "CsBnwq_loading",
+			"menu": "CsBnwq_menu",
+			"sectionTitle": "CsBnwq_sectionTitle",
+			"viewport": "CsBnwq_viewport"
 		};
 		//#endregion
 		//#region lib/types/client/MenuView.js

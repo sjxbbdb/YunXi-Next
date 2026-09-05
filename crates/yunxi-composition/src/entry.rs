@@ -7,6 +7,8 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Map, Value};
 
+use crate::{DefaultEnablement, PluginManifest, PluginRisk, PluginRole};
+
 const MAX_ENTRY_ID_BYTES: usize = 128;
 const MAX_MODULE_NAME_BYTES: usize = 512;
 const MAX_ENTRY_CONFIG_BYTES: usize = 64 * 1024;
@@ -156,6 +158,8 @@ pub struct CompositionEntry {
     enabled: bool,
     config: Value,
     group: Option<EntryId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    manifest: Option<PluginManifest>,
 }
 
 impl CompositionEntry {
@@ -173,7 +177,24 @@ impl CompositionEntry {
             enabled: true,
             config: empty_config(),
             group: None,
+            manifest: None,
         })
+    }
+
+    /// Creates an entry whose initial state follows its manifest policy.
+    pub fn new_with_manifest(
+        id: impl Into<String>,
+        module_name: impl Into<String>,
+        manifest: PluginManifest,
+    ) -> Result<Self, EntryError> {
+        Ok(Self::new(id, module_name)?.with_manifest(manifest))
+    }
+
+    /// Attaches manifest metadata and applies its default enablement.
+    pub fn with_manifest(mut self, manifest: PluginManifest) -> Self {
+        self.enabled = manifest.default_enabled();
+        self.manifest = Some(manifest);
+        self
     }
 
     pub fn with_config(mut self, config: Value) -> Result<Self, EntryError> {
@@ -212,6 +233,31 @@ impl CompositionEntry {
         self.group.as_ref()
     }
 
+    pub fn manifest(&self) -> Option<PluginManifest> {
+        self.manifest
+    }
+
+    pub fn role(&self) -> Option<PluginRole> {
+        self.manifest.map(PluginManifest::role)
+    }
+
+    pub fn risk(&self) -> Option<PluginRisk> {
+        self.manifest.map(PluginManifest::risk)
+    }
+
+    pub fn default_enablement(&self) -> Option<DefaultEnablement> {
+        self.manifest.map(PluginManifest::default_enablement)
+    }
+
+    pub fn default_enabled(&self) -> Option<bool> {
+        self.manifest.map(PluginManifest::default_enabled)
+    }
+
+    pub fn user_toggleable(&self) -> bool {
+        self.manifest
+            .is_none_or(|manifest| manifest.role().is_user_toggleable())
+    }
+
     pub(crate) fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
     }
@@ -227,26 +273,27 @@ impl<'de> Deserialize<'de> for CompositionEntry {
         struct WireEntry {
             id: EntryId,
             module_name: String,
-            #[serde(default = "default_enabled")]
-            enabled: bool,
+            #[serde(default)]
+            enabled: Option<bool>,
             #[serde(default = "empty_config")]
             config: Value,
             #[serde(default)]
             group: Option<EntryId>,
+            #[serde(default)]
+            manifest: Option<PluginManifest>,
         }
 
         let wire = WireEntry::deserialize(deserializer)?;
         let mut entry = Self::from_id(wire.id, wire.module_name).map_err(D::Error::custom)?;
-        entry.enabled = wire.enabled;
         entry.group = wire.group;
         entry.config = wire.config;
+        entry.manifest = wire.manifest;
+        entry.enabled = wire
+            .enabled
+            .unwrap_or_else(|| entry.manifest.is_none_or(PluginManifest::default_enabled));
         validate_config(&entry.config).map_err(D::Error::custom)?;
         Ok(entry)
     }
-}
-
-fn default_enabled() -> bool {
-    true
 }
 
 fn empty_config() -> Value {
@@ -319,5 +366,65 @@ mod tests {
             .with_config(value)
             .expect_err("large config must fail");
         assert!(matches!(error, EntryError::ConfigTooLarge { .. }));
+    }
+
+    #[test]
+    fn manifest_defaults_are_applied_and_old_entries_keep_their_wire_shape() {
+        let safe = CompositionEntry::new_with_manifest(
+            "safe",
+            "fixture.safe",
+            PluginManifest::optional(PluginRisk::None),
+        )
+        .expect("safe entry");
+        assert!(safe.enabled());
+        assert_eq!(safe.role(), Some(PluginRole::Optional));
+        assert_eq!(safe.default_enablement(), Some(DefaultEnablement::Safe));
+        assert!(safe.user_toggleable());
+
+        let external = CompositionEntry::new_with_manifest(
+            "external",
+            "fixture.external",
+            PluginManifest::optional(PluginRisk::External),
+        )
+        .expect("external entry");
+        assert!(!external.enabled());
+
+        let core =
+            CompositionEntry::new_with_manifest("core", "fixture.core", PluginManifest::core())
+                .expect("core entry");
+        assert!(core.enabled());
+        assert!(!core.user_toggleable());
+
+        let legacy =
+            serde_json::to_value(CompositionEntry::new("legacy", "fixture.legacy").expect("entry"))
+                .expect("serialize legacy entry");
+        assert!(legacy.get("manifest").is_none());
+    }
+
+    #[test]
+    fn omitted_enabled_field_uses_the_manifest_default() {
+        let external = serde_json::json!({
+            "id": "external",
+            "moduleName": "fixture.external",
+            "manifest": {
+                "role": "optional",
+                "risk": "external",
+                "defaultEnablement": "never"
+            }
+        });
+        let entry = serde_json::from_value::<CompositionEntry>(external).expect("entry");
+        assert!(!entry.enabled());
+
+        let safe = serde_json::json!({
+            "id": "safe",
+            "moduleName": "fixture.safe",
+            "manifest": {
+                "role": "optional",
+                "risk": "none",
+                "defaultEnablement": "safe"
+            }
+        });
+        let entry = serde_json::from_value::<CompositionEntry>(safe).expect("entry");
+        assert!(entry.enabled());
     }
 }

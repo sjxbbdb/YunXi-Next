@@ -1021,6 +1021,76 @@ fn disabled_optional_capabilities_never_launch_or_register_routes() {
 }
 
 #[test]
+fn plugin_override_disables_optional_launch_even_when_legacy_switch_requests_it() {
+    let workspace = unique_temp_dir("yunxi-plugin-override");
+    let state_root = workspace.join("next-home");
+    fs::create_dir_all(&state_root).expect("create settings root");
+    fs::write(
+        state_root.join("settings.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "version": 1,
+            "revision": 1,
+            "capabilities": {},
+            "plugins": { "yunxi.tool.shell": false }
+        }))
+        .expect("encode plugin settings"),
+    )
+    .expect("write plugin settings");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let server = thread::spawn(move || {
+        let (stream, body) = accept_request(&listener);
+        assert!(
+            !body.contains("shell.execute"),
+            "disabled Shell leaked: {body}"
+        );
+        assert!(!body.contains("\"tools\""), "disabled tools leaked: {body}");
+        write_response(
+            stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"plugin override held"},"finish_reason":"stop"}]}"#,
+        );
+    });
+
+    let child = configured_cli(address)
+        .current_dir(&workspace)
+        .args(["--once", "verify plugin override"])
+        .env("YUNXI_NEXT_HOME", &state_root)
+        .env("YUNXI_NEXT_SHELL_ENABLED", "true")
+        .env("YUNXI_NEXT_SHELL_PLUGIN", "this-command-must-not-launch")
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch CLI with plugin override");
+    let output = wait_for_cli(child);
+    server.join().expect("join mock API");
+
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .expect("UTF-8 CLI output")
+            .trim(),
+        "plugin override held"
+    );
+    assert!(
+        !String::from_utf8_lossy(&output.stderr).contains("yunxi.tool.shell"),
+        "disabled Shell was launched: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    fs::remove_dir_all(workspace).expect("remove workspace");
+}
+
+#[test]
 fn approved_multi_agent_spawn_uses_an_isolated_model_process_and_persists_result() {
     let workspace = unique_temp_dir("yunxi-multi-agent-e2e");
     fs::create_dir_all(&workspace).expect("create workspace");

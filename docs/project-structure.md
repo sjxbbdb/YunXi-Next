@@ -76,6 +76,45 @@ YunXi Next/
     |       |-- layer.rs               serializable layer operations
     |       |-- profile.rs              ordered bundle/profile/overlay composition
     |       `-- lib.rs                 public composition facade
+    |-- yunxi-cordis-core/             dependency-free trusted Cordis primitives
+    |   |-- Cargo.toml                 core crate metadata
+    |   |-- README.md                  Context, Service, Event, Effect, and Fiber boundary
+    |   `-- src/                       generic synchronous meta-kernel
+    |       |-- context.rs             scoped service/effect/subscription ownership
+    |       |-- effect.rs              reversible disposer state
+    |       |-- error.rs               bounded core errors
+    |       |-- event.rs               typed event bus and dispatch modes
+    |       |-- lib.rs                 public core facade
+    |       |-- plugin.rs              Plugin and Fiber lifecycle
+    |       `-- service.rs              typed ServiceKey and dependencies
+    |-- yunxi-cordis-runtime/          static Cordis registry and lifecycle adapter
+    |   |-- Cargo.toml                 runtime metadata and inward core dependency
+    |   |-- README.md                  runtime responsibilities and exclusions
+    |   `-- src/                       bounded static runtime
+    |       |-- error.rs               runtime policy and lifecycle errors
+    |       |-- lib.rs                 public runtime facade
+    |       |-- manifest.rs             role, risk, and default enablement policy
+    |       |-- registry.rs             static plugin definitions and lookup
+    |       |-- runtime.rs              mount, enable/disable, failure, and shutdown
+    |       |-- snapshot.rs             diagnostics and startup reports
+    |       `-- README.md              source ownership index
+    |   `-- tests/runtime.rs            registry, dependency, failure, and shutdown tests
+    |-- yunxi-agent-spine/             replaceable minimal Rust Agent loop
+    |   |-- Cargo.toml                 protocol dependency and crate metadata
+    |   |-- README.md                  loop, approval, bounds, and extension seams
+    |   `-- src/                       synchronous Agent orchestration
+    |       |-- agent.rs               turn loop and approval continuation
+    |       |-- cancellation.rs        cloneable cancellation token
+    |       |-- context.rs             context assembler contract
+    |       |-- error.rs               bounded Agent/component errors
+    |       |-- lib.rs                 public spine facade
+    |       |-- model.rs               model provider contract
+    |       |-- session.rs              append-only bounded session events
+    |       |-- state.rs                Agent and turn state snapshots
+    |       `-- tool.rs                 tool broker and fail-closed approval policy
+    |   `-- tests/                     loop and approval continuation tests
+    |       |-- agent_loop.rs          model/tool/budget/cancellation tests
+    |       `-- tool_approval.rs       approval matching and denial tests
     |-- yunxi-cli/                     user-facing multi-plugin terminal host
     |   |-- Cargo.toml                 CLI package and `yunxi-next` binary
     |   |-- README.md                  crate scope and layout
@@ -90,14 +129,19 @@ YunXi Next/
     |   |   |-- web.rs                 Web Host facade, session RPC, and subagent projection
     |   |   |-- session/               stateful orchestration split from model routing
     |   |   |   |-- README.md          session module ownership
-    |   |   |   |-- multi_agent.rs     coordinator calls and isolated child-model turns
-    |   |   |   |-- stateful.rs        storage, memory-write, scheduler, and mailbox calls
-    |   |   |   `-- tool_loop.rs       bounded model-tool catalog and argument decoding
+     |   |   |   |-- cordis.rs          trusted Cordis bootstrap bridge
+     |   |   |   |-- multi_agent.rs     coordinator calls and isolated child-model turns
+     |   |   |   |-- plugin_policy.rs   persisted enablement and legacy override policy
+     |   |   |   |-- spine_adapter.rs   generic Host adapters for spine contracts
+     |   |   |   |-- spine_runtime.rs   production spine-backed tool broker/controller
+     |   |   |   |-- stateful.rs        storage, memory-write, scheduler, and mailbox calls
+     |   |   |   `-- tool_loop.rs       bounded model-tool catalog and argument decoding
     |   |   `-- ui.rs                  ANSI-aware compact presentation
     |   `-- tests/                     complete process-path tests
     |       |-- README.md              integration test purpose
-    |       |-- chat_stack.rs          CLI-to-plugin-to-HTTP verification
-    |       `-- web_host.rs            Web session, settings, restart, and approval verification
+     |       |-- chat_stack.rs          CLI-to-plugin-to-HTTP verification
+     |       |-- spine_adapter.rs       generic Host adapter verification
+     |       `-- web_host.rs            Web session, settings, restart, and approval verification
     |-- yunxi-context/                 AGENTS.md context capability plugin
     |   |-- Cargo.toml                 protocol-only context package
     |   |-- README.md                  capability scope, limits, and layout
@@ -297,6 +341,40 @@ YunXi Next/
     |       `-- bin/                    standalone plugin entry point
     |           |-- README.md           binary purpose
     |           `-- yunxi-tool-shell.rs shell plugin executable
+    |-- yunxi-voice/                   voice contracts and deterministic process fixture
+    |   |-- Cargo.toml                 bounded voice package and fixture binary
+    |   |-- README.md                  device boundary and non-production status
+    |   `-- src/                       bounded transcribe/synthesize contracts
+    |       |-- audio.rs               audio formats and bounded chunks
+    |       |-- error.rs               voice contract errors
+    |       |-- fixture.rs             deterministic in-process fixtures
+    |       |-- identifiers.rs         bounded stream/request identifiers
+    |       |-- lib.rs                 public voice facade
+    |       |-- message.rs             transcribe/synthesize request contracts
+    |       |-- plugin.rs              protocol plugin fixture and dispatch
+    |       |-- state.rs               cancellation/backpressure state
+    |       |-- transcript.rs          partial/final transcript events
+    |       `-- bin/yunxi-voice-fixture.rs test-only child process
+    |   `-- tests/                     contract and Host process tests
+    |       |-- host_runtime.rs        expected capabilities and disable removal
+    |       `-- loopback.rs            bounded fixture protocol behavior
+    |-- yunxi-weixin/                 Weixin channel contract and process fixture
+    |   |-- Cargo.toml                 protocol and Host-test dependencies
+    |   |-- README.md                  channel boundary and non-production status
+    |   `-- src/                       bounded channel contracts and fixture
+    |       |-- error.rs               channel validation errors
+    |       |-- fixture.rs             canonical inbound/outbound messages
+    |       |-- identifiers.rs         bounded IDs and idempotency keys
+    |       |-- lib.rs                 public Weixin facade
+    |       |-- media.rs               bounded media metadata
+    |       |-- message.rs              typed direction and delivery contracts
+    |       |-- plugin.rs              process-host fixture and state dispatch
+    |       |-- state.rs               ACK/retry/cancel/backpressure state
+    |       `-- bin/                   fixture entry points
+    |           |-- README.md           binary ownership
+    |           |-- yunxi-weixin-fixture.rs single-process contract loop
+    |           `-- yunxi-weixin-plugin-fixture.rs Host integration fixture
+    |   `-- tests/host_runtime.rs       process handshake and route isolation tests
     |-- yunxi-protocol/                 local host/plugin wire contract
     |   |-- Cargo.toml                  serialization-only dependencies
     |   |-- README.md                   crate scope and layout

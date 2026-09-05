@@ -19,10 +19,12 @@ pub enum CapabilitySetting {
     Mcp,
     Skills,
     MultiAgent,
+    Voice,
+    Weixin,
 }
 
 impl CapabilitySetting {
-    pub const ALL: [Self; 13] = [
+    pub const ALL: [Self; 15] = [
         Self::Context,
         Self::Persona,
         Self::Memory,
@@ -36,6 +38,8 @@ impl CapabilitySetting {
         Self::Mcp,
         Self::Skills,
         Self::MultiAgent,
+        Self::Voice,
+        Self::Weixin,
     ];
 
     pub const fn as_str(self) -> &'static str {
@@ -53,6 +57,8 @@ impl CapabilitySetting {
             Self::Mcp => "mcp",
             Self::Skills => "skills",
             Self::MultiAgent => "multi_agent",
+            Self::Voice => "voice",
+            Self::Weixin => "weixin",
         }
     }
 
@@ -80,6 +86,8 @@ impl CapabilitySetting {
             Self::Mcp => ("YUNXI_NEXT_MCP_ENABLED", None),
             Self::Skills => ("YUNXI_NEXT_SKILLS_ENABLED", None),
             Self::MultiAgent => ("YUNXI_NEXT_MULTI_AGENT_ENABLED", None),
+            Self::Voice => ("YUNXI_NEXT_VOICE_ENABLED", None),
+            Self::Weixin => ("YUNXI_NEXT_WEIXIN_ENABLED", None),
         }
     }
 }
@@ -87,32 +95,36 @@ impl CapabilitySetting {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CapabilityOverrides {
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     context: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     persona: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     memory: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     companion: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     storage: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     mailbox: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     scheduler: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     shell: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     patch: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     files: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     mcp: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     skills: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     multi_agent: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    voice: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    weixin: Option<bool>,
 }
 
 impl CapabilityOverrides {
@@ -131,6 +143,8 @@ impl CapabilityOverrides {
             CapabilitySetting::Mcp => self.mcp,
             CapabilitySetting::Skills => self.skills,
             CapabilitySetting::MultiAgent => self.multi_agent,
+            CapabilitySetting::Voice => self.voice,
+            CapabilitySetting::Weixin => self.weixin,
         }
     }
 
@@ -165,6 +179,8 @@ impl CapabilityOverrides {
             CapabilitySetting::Mcp => &mut self.mcp,
             CapabilitySetting::Skills => &mut self.skills,
             CapabilitySetting::MultiAgent => &mut self.multi_agent,
+            CapabilitySetting::Voice => &mut self.voice,
+            CapabilitySetting::Weixin => &mut self.weixin,
         }
     }
 }
@@ -184,6 +200,8 @@ pub struct CapabilitySwitches {
     pub mcp: bool,
     pub skills: bool,
     pub multi_agent: bool,
+    pub voice: bool,
+    pub weixin: bool,
 }
 
 impl Default for CapabilitySwitches {
@@ -215,6 +233,8 @@ impl CapabilitySwitches {
             multi_agent: overrides
                 .get(CapabilitySetting::MultiAgent)
                 .unwrap_or(false),
+            voice: overrides.get(CapabilitySetting::Voice).unwrap_or(false),
+            weixin: overrides.get(CapabilitySetting::Weixin).unwrap_or(false),
         }
     }
 
@@ -248,6 +268,8 @@ impl CapabilitySwitches {
             CapabilitySetting::Mcp => self.mcp,
             CapabilitySetting::Skills => self.skills,
             CapabilitySetting::MultiAgent => self.multi_agent,
+            CapabilitySetting::Voice => self.voice,
+            CapabilitySetting::Weixin => self.weixin,
         }
     }
 
@@ -266,6 +288,8 @@ impl CapabilitySwitches {
             CapabilitySetting::Mcp => self.mcp = value,
             CapabilitySetting::Skills => self.skills = value,
             CapabilitySetting::MultiAgent => self.multi_agent = value,
+            CapabilitySetting::Voice => self.voice = value,
+            CapabilitySetting::Weixin => self.weixin = value,
         }
     }
 }
@@ -296,6 +320,51 @@ mod tests {
         assert!(!switches.memory);
         assert!(!switches.companion);
         assert!(!switches.shell);
+        assert!(!switches.voice);
+        assert!(!switches.weixin);
+    }
+
+    #[test]
+    fn voice_and_weixin_are_stable_settings_with_expected_keys() {
+        assert_eq!(CapabilitySetting::ALL.len(), 15);
+        assert_eq!(CapabilitySetting::Voice.as_str(), "voice");
+        assert_eq!(CapabilitySetting::Weixin.as_str(), "weixin");
+        assert_eq!(
+            CapabilitySetting::parse("voice"),
+            Some(CapabilitySetting::Voice)
+        );
+        assert_eq!(
+            CapabilitySetting::parse("weixin"),
+            Some(CapabilitySetting::Weixin)
+        );
+    }
+
+    #[test]
+    fn overrides_get_set_unset_and_merge_cover_voice_and_weixin() {
+        let mut base = CapabilityOverrides::default();
+        base.set(CapabilitySetting::Voice, true);
+        assert_eq!(base.get(CapabilitySetting::Voice), Some(true));
+
+        let mut patch = CapabilityOverrides::default();
+        patch.set(CapabilitySetting::Weixin, true);
+        base.merge(&patch);
+        assert_eq!(base.get(CapabilitySetting::Voice), Some(true));
+        assert_eq!(base.get(CapabilitySetting::Weixin), Some(true));
+
+        base.unset(CapabilitySetting::Voice);
+        assert_eq!(base.get(CapabilitySetting::Voice), None);
+    }
+
+    #[test]
+    fn old_serialized_overrides_without_new_fields_remain_compatible() {
+        let old = serde_json::json!({ "memory": true, "shell": false });
+        let overrides: CapabilityOverrides = serde_json::from_value(old).expect("old settings");
+        assert_eq!(overrides.get(CapabilitySetting::Memory), Some(true));
+        assert_eq!(overrides.get(CapabilitySetting::Voice), None);
+        assert_eq!(overrides.get(CapabilitySetting::Weixin), None);
+        let switches = CapabilitySwitches::from_overrides(&overrides);
+        assert!(!switches.voice);
+        assert!(!switches.weixin);
     }
 
     #[test]
@@ -321,10 +390,14 @@ mod tests {
             ("YUNXI_PERSONA_ENABLED", "false"),
             ("YUNXI_NEXT_PERSONA_ENABLED", "true"),
             ("YUNXI_NEXT_SHELL_ENABLED", "false"),
+            ("YUNXI_NEXT_VOICE_ENABLED", "on"),
+            ("YUNXI_NEXT_WEIXIN_ENABLED", "1"),
         ]);
         let switches = CapabilitySwitches::from_overrides(&overrides)
             .with_environment(|name| values.get(name).map(|value| (*value).to_string()));
         assert!(switches.persona);
         assert!(!switches.shell);
+        assert!(switches.voice);
+        assert!(switches.weixin);
     }
 }

@@ -23,10 +23,11 @@ Use `web --bind 127.0.0.1:0` to request an available local port. Closing its
 standard input shuts down the shared Host explicitly and lets all plugin
 children exit through their normal shutdown path. The command serves the
 embedded pinned dsh workbench with text chat, history, model projection, and
-Host approvals. Settings > Plugins exposes the thirteen optional capability
-switches. Writes are revision-fenced, persisted under `YUNXI_NEXT_HOME`, and
-applied only when the Host restarts; the required Model plugin cannot be
-disabled.
+Host approvals. Settings > Plugins exposes the 15 optional capability
+switches. Writes are revision-fenced and persisted under `YUNXI_NEXT_HOME`;
+WebHost rebuilds its current Host after a successful write, while a standalone
+CLI process applies the document on its next start. The required Model plugin
+cannot be disabled.
 
 Interactive commands include `/sessions`, `/resume <id>`, `/new`,
 `/memory approve|reject <id>`, `/mailbox [read <id>]`, `/status`, `/clear`, and

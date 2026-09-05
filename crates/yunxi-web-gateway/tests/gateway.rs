@@ -1,5 +1,5 @@
 use serde_json::{Value, json};
-use yunxi_composition::{CompositionEntry, ConfigLayer, Profile};
+use yunxi_composition::{CompositionEntry, ConfigLayer, PluginManifest, PluginRisk, Profile};
 use yunxi_web_contract::{
     ClientRequest, EVENTS_HOST_METHOD, EVENTS_MUX_METHOD, EventChannel, RpcId, RpcMessage,
     RpcResult, parse_event_message,
@@ -18,9 +18,13 @@ fn gateway() -> Gateway {
     layer
         .insert(vec![
             CompositionEntry::new("model", "yunxi.model.openai").expect("entry"),
-            CompositionEntry::new("shell", "yunxi.tool.shell")
-                .expect("entry")
-                .with_enabled(false),
+            CompositionEntry::new_with_manifest(
+                "shell",
+                "yunxi.tool.shell",
+                PluginManifest::optional(PluginRisk::External),
+            )
+            .expect("entry")
+            .with_enabled(false),
         ])
         .expect("entries");
     let mut profile = Profile::new("web").expect("profile");
@@ -202,6 +206,8 @@ fn inventory_and_sessions_keep_dsh_response_shapes() {
     };
     assert_eq!(value["entries"][0]["entryId"], "model");
     assert_eq!(value["entries"][1]["enabled"], false);
+    assert_eq!(value["entries"][1]["fiberPhase"], Value::Null);
+    assert!(value["entries"][1].get("manifest").is_none());
 
     let sessions = gateway
         .dispatch(&request("rpc-sessions", SESSION_LIST_METHOD, json!({})))

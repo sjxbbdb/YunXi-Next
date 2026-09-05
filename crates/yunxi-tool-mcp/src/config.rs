@@ -10,10 +10,10 @@ use serde_json::Value;
 use yunxi_protocol::NetworkScope;
 
 pub const TRANSPORT_ENV: &str = "YUNXI_NEXT_MCP_TRANSPORT";
-const COMMAND_ENV: &str = "YUNXI_NEXT_MCP_COMMAND";
-const ARGS_ENV: &str = "YUNXI_NEXT_MCP_ARGS_JSON";
-const NAME_ENV: &str = "YUNXI_NEXT_MCP_NAME";
-const CHILD_ENV_ENV: &str = "YUNXI_NEXT_MCP_ENV_JSON";
+pub const COMMAND_ENV: &str = "YUNXI_NEXT_MCP_COMMAND";
+pub const ARGS_ENV: &str = "YUNXI_NEXT_MCP_ARGS_JSON";
+pub const NAME_ENV: &str = "YUNXI_NEXT_MCP_NAME";
+pub const CHILD_ENV_ENV: &str = "YUNXI_NEXT_MCP_ENV_JSON";
 pub const HTTP_ENDPOINT_ENV: &str = "YUNXI_NEXT_MCP_URL";
 pub const HTTP_HEADERS_ENV: &str = "YUNXI_NEXT_MCP_HEADERS_JSON";
 pub const HTTP_SECRETS_ENV: &str = "YUNXI_NEXT_MCP_SECRETS_JSON";

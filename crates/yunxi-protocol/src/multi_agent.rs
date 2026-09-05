@@ -1021,7 +1021,10 @@ fn validate_grants(grants: &[GrantKind]) -> Result<(), AgentProtocolError> {
     for grant in grants {
         if matches!(
             grant,
-            GrantKind::Approval | GrantKind::ProviderCredential | GrantKind::AgentDelegation
+            GrantKind::Approval
+                | GrantKind::ProviderCredential
+                | GrantKind::AgentDelegation
+                | GrantKind::Device
         ) {
             return Err(AgentProtocolError::UndelegableGrant { grant: *grant });
         }
@@ -1186,6 +1189,14 @@ mod tests {
             credential,
             Err(AgentProtocolError::UndelegableGrant {
                 grant: GrantKind::ProviderCredential
+            })
+        ));
+
+        let device = grant().with_allowed_child_grants([GrantKind::Device]);
+        assert!(matches!(
+            device,
+            Err(AgentProtocolError::UndelegableGrant {
+                grant: GrantKind::Device
             })
         ));
     }

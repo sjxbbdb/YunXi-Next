@@ -12,6 +12,9 @@ yunxi-companion = { path = "../yunxi-companion" }
 yunxi-companion-mailbox = { path = "../yunxi-companion-mailbox" }
 yunxi-composition = { path = "../yunxi-composition" }
 yunxi-context = { path = "../yunxi-context" }
+yunxi-agent-spine = { path = "../yunxi-agent-spine" }
+yunxi-cordis-core = { path = "../yunxi-cordis-core" }
+yunxi-cordis-runtime = { path = "../yunxi-cordis-runtime" }
 yunxi-kernel = { path = "../yunxi-kernel" }
 yunxi-memory = { path = "../yunxi-memory" }
 yunxi-multi-agent = { path = "../yunxi-multi-agent" }
@@ -27,8 +30,10 @@ yunxi-tool-files = { path = "../yunxi-tool-files" }
 yunxi-tool-mcp = { path = "../yunxi-tool-mcp" }
 yunxi-tool-skills = { path = "../yunxi-tool-skills" }
 yunxi-tool-shell = { path = "../yunxi-tool-shell" }
+yunxi-voice = { path = "../yunxi-voice" }
 yunxi-web-contract = { path = "../yunxi-web-contract" }
 yunxi-web-gateway = { path = "../yunxi-web-gateway" }
+yunxi-weixin = { path = "../yunxi-weixin" }
 
 [[bin]]
 name = "yunxi-next"

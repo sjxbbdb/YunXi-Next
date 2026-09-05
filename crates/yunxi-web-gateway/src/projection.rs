@@ -1,7 +1,49 @@
 //! Browser-safe point-in-time projections used by the Gateway.
 
 use serde::Serialize;
-use yunxi_composition::PluginInventorySnapshot;
+use yunxi_composition::{PluginFiberPhase, PluginInventorySnapshot};
+
+/// Exact wire projection expected by dsh's plugin-inventory Remote.
+///
+/// The composition inventory intentionally carries local manifest metadata and
+/// a `Disabled` diagnostic phase. Neither is part of dsh's strict response
+/// schema, so the Gateway projects those details away at this boundary.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub(crate) struct DshPluginInventorySnapshot {
+    entries: Vec<DshPluginInventoryEntry>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+struct DshPluginInventoryEntry {
+    #[serde(rename = "entryId")]
+    entry_id: String,
+    #[serde(rename = "moduleName")]
+    module_name: String,
+    enabled: bool,
+    #[serde(rename = "fiberPhase")]
+    fiber_phase: Option<String>,
+}
+
+impl DshPluginInventorySnapshot {
+    fn from_inventory(inventory: &PluginInventorySnapshot) -> Self {
+        Self {
+            entries: inventory.entries().iter().map(Self::entry).collect(),
+        }
+    }
+
+    fn entry(entry: &yunxi_composition::PluginInventoryEntry) -> DshPluginInventoryEntry {
+        let fiber_phase = match entry.fiber_phase() {
+            None | Some(PluginFiberPhase::Disabled) => None,
+            Some(phase) => Some(phase.to_string()),
+        };
+        DshPluginInventoryEntry {
+            entry_id: entry.entry_id().to_string(),
+            module_name: entry.module_name().to_string(),
+            enabled: entry.enabled(),
+            fiber_phase,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -208,6 +250,11 @@ impl GatewayProjection {
 
     pub fn inventory(&self) -> &PluginInventorySnapshot {
         &self.inventory
+    }
+
+    /// Return only the fields accepted by dsh's strict inventory Remote.
+    pub(crate) fn dsh_inventory(&self) -> DshPluginInventorySnapshot {
+        DshPluginInventorySnapshot::from_inventory(&self.inventory)
     }
 
     pub fn sessions(&self) -> &[GatewaySessionSummary] {

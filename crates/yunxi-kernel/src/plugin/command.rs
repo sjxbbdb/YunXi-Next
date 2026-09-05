@@ -55,6 +55,12 @@ impl PluginCommand {
         self
     }
 
+    /// Returns whether the child starts from an empty environment before the
+    /// explicitly configured variables are applied.
+    pub fn environment_is_cleared(&self) -> bool {
+        self.clear_environment
+    }
+
     pub fn program(&self) -> &Path {
         &self.program
     }

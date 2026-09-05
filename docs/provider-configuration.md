@@ -57,8 +57,10 @@ them to this repository.
 
 ## Capability Switches
 
-The thirteen optional capabilities can be changed in Web Settings > Plugins.
-Those choices are written to `YUNXI_NEXT_HOME\settings.json` (or the normal
+The settings domain defines fifteen built-in capability keys. Web Settings >
+Plugins connects all fifteen to the CLI Host launch path. `voice` and `weixin`
+are launch-wired fixture routes and remain disabled by default. Choices are
+written to `YUNXI_NEXT_HOME\settings.json` (or the normal
 `~/.yunxi-next/settings.json` state root), and take effect on the next Host
 start. The following environment variables have higher precedence than the
 stored document, so they remain the operator, CI, and recovery override.
@@ -78,6 +80,8 @@ stored document, so they remain the operator, CI, and recovery override.
 | `YUNXI_NEXT_MCP_ENABLED` | `false` | Launch the configured Host-approved `tool.mcp@1` bridge |
 | `YUNXI_NEXT_SKILLS_ENABLED` | `false` | Launch read-only `tool.skills@1` discovery and context |
 | `YUNXI_NEXT_MULTI_AGENT_ENABLED` | `false` | Launch isolated `tool.multi-agent@1` coordination and child-model turns |
+| `YUNXI_NEXT_VOICE_ENABLED` | `false` | Launch the bounded Voice fixture routes |
+| `YUNXI_NEXT_WEIXIN_ENABLED` | `false` | Launch the bounded Weixin channel fixture route |
 | `YUNXI_NEXT_COMPANION_TOOL_REQUESTS` | `false` | Permit scheduler plans that ask the user to approve a tool; never executes it |
 
 The Next persona, memory, and companion variables take precedence over legacy
@@ -87,11 +91,14 @@ When memory is enabled while persona expression is disabled, the persona
 process runs only as the safety wrapper for memory context. A disabled
 capability is not launched and has no catalog route.
 
-The settings document accepts only the thirteen known boolean fields, is capped
-at 64 KiB, and uses revision-fenced same-directory replacement. It does not
+The settings document accepts the fifteen known built-in boolean fields plus a
+bounded plugin override map, is capped at 64 KiB, and uses revision-fenced
+same-directory replacement. It does not
 store provider credentials, executable paths, MCP secrets, or arbitrary plugin
 configuration. The Model capability is required and is not part of this
-writable namespace.
+writable namespace. The Voice and Weixin values start their isolated fixture
+routes when enabled; they do not provide real device, login, or network
+backends yet.
 
 Each optional built-in executable also has a development-only path override:
 `YUNXI_NEXT_CONTEXT_PLUGIN`, `YUNXI_NEXT_PERSONA_PLUGIN`,

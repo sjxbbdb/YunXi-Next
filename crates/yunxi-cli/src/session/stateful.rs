@@ -56,6 +56,7 @@ impl ChatSession {
         self.proactive_in_session = 0;
         self.pending_action = None;
         self.tool_continuation = None;
+        self.reset_spine();
         Ok(session)
     }
 
@@ -97,6 +98,7 @@ impl ChatSession {
         self.proactive_in_session = 0;
         self.pending_action = None;
         self.tool_continuation = None;
+        self.reset_spine();
         Ok(messages)
     }
 
@@ -218,6 +220,7 @@ impl ChatSession {
                 self.proactive_in_session = 0;
                 self.pending_action = None;
                 self.tool_continuation = None;
+                self.reset_spine();
                 Ok(ManagementResult::replace_history(
                     vec!["Started a new session.".to_string()],
                     Vec::new(),
@@ -365,7 +368,7 @@ impl ChatSession {
     }
 
     fn queue_shell(&mut self, command: String) -> Result<ManagementResult, String> {
-        if self.pending_action.is_some() || self.tool_continuation.is_some() {
+        if self.has_pending_action() {
             return Err("resolve the pending action before queueing another one".to_string());
         }
         if self.shell_capability.is_none() {
@@ -387,7 +390,7 @@ impl ChatSession {
     }
 
     fn queue_patch(&mut self, value: String) -> Result<ManagementResult, String> {
-        if self.pending_action.is_some() || self.tool_continuation.is_some() {
+        if self.has_pending_action() {
             return Err("resolve the pending action before queueing another one".to_string());
         }
         if self.patch_capability.is_none() {
@@ -418,10 +421,12 @@ impl ChatSession {
     }
 
     fn approve_action(&mut self) -> Result<ManagementResult, String> {
-        if matches!(
-            self.pending_action,
-            Some(super::PendingAction::ModelTool { .. })
-        ) {
+        if self.has_spine_pending_approval()
+            || matches!(
+                self.pending_action,
+                Some(super::PendingAction::ModelTool { .. })
+            )
+        {
             return self.approve_pending_model_tool();
         }
         let action = self
@@ -488,10 +493,12 @@ impl ChatSession {
     }
 
     fn deny_action(&mut self) -> Result<ManagementResult, String> {
-        if matches!(
-            self.pending_action,
-            Some(super::PendingAction::ModelTool { .. })
-        ) {
+        if self.has_spine_pending_approval()
+            || matches!(
+                self.pending_action,
+                Some(super::PendingAction::ModelTool { .. })
+            )
+        {
             return self.deny_pending_model_tool();
         }
         if self.pending_action.take().is_some() {
@@ -504,10 +511,12 @@ impl ChatSession {
     }
 
     fn cancel_action(&mut self) -> Result<ManagementResult, String> {
-        if matches!(
-            self.pending_action,
-            Some(super::PendingAction::ModelTool { .. })
-        ) {
+        if self.has_spine_pending_approval()
+            || matches!(
+                self.pending_action,
+                Some(super::PendingAction::ModelTool { .. })
+            )
+        {
             return self.cancel_pending_model_tool();
         }
         if self.pending_action.take().is_some() {
@@ -630,6 +639,7 @@ impl ChatSession {
         self.proactive_in_session = 0;
         self.pending_action = None;
         self.tool_continuation = None;
+        self.reset_spine();
         Ok(ManagementResult::replace_history(
             vec![format!(
                 "Resumed session `{}` with {} messages{}.",

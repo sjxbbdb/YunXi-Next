@@ -12,6 +12,7 @@ use yunxi_cli::{
     INTERNAL_PATCH_PLUGIN_ARGUMENT, INTERNAL_PERSONA_PLUGIN_ARGUMENT,
     INTERNAL_SCHEDULER_PLUGIN_ARGUMENT, INTERNAL_SHELL_PLUGIN_ARGUMENT,
     INTERNAL_SKILLS_PLUGIN_ARGUMENT, INTERNAL_STORAGE_PLUGIN_ARGUMENT,
+    INTERNAL_VOICE_PLUGIN_ARGUMENT, INTERNAL_WEIXIN_PLUGIN_ARGUMENT,
 };
 
 fn main() -> ExitCode {
@@ -57,6 +58,12 @@ fn main() -> ExitCode {
         }
         Some(argument) if argument == OsStr::new(INTERNAL_SKILLS_PLUGIN_ARGUMENT) => {
             return plugin_exit("skills", yunxi_tool_skills::run_skills_plugin());
+        }
+        Some(argument) if argument == OsStr::new(INTERNAL_VOICE_PLUGIN_ARGUMENT) => {
+            return plugin_exit("voice", yunxi_voice::run_voice_fixture());
+        }
+        Some(argument) if argument == OsStr::new(INTERNAL_WEIXIN_PLUGIN_ARGUMENT) => {
+            return plugin_exit("weixin", yunxi_weixin::run_weixin_plugin());
         }
         Some(argument) if argument == OsStr::new(INTERNAL_MCP_FIXTURE_ARGUMENT) => {
             yunxi_tool_mcp::run_fixture();

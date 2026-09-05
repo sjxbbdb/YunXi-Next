@@ -1,0 +1,12 @@
+[package]
+name = "yunxi-cordis-runtime"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+yunxi-cordis-core = { path = "../yunxi-cordis-core" }
+
+[lints]
+workspace = true

@@ -2,6 +2,7 @@
 
 use std::error::Error;
 use std::fmt;
+use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -11,7 +12,7 @@ use yunxi_protocol::{
 };
 use yunxi_settings::{
     CAPABILITY_SETTINGS_NAMESPACE, CapabilityEdit, CapabilitySetting, CapabilitySettingsError,
-    CapabilitySettingsStore, CapabilitySwitches,
+    CapabilitySettingsStore, CapabilitySwitches, PluginEdit,
 };
 use yunxi_web_contract::{
     ClientRequest, ClientResponse, EventChannel, RpcError, RpcId, RpcMessage, RpcResult,
@@ -31,10 +32,12 @@ const MAX_SETTINGS_MUTATIONS: usize = 64;
 pub struct WebHost {
     session: ChatSession,
     gateway: Gateway,
+    plugin_path: Option<std::path::PathBuf>,
     web_history: Vec<ChatMessage>,
     web_session_id: Option<String>,
     pending_approval: Option<WebPendingApproval>,
     next_web_id: u64,
+    rebuild_in_progress: bool,
 }
 
 struct WebPendingApproval {
@@ -46,18 +49,36 @@ struct WebPendingApproval {
     reason: String,
 }
 
+struct SettingsSnapshot {
+    store: CapabilitySettingsStore,
+    file: SettingsFileState,
+}
+
+enum SettingsFileState {
+    Missing,
+    Present(Vec<u8>),
+}
+
+struct SettingsApplyFailure {
+    cause: String,
+    rollback_error: Option<String>,
+}
+
 impl WebHost {
     pub fn launch(plugin_path: Option<&Path>) -> Result<Self, WebHostError> {
-        let mut session = ChatSession::launch(plugin_path)
+        let plugin_path = plugin_path.map(Path::to_path_buf);
+        let mut session = ChatSession::launch(plugin_path.as_deref())
             .map_err(|error| WebHostError::Session(error.to_string()))?;
         let gateway = Gateway::new(session.web_projection());
         Ok(Self {
             session,
             gateway,
+            plugin_path,
             web_history: Vec::new(),
             web_session_id: None,
             pending_approval: None,
             next_web_id: 1,
+            rebuild_in_progress: false,
         })
     }
 
@@ -160,6 +181,9 @@ impl WebHost {
         if let Err(response) = self.validate_settings_namespace(request) {
             return response;
         }
+        if let Err(response) = self.validate_settings_change_allowed(request) {
+            return response;
+        }
         let Some(patch) = request.payload().get("patch") else {
             return self.failure(
                 request,
@@ -168,6 +192,33 @@ impl WebHost {
                 json!({ "field": "patch" }),
             );
         };
+        if let Some(plugins) = patch.get("plugins") {
+            if patch.as_object().is_none_or(|object| object.len() != 1) {
+                return self.failure(
+                    request,
+                    "invalid-payload",
+                    "settings.update cannot mix capability and plugin sections",
+                    json!({ "field": "patch" }),
+                );
+            }
+            let plugins = match CapabilitySettingsStore::parse_plugins(plugins) {
+                Ok(plugins) => plugins,
+                Err(error) => return self.settings_rejected(request, error),
+            };
+            let expected_revision = match expected_revision(request.payload()) {
+                Ok(revision) => revision,
+                Err(()) => return self.invalid_settings_revision(request),
+            };
+            let previous = match self.capture_settings_snapshot(request) {
+                Ok(snapshot) => snapshot,
+                Err(response) => return response,
+            };
+            let result = self
+                .session
+                .capability_settings_mut()
+                .update_plugins(plugins, expected_revision);
+            return self.finish_settings_write(request, previous, result);
+        }
         let patch = match CapabilitySettingsStore::parse_section(patch) {
             Ok(patch) => patch,
             Err(error) => return self.settings_rejected(request, error),
@@ -176,11 +227,15 @@ impl WebHost {
             Ok(revision) => revision,
             Err(()) => return self.invalid_settings_revision(request),
         };
+        let previous = match self.capture_settings_snapshot(request) {
+            Ok(snapshot) => snapshot,
+            Err(response) => return response,
+        };
         let result = self
             .session
             .capability_settings_mut()
             .update(patch, expected_revision);
-        self.finish_settings_write(request, result)
+        self.finish_settings_write(request, previous, result)
     }
 
     fn dispatch_settings_replace(
@@ -188,6 +243,9 @@ impl WebHost {
         request: &ClientRequest,
     ) -> Result<ServerResponse, WebHostError> {
         if let Err(response) = self.validate_settings_namespace(request) {
+            return response;
+        }
+        if let Err(response) = self.validate_settings_change_allowed(request) {
             return response;
         }
         let Some(section) = request.payload().get("section") else {
@@ -198,6 +256,33 @@ impl WebHost {
                 json!({ "field": "section" }),
             );
         };
+        if let Some(plugins) = section.get("plugins") {
+            if section.as_object().is_none_or(|object| object.len() != 1) {
+                return self.failure(
+                    request,
+                    "invalid-payload",
+                    "settings.replace cannot mix capability and plugin sections",
+                    json!({ "field": "section" }),
+                );
+            }
+            let plugins = match CapabilitySettingsStore::parse_plugins(plugins) {
+                Ok(plugins) => plugins,
+                Err(error) => return self.settings_rejected(request, error),
+            };
+            let expected_revision = match expected_revision(request.payload()) {
+                Ok(revision) => revision,
+                Err(()) => return self.invalid_settings_revision(request),
+            };
+            let previous = match self.capture_settings_snapshot(request) {
+                Ok(snapshot) => snapshot,
+                Err(response) => return response,
+            };
+            let result = self
+                .session
+                .capability_settings_mut()
+                .replace_plugins(plugins, expected_revision);
+            return self.finish_settings_write(request, previous, result);
+        }
         let section = match CapabilitySettingsStore::parse_section(section) {
             Ok(section) => section,
             Err(error) => return self.settings_rejected(request, error),
@@ -206,11 +291,15 @@ impl WebHost {
             Ok(revision) => revision,
             Err(()) => return self.invalid_settings_revision(request),
         };
+        let previous = match self.capture_settings_snapshot(request) {
+            Ok(snapshot) => snapshot,
+            Err(response) => return response,
+        };
         let result = self
             .session
             .capability_settings_mut()
             .replace(section, expected_revision);
-        self.finish_settings_write(request, result)
+        self.finish_settings_write(request, previous, result)
     }
 
     fn dispatch_settings_mutate(
@@ -220,7 +309,10 @@ impl WebHost {
         if let Err(response) = self.validate_settings_namespace(request) {
             return response;
         }
-        let edits = match capability_edits(request.payload()) {
+        if let Err(response) = self.validate_settings_change_allowed(request) {
+            return response;
+        }
+        let edits = match settings_edits(request.payload()) {
             Ok(edits) => edits,
             Err(message) => {
                 return self.failure(
@@ -235,11 +327,21 @@ impl WebHost {
             Ok(revision) => revision,
             Err(()) => return self.invalid_settings_revision(request),
         };
-        let result = self
-            .session
-            .capability_settings_mut()
-            .mutate(edits, expected_revision);
-        self.finish_settings_write(request, result)
+        let previous = match self.capture_settings_snapshot(request) {
+            Ok(snapshot) => snapshot,
+            Err(response) => return response,
+        };
+        let result = match edits {
+            SettingsEdits::Capabilities(edits) => self
+                .session
+                .capability_settings_mut()
+                .mutate(edits, expected_revision),
+            SettingsEdits::Plugins(edits) => self
+                .session
+                .capability_settings_mut()
+                .mutate_plugins(edits, expected_revision),
+        };
+        self.finish_settings_write(request, previous, result)
     }
 
     fn validate_settings_namespace(
@@ -267,6 +369,27 @@ impl WebHost {
         Ok(())
     }
 
+    fn validate_settings_change_allowed(
+        &self,
+        request: &ClientRequest,
+    ) -> Result<(), Result<ServerResponse, WebHostError>> {
+        if self.rebuild_in_progress
+            || self.pending_approval.is_some()
+            || self.session.pending_approval().is_some()
+        {
+            return Err(self.failure(
+                request,
+                "agent-busy",
+                "resolve the pending approval before changing plugin settings",
+                json!({
+                    "ns": CAPABILITY_SETTINGS_NAMESPACE,
+                    "sessionId": self.web_session_id,
+                }),
+            ));
+        }
+        Ok(())
+    }
+
     fn invalid_settings_revision(
         &self,
         request: &ClientRequest,
@@ -282,11 +405,34 @@ impl WebHost {
     fn finish_settings_write(
         &mut self,
         request: &ClientRequest,
+        previous: SettingsSnapshot,
         result: Result<bool, CapabilitySettingsError>,
     ) -> Result<ServerResponse, WebHostError> {
         match result {
             Ok(changed) => {
                 if changed {
+                    if let Err(error) = self.rebuild_after_settings_change(previous) {
+                        let mut details = json!({
+                            "ns": CAPABILITY_SETTINGS_NAMESPACE,
+                            "rolledBack": error.rollback_error.is_none(),
+                            "message": bounded_message(error.cause),
+                        });
+                        if let Some(rollback_error) = error.rollback_error {
+                            details
+                                .as_object_mut()
+                                .expect("settings failure details are an object")
+                                .insert(
+                                    "rollbackError".to_string(),
+                                    Value::String(bounded_message(rollback_error)),
+                                );
+                        }
+                        return self.failure(
+                            request,
+                            "settings-apply-failed",
+                            "the setting was not applied to the live WebHost",
+                            details,
+                        );
+                    }
                     let revision = self.session.capability_settings().revision();
                     self.publish_event(
                         EventChannel::Host,
@@ -300,6 +446,76 @@ impl WebHost {
                 self.success(request, self.capability_namespace_view())
             }
             Err(error) => self.settings_rejected(request, error),
+        }
+    }
+
+    fn capture_settings_snapshot(
+        &self,
+        request: &ClientRequest,
+    ) -> Result<SettingsSnapshot, Result<ServerResponse, WebHostError>> {
+        let path = self.session.capability_settings().path();
+        let file = match fs::read(path) {
+            Ok(bytes) => SettingsFileState::Present(bytes),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                SettingsFileState::Missing
+            }
+            Err(error) => {
+                return Err(self.failure(
+                    request,
+                    "settings-unavailable",
+                    "the current settings document could not be snapshotted",
+                    json!({
+                        "ns": CAPABILITY_SETTINGS_NAMESPACE,
+                        "message": bounded_message(error.to_string()),
+                    }),
+                ));
+            }
+        };
+        Ok(SettingsSnapshot {
+            store: self.session.capability_settings().clone(),
+            file,
+        })
+    }
+
+    fn rebuild_after_settings_change(
+        &mut self,
+        previous: SettingsSnapshot,
+    ) -> Result<(), SettingsApplyFailure> {
+        self.rebuild_in_progress = true;
+        let result = self.rebuild_after_settings_change_inner(previous);
+        self.rebuild_in_progress = false;
+        result
+    }
+
+    fn rebuild_after_settings_change_inner(
+        &mut self,
+        previous: SettingsSnapshot,
+    ) -> Result<(), SettingsApplyFailure> {
+        let mut replacement = match ChatSession::launch(self.plugin_path.as_deref()) {
+            Ok(session) => session,
+            Err(error) => return Err(self.settings_apply_failure(previous, error.to_string())),
+        };
+        if let Some(session_id) = self.web_session_id.as_deref()
+            && let Err(error) = replacement.activate_web_session(session_id)
+        {
+            return Err(self.settings_apply_failure(previous, error));
+        }
+        self.session = replacement;
+        self.refresh();
+        Ok(())
+    }
+
+    fn settings_apply_failure(
+        &mut self,
+        previous: SettingsSnapshot,
+        cause: String,
+    ) -> SettingsApplyFailure {
+        let rollback_error =
+            restore_settings_file(self.session.capability_settings().path(), previous.file).err();
+        *self.session.capability_settings_mut() = previous.store;
+        SettingsApplyFailure {
+            cause,
+            rollback_error: rollback_error.map(|error| error.to_string()),
         }
     }
 
@@ -361,9 +577,10 @@ impl WebHost {
             "schema": capability_settings_schema(),
             "value": settings.resolved(),
             "base": CapabilitySwitches::default(),
-            "applies": "restart",
+            "applies": "live",
             "secrets": [],
             "revision": settings.revision(),
+            "plugins": settings.plugin_overrides(),
         });
         if user.as_object().is_some_and(|object| !object.is_empty()) {
             view.as_object_mut()
@@ -1044,6 +1261,17 @@ impl GatewayBackend for WebHost {
     }
 }
 
+fn restore_settings_file(path: &Path, state: SettingsFileState) -> std::io::Result<()> {
+    match state {
+        SettingsFileState::Missing => match fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        },
+        SettingsFileState::Present(bytes) => fs::write(path, bytes),
+    }
+}
+
 fn expected_revision(payload: &Value) -> Result<Option<u64>, ()> {
     match payload.get("expectedRevision") {
         None => Ok(None),
@@ -1051,7 +1279,12 @@ fn expected_revision(payload: &Value) -> Result<Option<u64>, ()> {
     }
 }
 
-fn capability_edits(payload: &Value) -> Result<Vec<CapabilityEdit>, String> {
+enum SettingsEdits {
+    Capabilities(Vec<CapabilityEdit>),
+    Plugins(Vec<PluginEdit>),
+}
+
+fn settings_edits(payload: &Value) -> Result<SettingsEdits, String> {
     let ops = payload
         .get("ops")
         .and_then(Value::as_array)
@@ -1061,56 +1294,77 @@ fn capability_edits(payload: &Value) -> Result<Vec<CapabilityEdit>, String> {
             "settings.mutate accepts at most {MAX_SETTINGS_MUTATIONS} operations"
         ));
     }
-    ops.iter()
-        .map(|operation| {
-            let object = operation
-                .as_object()
-                .ok_or_else(|| "each settings mutation must be an object".to_string())?;
-            let op = object
-                .get("op")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "each settings mutation requires an op".to_string())?;
-            let path = object
-                .get("path")
-                .and_then(Value::as_array)
-                .filter(|path| path.len() == 1)
-                .and_then(|path| path[0].as_str())
-                .and_then(CapabilitySetting::parse)
-                .ok_or_else(|| {
-                    "settings mutations require one supported capability path".to_string()
-                })?;
-            match op {
-                "set" => {
-                    if object
-                        .keys()
-                        .any(|key| !matches!(key.as_str(), "op" | "path" | "value"))
-                    {
-                        return Err("settings set mutation contains an unknown field".to_string());
-                    }
-                    let value = object
-                        .get("value")
-                        .and_then(Value::as_bool)
-                        .ok_or_else(|| "settings capability values must be booleans".to_string())?;
-                    Ok(CapabilityEdit::Set(path, value))
+    let mut capability_edits = Vec::new();
+    let mut plugin_edits = Vec::new();
+    for operation in ops {
+        let object = operation
+            .as_object()
+            .ok_or_else(|| "each settings mutation must be an object".to_string())?;
+        let op = object
+            .get("op")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "each settings mutation requires an op".to_string())?;
+        let path = object
+            .get("path")
+            .and_then(Value::as_array)
+            .ok_or_else(|| "settings mutations require a path array".to_string())?;
+        let capability = path
+            .first()
+            .and_then(Value::as_str)
+            .and_then(CapabilitySetting::parse)
+            .filter(|_| path.len() == 1);
+        let plugin = (path.len() == 2 && path[0].as_str() == Some("plugins"))
+            .then(|| path[1].as_str())
+            .flatten();
+        if capability.is_none() && plugin.is_none() {
+            return Err(
+                "settings mutations require one supported capability or plugin path".to_string(),
+            );
+        }
+        match op {
+            "set" => {
+                if object
+                    .keys()
+                    .any(|key| !matches!(key.as_str(), "op" | "path" | "value"))
+                {
+                    return Err("settings set mutation contains an unknown field".to_string());
                 }
-                "unset" => {
-                    if object
-                        .keys()
-                        .any(|key| !matches!(key.as_str(), "op" | "path"))
-                    {
-                        return Err("settings unset mutation contains an unknown field".to_string());
-                    }
-                    Ok(CapabilityEdit::Unset(path))
+                let value = object
+                    .get("value")
+                    .and_then(Value::as_bool)
+                    .ok_or_else(|| "settings capability values must be booleans".to_string())?;
+                if let Some(capability) = capability {
+                    capability_edits.push(CapabilityEdit::Set(capability, value));
+                } else if let Some(plugin) = plugin {
+                    plugin_edits.push(PluginEdit::Set(plugin.to_string(), value));
                 }
-                _ => Err("settings mutation op must be set or unset".to_string()),
             }
-        })
-        .collect()
+            "unset" => {
+                if object
+                    .keys()
+                    .any(|key| !matches!(key.as_str(), "op" | "path"))
+                {
+                    return Err("settings unset mutation contains an unknown field".to_string());
+                }
+                if let Some(capability) = capability {
+                    capability_edits.push(CapabilityEdit::Unset(capability));
+                } else if let Some(plugin) = plugin {
+                    plugin_edits.push(PluginEdit::Unset(plugin.to_string()));
+                }
+            }
+            _ => return Err("settings mutation op must be set or unset".to_string()),
+        }
+    }
+    match (capability_edits.is_empty(), plugin_edits.is_empty()) {
+        (false, true) => Ok(SettingsEdits::Capabilities(capability_edits)),
+        (true, false) => Ok(SettingsEdits::Plugins(plugin_edits)),
+        _ => Err("settings mutations cannot mix capability and plugin paths".to_string()),
+    }
 }
 
 fn capability_settings_schema() -> Value {
     json!({
-        "uid": 14,
+        "uid": 16,
         "refs": {
             "1": { "type": "boolean" },
             "2": { "type": "boolean" },
@@ -1125,7 +1379,9 @@ fn capability_settings_schema() -> Value {
             "11": { "type": "boolean" },
             "12": { "type": "boolean" },
             "13": { "type": "boolean" },
-            "14": {
+            "14": { "type": "boolean" },
+            "15": { "type": "boolean" },
+            "16": {
                 "type": "object",
                 "dict": {
                     "context": 1,
@@ -1140,7 +1396,9 @@ fn capability_settings_schema() -> Value {
                     "files": 10,
                     "mcp": 11,
                     "skills": 12,
-                    "multi_agent": 13
+                    "multi_agent": 13,
+                    "voice": 14,
+                    "weixin": 15
                 }
             }
         }

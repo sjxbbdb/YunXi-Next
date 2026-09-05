@@ -5,11 +5,14 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{CompositionEntry, CompositionSnapshot, EntryId};
+use crate::{
+    CompositionEntry, CompositionSnapshot, EntryId, PluginManifest, PluginRisk, PluginRole,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum PluginFiberPhase {
+    Disabled,
     Pending,
     Loading,
     Active,
@@ -20,6 +23,7 @@ pub enum PluginFiberPhase {
 impl fmt::Display for PluginFiberPhase {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let value = match self {
+            Self::Disabled => "disabled",
             Self::Pending => "pending",
             Self::Loading => "loading",
             Self::Active => "active",
@@ -39,6 +43,8 @@ pub struct PluginInventoryEntry {
     enabled: bool,
     #[serde(rename = "fiberPhase")]
     fiber_phase: Option<PluginFiberPhase>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    manifest: Option<PluginManifest>,
 }
 
 impl PluginInventoryEntry {
@@ -58,15 +64,46 @@ impl PluginInventoryEntry {
         self.fiber_phase
     }
 
+    pub fn runtime_status(&self) -> Option<PluginFiberPhase> {
+        self.fiber_phase
+    }
+
+    pub fn manifest(&self) -> Option<PluginManifest> {
+        self.manifest
+    }
+
+    pub fn role(&self) -> Option<PluginRole> {
+        self.manifest.map(PluginManifest::role)
+    }
+
+    pub fn risk(&self) -> Option<PluginRisk> {
+        self.manifest.map(PluginManifest::risk)
+    }
+
+    pub fn default_enabled(&self) -> Option<bool> {
+        self.manifest.map(PluginManifest::default_enabled)
+    }
+
     pub(crate) fn from_entry(
         entry: &CompositionEntry,
         fiber_phase: Option<PluginFiberPhase>,
     ) -> Self {
+        let manifest = entry.manifest();
+        let fiber_phase = fiber_phase.or_else(|| {
+            manifest.map(|_| {
+                if entry.enabled() {
+                    PluginFiberPhase::Pending
+                } else {
+                    PluginFiberPhase::Disabled
+                }
+            })
+        });
         Self {
             entry_id: entry.id().clone(),
             module_name: entry.module_name().to_string(),
             enabled: entry.enabled(),
             fiber_phase,
+            manifest,
         }
     }
 }
@@ -157,5 +194,26 @@ mod tests {
             inventory.entries()[0].fiber_phase(),
             Some(PluginFiberPhase::Active)
         );
+    }
+
+    #[test]
+    fn manifest_entries_expose_role_risk_default_and_disabled_status() {
+        let entry = CompositionEntry::new_with_manifest(
+            "tool-shell",
+            "yunxi.tool.shell",
+            PluginManifest::optional(PluginRisk::External),
+        )
+        .expect("entry");
+        let mut layer = ConfigLayer::new("base").expect("layer");
+        layer.insert(vec![entry]).expect("insert");
+        let mut profile = Profile::new("headless").expect("profile");
+        profile.add_bundle(layer).expect("bundle");
+
+        let inventory = profile.compose().expect("compose").inventory();
+        let item = &inventory.entries()[0];
+        assert_eq!(item.role(), Some(PluginRole::Optional));
+        assert_eq!(item.risk(), Some(PluginRisk::External));
+        assert_eq!(item.default_enabled(), Some(false));
+        assert_eq!(item.runtime_status(), Some(PluginFiberPhase::Disabled));
     }
 }

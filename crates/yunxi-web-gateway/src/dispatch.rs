@@ -126,7 +126,7 @@ impl Gateway {
             PLUGIN_INVENTORY_LIST_METHOD => {
                 match object_payload(request.method(), request.payload()) {
                     Ok(()) => {
-                        RpcResult::success(serde_json::to_value(self.projection.inventory())?)
+                        RpcResult::success(serde_json::to_value(self.projection.dsh_inventory())?)
                     }
                     Err(error) => RpcResult::failure(error),
                 }

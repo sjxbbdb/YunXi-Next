@@ -35,6 +35,8 @@ pub const INTERNAL_PATCH_PLUGIN_ARGUMENT: &str = "__patch-plugin";
 pub const INTERNAL_FILES_PLUGIN_ARGUMENT: &str = "__files-plugin";
 pub const INTERNAL_MCP_PLUGIN_ARGUMENT: &str = "__mcp-plugin";
 pub const INTERNAL_SKILLS_PLUGIN_ARGUMENT: &str = "__skills-plugin";
+pub const INTERNAL_VOICE_PLUGIN_ARGUMENT: &str = "__voice-plugin";
+pub const INTERNAL_WEIXIN_PLUGIN_ARGUMENT: &str = "__weixin-plugin";
 pub const INTERNAL_MCP_FIXTURE_ARGUMENT: &str = "__mcp-fixture";
 
 pub fn run_from_env() -> Result<(), CliError> {
