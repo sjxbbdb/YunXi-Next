@@ -156,8 +156,8 @@ window.__ModuleLoader__.load({
 			return matches.length === 1 ? matches[0] : void 0;
 		}
 		//#endregion
-		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-ab5a0433e27742b99ef765dc97041378\packages\client\ui-deliverables\src\client\ProducedFiles.module.css.mjs
-		const css = "._27pIvq_root{grid-template-columns:max-content minmax(0,1fr);align-items:center;gap:6px 8px;margin-top:16px;font-size:13px;line-height:22px;display:grid;position:relative}._27pIvq_label{color:var(--dsw-alias-label-tertiary);grid-area:1/1}._27pIvq_row{flex-wrap:nowrap;grid-area:1/2;align-items:center;gap:8px;min-width:0;display:flex;overflow:hidden}._27pIvq_file{text-overflow:ellipsis;white-space:nowrap;background:var(--dsw-alias-interactive-bg-hover);max-width:320px;color:var(--dsw-alias-label-secondary);font:inherit;cursor:pointer;border:none;border-radius:6px;flex:none;margin:0;padding:0 8px;overflow:hidden}._27pIvq_file:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}._27pIvq_file:focus-visible,._27pIvq_showFolder:focus-visible{box-shadow:inset 0 0 0 2px var(--dsw-alias-border-l3);outline:none}._27pIvq_more{white-space:nowrap;color:var(--dsw-alias-label-tertiary);flex:none}._27pIvq_showFolder{color:var(--dsw-alias-label-tertiary);font:inherit;cursor:pointer;background:0 0;border:none;border-radius:4px;grid-area:2/2;justify-self:start;margin:0;padding:0 2px;line-height:20px}._27pIvq_showFolder:hover{color:var(--dsw-alias-label-secondary);text-decoration:underline}._27pIvq_measure{visibility:hidden;pointer-events:none;contain:strict;width:0;height:0;position:absolute;overflow:hidden}._27pIvq_probe{width:max-content;position:absolute;inset:0 auto auto 0}";
+		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-9c80724d56484e56a43c2b8dbb125407\packages\client\ui-deliverables\src\client\ProducedFiles.module.css.mjs
+		const css = "._1c_EBG_root{grid-template-columns:max-content minmax(0,1fr);align-items:center;gap:6px 8px;margin-top:16px;font-size:13px;line-height:22px;display:grid;position:relative}._1c_EBG_label{color:var(--dsw-alias-label-tertiary);grid-area:1/1}._1c_EBG_row{flex-wrap:nowrap;grid-area:1/2;align-items:center;gap:8px;min-width:0;display:flex;overflow:hidden}._1c_EBG_file{text-overflow:ellipsis;white-space:nowrap;background:var(--dsw-alias-interactive-bg-hover);max-width:320px;color:var(--dsw-alias-label-secondary);font:inherit;cursor:pointer;border:none;border-radius:6px;flex:none;margin:0;padding:0 8px;overflow:hidden}._1c_EBG_file:hover{color:var(--dsw-alias-label-primary);text-decoration:underline}._1c_EBG_file:focus-visible,._1c_EBG_showFolder:focus-visible{box-shadow:inset 0 0 0 2px var(--dsw-alias-border-l3);outline:none}._1c_EBG_more{white-space:nowrap;color:var(--dsw-alias-label-tertiary);flex:none}._1c_EBG_showFolder{color:var(--dsw-alias-label-tertiary);font:inherit;cursor:pointer;background:0 0;border:none;border-radius:4px;grid-area:2/2;justify-self:start;margin:0;padding:0 2px;line-height:20px}._1c_EBG_showFolder:hover{color:var(--dsw-alias-label-secondary);text-decoration:underline}._1c_EBG_measure{visibility:hidden;pointer-events:none;contain:strict;width:0;height:0;position:absolute;overflow:hidden}._1c_EBG_probe{width:max-content;position:absolute;inset:0 auto auto 0}";
 		const tagId = "@deepseek-ai/dsh-client-ui-deliverables/ProducedFiles.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -167,14 +167,14 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var ProducedFiles_module_css_default = {
-			"file": "_27pIvq_file",
-			"label": "_27pIvq_label",
-			"measure": "_27pIvq_measure",
-			"more": "_27pIvq_more",
-			"probe": "_27pIvq_probe",
-			"root": "_27pIvq_root",
-			"row": "_27pIvq_row",
-			"showFolder": "_27pIvq_showFolder"
+			"file": "_1c_EBG_file",
+			"label": "_1c_EBG_label",
+			"measure": "_1c_EBG_measure",
+			"more": "_1c_EBG_more",
+			"probe": "_1c_EBG_probe",
+			"root": "_1c_EBG_root",
+			"row": "_1c_EBG_row",
+			"showFolder": "_1c_EBG_showFolder"
 		};
 		//#endregion
 		//#region lib/types/client/ProducedFiles.js

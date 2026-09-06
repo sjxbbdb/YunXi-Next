@@ -3,6 +3,8 @@
 - `main.rs` selects normal CLI mode or one of the private built-in plugin modes.
 - `lib.rs` coordinates argument handling, session startup, and terminal I/O.
 - `args.rs` parses the deliberately small command-line surface.
+- `control.rs` implements detached `status`, `diagnostics`, `enable`, `disable`,
+  and validation-only `reload` commands for persisted plugin state.
 - `management.rs` defines REPL management commands and history replacement results.
 - `session.rs` launches plugins, composes optional identity context, and routes model calls.
 - `session/` owns post-response state, model tools, and isolated child-agent turns.

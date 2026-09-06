@@ -7,8 +7,8 @@ window.__ModuleLoader__.load({
 		let react_jsx_runtime = require("react/jsx-runtime");
 		let react = require("react");
 		let _deepseek_ai_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
-		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-ab5a0433e27742b99ef765dc97041378\packages\client\ui-settings-plugin-inventory\src\client\PluginInventorySettingsTab.module.css.mjs
-		const css = ".ga2xMa_section{width:100%;max-width:760px;color:var(--dsw-alias-label-primary);flex-direction:column;gap:14px;display:flex}.ga2xMa_catalogHeading h3,.ga2xMa_status,.ga2xMa_failure p{margin:0}.ga2xMa_status,.ga2xMa_failure{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:20px}.ga2xMa_failure{color:var(--dsw-alias-state-error-primary);align-items:center;gap:10px;display:flex}.ga2xMa_failure button{border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-primary);font:inherit;cursor:pointer;background:0 0;border-radius:6px;padding:4px 10px}.ga2xMa_catalog{flex-direction:column;gap:12px;display:flex}.ga2xMa_search{width:100%;color:var(--dsw-alias-label-tertiary);align-items:center;display:flex;position:relative}.ga2xMa_search>svg{pointer-events:none;position:absolute;left:12px}.ga2xMa_search input{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);width:100%;height:36px;color:var(--dsw-alias-label-primary);font:inherit;border-radius:8px;outline:none;padding:0 34px 0 36px;font-size:13px}.ga2xMa_search input::placeholder{color:var(--dsw-alias-label-tertiary)}.ga2xMa_search input:focus-visible{border-color:var(--dsw-alias-state-business-primary);box-shadow:0 0 0 2px color-mix(in srgb, var(--dsw-alias-state-business-primary) 18%, transparent)}.ga2xMa_catalogHeading{align-items:baseline;gap:7px;padding:0 2px;display:flex}.ga2xMa_catalogHeading h3{font-size:13px;font-weight:600;line-height:20px}.ga2xMa_catalogHeading span{color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums;font-size:12px;line-height:18px}.ga2xMa_cards{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:10px;margin:0;padding:0;list-style:none;display:grid}.ga2xMa_card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);border-radius:8px;min-width:0;overflow:hidden}.ga2xMa_card[data-open=true]{border-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-shadow-lv1)}.ga2xMa_cardHeader{align-items:center;min-width:0;display:flex}.ga2xMa_cardContent{box-sizing:border-box;min-width:0;min-height:52px;color:inherit;font:inherit;text-align:left;cursor:pointer;background:0 0;border:0;flex:auto;justify-content:space-between;align-items:center;gap:10px;padding:12px 8px 12px 14px;display:flex}.ga2xMa_cardContent:hover,.ga2xMa_card[data-open=true] .ga2xMa_cardContent{background:var(--dsw-alias-interactive-bg-hover)}.ga2xMa_cardContent:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-2px}.ga2xMa_cardTitle{text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:14px;font-weight:600;line-height:20px;overflow:hidden}.ga2xMa_cardTrailing{color:var(--dsw-alias-label-tertiary);flex:none;align-items:center;gap:6px;display:inline-flex}.ga2xMa_statusDot{background:var(--dsw-alias-label-tertiary);border-radius:999px;flex:none;width:7px;height:7px;display:inline-block}.ga2xMa_statusDot[data-phase=active]{background:var(--dsw-alias-state-success-primary)}.ga2xMa_statusDot[data-phase=failed]{background:var(--dsw-alias-state-error-primary)}.ga2xMa_statusDot[data-phase=loading]{background:var(--dsw-alias-state-business-primary)}.ga2xMa_configTag{background:var(--dsw-alias-bg-layer-1);min-height:20px;color:var(--dsw-alias-label-secondary);white-space:nowrap;border-radius:5px;align-items:center;padding:1px 6px;font-size:11px;line-height:16px;display:inline-flex}.ga2xMa_configTag[data-enabled=true]{background:color-mix(in srgb, var(--dsw-alias-state-success-primary) 10%, transparent);color:var(--dsw-alias-state-success-primary)}.ga2xMa_configTag[data-pending=true]{background:color-mix(in srgb, var(--dsw-alias-state-warn-label) 12%, transparent);color:var(--dsw-alias-state-warn-label)}.ga2xMa_chevron{color:var(--dsw-alias-label-tertiary);flex:none}.ga2xMa_card[data-open=true] .ga2xMa_chevron{transform:rotate(180deg)}.ga2xMa_capabilitySwitch{background:var(--dsw-alias-fill-l2);cursor:pointer;border:0;border-radius:999px;flex:0 0 34px;width:34px;height:20px;margin:0 12px 0 2px;padding:0;position:relative}.ga2xMa_capabilitySwitch>span{background:var(--dsw-alias-bg-layer-3);width:14px;height:14px;box-shadow:var(--dsw-shadow-lv1);border-radius:50%;position:absolute;top:3px;left:3px}.ga2xMa_capabilitySwitch[data-checked=true]{background:var(--dsw-alias-state-business-primary)}.ga2xMa_capabilitySwitch[data-checked=true]>span{transform:translate(14px)}.ga2xMa_capabilitySwitch:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}.ga2xMa_capabilitySwitch:disabled{cursor:not-allowed;opacity:.48}.ga2xMa_cardDetails{border-top:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-module-platform);padding:10px 14px 12px}.ga2xMa_entryValue{overflow-wrap:anywhere;color:var(--dsw-alias-label-primary);font-family:var(--ds-font-family-code);font-size:12px;line-height:18px;display:block}.ga2xMa_details{grid-template-columns:76px minmax(0,1fr);gap:6px 10px;margin:8px 0 0;display:grid}.ga2xMa_details div{display:contents}.ga2xMa_details dt{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:17px}.ga2xMa_details dd{overflow-wrap:anywhere;min-width:0;color:var(--dsw-alias-label-secondary);margin:0;font-size:12px;line-height:17px}.ga2xMa_visuallyHidden{clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;width:1px;height:1px;position:absolute;overflow:hidden}@media (prefers-reduced-motion:no-preference){.ga2xMa_chevron,.ga2xMa_capabilitySwitch,.ga2xMa_capabilitySwitch>span{transition:transform .14s var(--ds-ease-in-out), background-color .14s var(--ds-ease-in-out)}}@media (width<=680px){[role=dialog]:has(.ga2xMa_section){flex-direction:column}[role=dialog]:has(.ga2xMa_section)>nav{box-sizing:border-box;flex:none;gap:8px;width:100%;height:auto;padding:16px 48px 8px 12px}[role=dialog]:has(.ga2xMa_section)>nav>div:first-child{width:auto}[role=dialog]:has(.ga2xMa_section)>nav>div:last-child{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 10px;width:100%;height:auto;display:grid}[role=dialog]:has(.ga2xMa_section)>nav>div:last-child>button{gap:6px;width:100%;padding-left:8px;padding-right:8px}[role=dialog]:has(.ga2xMa_section)>nav>div:last-child>button>span{width:auto;min-width:0}[role=dialog]:has(.ga2xMa_section)>nav+div{width:100%;min-width:0;min-height:0}[role=dialog]:has(.ga2xMa_section)>nav+div>div:first-child{z-index:1;width:auto;height:auto;padding:0;position:absolute;top:12px;right:12px}[role=dialog]:has(.ga2xMa_section)>nav+div>div:last-child{box-sizing:border-box;width:100%;padding:0 16px 16px}.ga2xMa_cards{grid-template-columns:minmax(0,1fr)}}";
+		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-9c80724d56484e56a43c2b8dbb125407\packages\client\ui-settings-plugin-inventory\src\client\PluginInventorySettingsTab.module.css.mjs
+		const css = ".YaAaKG_section{width:100%;max-width:760px;color:var(--dsw-alias-label-primary);flex-direction:column;gap:14px;display:flex}.YaAaKG_catalogHeading h3,.YaAaKG_status,.YaAaKG_failure p{margin:0}.YaAaKG_status,.YaAaKG_failure{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:20px}.YaAaKG_writeError{color:var(--dsw-alias-state-error-primary);margin:0;font-size:13px;line-height:20px}.YaAaKG_failure{color:var(--dsw-alias-state-error-primary);align-items:center;gap:10px;display:flex}.YaAaKG_failure button{border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-label-primary);font:inherit;cursor:pointer;background:0 0;border-radius:6px;padding:4px 10px}.YaAaKG_catalog{flex-direction:column;gap:12px;display:flex}.YaAaKG_search{width:100%;color:var(--dsw-alias-label-tertiary);align-items:center;display:flex;position:relative}.YaAaKG_search>svg{pointer-events:none;position:absolute;left:12px}.YaAaKG_search input{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);width:100%;height:36px;color:var(--dsw-alias-label-primary);font:inherit;border-radius:8px;outline:none;padding:0 34px 0 36px;font-size:13px}.YaAaKG_search input::placeholder{color:var(--dsw-alias-label-tertiary)}.YaAaKG_search input:focus-visible{border-color:var(--dsw-alias-state-business-primary);box-shadow:0 0 0 2px color-mix(in srgb, var(--dsw-alias-state-business-primary) 18%, transparent)}.YaAaKG_catalogHeading{align-items:baseline;gap:7px;padding:0 2px;display:flex}.YaAaKG_catalogHeading h3{font-size:13px;font-weight:600;line-height:20px}.YaAaKG_catalogHeading span{color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums;font-size:12px;line-height:18px}.YaAaKG_cards{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start;gap:10px;margin:0;padding:0;list-style:none;display:grid}.YaAaKG_card{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-3);border-radius:8px;min-width:0;overflow:hidden}.YaAaKG_card[data-open=true]{border-color:var(--dsw-alias-border-l1);box-shadow:var(--dsw-shadow-lv1)}.YaAaKG_cardHeader{align-items:center;min-width:0;display:flex}.YaAaKG_cardContent{box-sizing:border-box;min-width:0;min-height:52px;color:inherit;font:inherit;text-align:left;cursor:pointer;background:0 0;border:0;flex:auto;justify-content:space-between;align-items:center;gap:10px;padding:12px 8px 12px 14px;display:flex}.YaAaKG_cardContent:hover,.YaAaKG_card[data-open=true] .YaAaKG_cardContent{background:var(--dsw-alias-interactive-bg-hover)}.YaAaKG_cardContent:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-2px}.YaAaKG_cardTitle{text-overflow:ellipsis;white-space:nowrap;min-width:0;font-size:14px;font-weight:600;line-height:20px;overflow:hidden}.YaAaKG_cardTrailing{color:var(--dsw-alias-label-tertiary);flex:none;align-items:center;gap:6px;display:inline-flex}.YaAaKG_statusDot{background:var(--dsw-alias-label-tertiary);border-radius:999px;flex:none;width:7px;height:7px;display:inline-block}.YaAaKG_statusDot[data-phase=active]{background:var(--dsw-alias-state-success-primary)}.YaAaKG_statusDot[data-phase=failed]{background:var(--dsw-alias-state-error-primary)}.YaAaKG_statusDot[data-phase=loading]{background:var(--dsw-alias-state-business-primary)}.YaAaKG_configTag{background:var(--dsw-alias-bg-layer-1);min-height:20px;color:var(--dsw-alias-label-secondary);white-space:nowrap;border-radius:5px;align-items:center;padding:1px 6px;font-size:11px;line-height:16px;display:inline-flex}.YaAaKG_configTag[data-enabled=true]{background:color-mix(in srgb, var(--dsw-alias-state-success-primary) 10%, transparent);color:var(--dsw-alias-state-success-primary)}.YaAaKG_configTag[data-pending=true]{background:color-mix(in srgb, var(--dsw-alias-state-warn-label) 12%, transparent);color:var(--dsw-alias-state-warn-label)}.YaAaKG_chevron{color:var(--dsw-alias-label-tertiary);flex:none}.YaAaKG_card[data-open=true] .YaAaKG_chevron{transform:rotate(180deg)}.YaAaKG_capabilitySwitch{background:var(--dsw-alias-fill-l2);cursor:pointer;border:0;border-radius:999px;flex:0 0 34px;width:34px;height:20px;margin:0 12px 0 2px;padding:0;position:relative}.YaAaKG_capabilitySwitch>span{background:var(--dsw-alias-bg-layer-3);width:14px;height:14px;box-shadow:var(--dsw-shadow-lv1);border-radius:50%;position:absolute;top:3px;left:3px}.YaAaKG_capabilitySwitch[data-checked=true]{background:var(--dsw-alias-state-business-primary)}.YaAaKG_capabilitySwitch[data-checked=true]>span{transform:translate(14px)}.YaAaKG_capabilitySwitch:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px}.YaAaKG_capabilitySwitch:disabled{cursor:not-allowed;opacity:.48}.YaAaKG_cardDetails{border-top:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-module-platform);padding:10px 14px 12px}.YaAaKG_entryValue{overflow-wrap:anywhere;color:var(--dsw-alias-label-primary);font-family:var(--ds-font-family-code);font-size:12px;line-height:18px;display:block}.YaAaKG_details{grid-template-columns:76px minmax(0,1fr);gap:6px 10px;margin:8px 0 0;display:grid}.YaAaKG_details div{display:contents}.YaAaKG_details dt{color:var(--dsw-alias-label-tertiary);font-size:11px;line-height:17px}.YaAaKG_details dd{overflow-wrap:anywhere;min-width:0;color:var(--dsw-alias-label-secondary);margin:0;font-size:12px;line-height:17px}.YaAaKG_visuallyHidden{clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;width:1px;height:1px;position:absolute;overflow:hidden}@media (prefers-reduced-motion:no-preference){.YaAaKG_chevron,.YaAaKG_capabilitySwitch,.YaAaKG_capabilitySwitch>span{transition:transform .14s var(--ds-ease-in-out), background-color .14s var(--ds-ease-in-out)}}@media (width<=680px){[role=dialog]:has(.YaAaKG_section){flex-direction:column}[role=dialog]:has(.YaAaKG_section)>nav{box-sizing:border-box;flex:none;gap:8px;width:100%;height:auto;padding:16px 48px 8px 12px}[role=dialog]:has(.YaAaKG_section)>nav>div:first-child{width:auto}[role=dialog]:has(.YaAaKG_section)>nav>div:last-child{grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 10px;width:100%;height:auto;display:grid}[role=dialog]:has(.YaAaKG_section)>nav>div:last-child>button{gap:6px;width:100%;padding-left:8px;padding-right:8px}[role=dialog]:has(.YaAaKG_section)>nav>div:last-child>button>span{width:auto;min-width:0}[role=dialog]:has(.YaAaKG_section)>nav+div{width:100%;min-width:0;min-height:0}[role=dialog]:has(.YaAaKG_section)>nav+div>div:first-child{z-index:1;width:auto;height:auto;padding:0;position:absolute;top:12px;right:12px}[role=dialog]:has(.YaAaKG_section)>nav+div>div:last-child{box-sizing:border-box;width:100%;padding:0 16px 16px}.YaAaKG_cards{grid-template-columns:minmax(0,1fr)}}";
 		const tagId = "@deepseek-ai/dsh-client-ui-settings-plugin-inventory/PluginInventorySettingsTab.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -18,26 +18,27 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var PluginInventorySettingsTab_module_css_default = {
-			"capabilitySwitch": "ga2xMa_capabilitySwitch",
-			"card": "ga2xMa_card",
-			"cardContent": "ga2xMa_cardContent",
-			"cardDetails": "ga2xMa_cardDetails",
-			"cardHeader": "ga2xMa_cardHeader",
-			"cardTitle": "ga2xMa_cardTitle",
-			"cardTrailing": "ga2xMa_cardTrailing",
-			"cards": "ga2xMa_cards",
-			"catalog": "ga2xMa_catalog",
-			"catalogHeading": "ga2xMa_catalogHeading",
-			"chevron": "ga2xMa_chevron",
-			"configTag": "ga2xMa_configTag",
-			"details": "ga2xMa_details",
-			"entryValue": "ga2xMa_entryValue",
-			"failure": "ga2xMa_failure",
-			"search": "ga2xMa_search",
-			"section": "ga2xMa_section",
-			"status": "ga2xMa_status",
-			"statusDot": "ga2xMa_statusDot",
-			"visuallyHidden": "ga2xMa_visuallyHidden"
+			"capabilitySwitch": "YaAaKG_capabilitySwitch",
+			"card": "YaAaKG_card",
+			"cardContent": "YaAaKG_cardContent",
+			"cardDetails": "YaAaKG_cardDetails",
+			"cardHeader": "YaAaKG_cardHeader",
+			"cardTitle": "YaAaKG_cardTitle",
+			"cardTrailing": "YaAaKG_cardTrailing",
+			"cards": "YaAaKG_cards",
+			"catalog": "YaAaKG_catalog",
+			"catalogHeading": "YaAaKG_catalogHeading",
+			"chevron": "YaAaKG_chevron",
+			"configTag": "YaAaKG_configTag",
+			"details": "YaAaKG_details",
+			"entryValue": "YaAaKG_entryValue",
+			"failure": "YaAaKG_failure",
+			"search": "YaAaKG_search",
+			"section": "YaAaKG_section",
+			"status": "YaAaKG_status",
+			"statusDot": "YaAaKG_statusDot",
+			"visuallyHidden": "YaAaKG_visuallyHidden",
+			"writeError": "YaAaKG_writeError"
 		};
 		//#endregion
 		//#region lib/types/client/PluginInventorySettingsTab.js
@@ -75,14 +76,15 @@ window.__ModuleLoader__.load({
 			if (normalizedQuery.length === 0) return true;
 			return [entry.moduleName, entry.entryId].some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
 		}
-		/** Render the current inventory with restart-scoped YunXi capability switches. */
-		function PluginInventorySettingsTab({ list, getCapabilities, subscribeCapabilities, setCapability, t }) {
+		/** Render the current inventory with composition-scoped YunXi capability switches. */
+		function PluginInventorySettingsTab({ list, getCapabilities, subscribeCapabilities, setCapability, setPlugin, t }) {
 			const catalogId = (0, react.useId)();
 			const [request, setRequest] = (0, react.useState)(0);
 			const [query, setQuery] = (0, react.useState)("");
 			const [expanded, setExpanded] = (0, react.useState)(null);
 			const [state, setState] = (0, react.useState)({ status: "loading" });
 			const [savingFields, setSavingFields] = (0, react.useState)(() => /* @__PURE__ */ new Set());
+			const [writeError, setWriteError] = (0, react.useState)(false);
 			const capabilities = (0, react.useSyncExternalStore)(subscribeCapabilities, getCapabilities, getCapabilities);
 			(0, react.useEffect)(() => {
 				let current = true;
@@ -108,11 +110,29 @@ window.__ModuleLoader__.load({
 				setRequest((value) => value + 1);
 			};
 			const chooseCapability = (field, enabled) => {
+				setWriteError(false);
 				setSavingFields((previous) => new Set([...previous, field]));
-				setCapability(field, enabled).finally(() => {
+				setCapability(field, enabled).catch(() => {
+					setWriteError(true);
+				}).finally(() => {
 					setSavingFields((previous) => {
 						const next = new Set(previous);
 						next.delete(field);
+						return next;
+					});
+				});
+			};
+			const choosePlugin = (pluginId, enabled) => {
+				setWriteError(false);
+				setSavingFields((previous) => new Set([...previous, pluginId]));
+				setPlugin(pluginId, enabled).then(() => {
+					setRequest((value) => value + 1);
+				}).catch(() => {
+					setWriteError(true);
+				}).finally(() => {
+					setSavingFields((previous) => {
+						const next = new Set(previous);
+						next.delete(pluginId);
 						return next;
 					});
 				});
@@ -139,6 +159,11 @@ window.__ModuleLoader__.load({
 					state.status === "ready" ? (0, react_jsx_runtime.jsxs)("div", {
 						className: PluginInventorySettingsTab_module_css_default.catalog,
 						children: [
+							writeError ? (0, react_jsx_runtime.jsx)("p", {
+								className: PluginInventorySettingsTab_module_css_default.writeError,
+								role: "alert",
+								children: t("writeError")
+							}) : null,
 							(0, react_jsx_runtime.jsxs)("label", {
 								className: PluginInventorySettingsTab_module_css_default.search,
 								children: [
@@ -179,15 +204,16 @@ window.__ModuleLoader__.load({
 									const status = phaseLabel(entry.fiberPhase, t);
 									const title = moduleShortName(entry.moduleName);
 									const field = CAPABILITY_BY_ENTRY[String(entry.entryId)];
+									const dynamicToggleable = field === void 0 && entry.moduleName.startsWith("yunxi.dynamic.");
 									const configured = field === void 0 ? entry.enabled : capabilities.value?.[field] ?? entry.enabled;
-									const restartPending = field !== void 0 && configured !== entry.enabled;
-									const configuration = field === void 0 ? t("coreTag") : restartPending ? t("restartPendingTag") : t(configured ? "enabledTag" : "disabledTag");
+									const restartPending = (field !== void 0 || dynamicToggleable) && configured !== entry.enabled;
+									const configuration = field === void 0 && !dynamicToggleable ? t("coreTag") : restartPending ? t("restartPendingTag") : t(configured ? "enabledTag" : "disabledTag");
 									const runtime = t(entry.enabled ? "enabledTag" : "disabledTag");
 									const open = expanded === entry.entryId;
 									const detailId = `${catalogId}-details-${encodeURIComponent(entry.entryId)}`;
-									const saving = field !== void 0 && savingFields.has(field);
-									const canWrite = field !== void 0 && capabilities.status === "ready" && capabilities.writable && !saving;
-									const toggleLabel = field === void 0 ? t("unavailable") : t(configured ? "disable" : "enable");
+									const saving = savingFields.has(field ?? String(entry.entryId));
+									const canWrite = capabilities.status === "ready" && capabilities.writable && (field !== void 0 || dynamicToggleable) && !saving;
+									const toggleLabel = field === void 0 && !dynamicToggleable ? t("unavailable") : t(configured ? "disable" : "enable");
 									return (0, react_jsx_runtime.jsxs)("li", {
 										className: PluginInventorySettingsTab_module_css_default.card,
 										"data-plugin-entry": entry.entryId,
@@ -231,7 +257,7 @@ window.__ModuleLoader__.load({
 														})
 													]
 												})]
-											}), field !== void 0 ? (0, react_jsx_runtime.jsx)("button", {
+											}), field !== void 0 || dynamicToggleable ? (0, react_jsx_runtime.jsx)("button", {
 												className: PluginInventorySettingsTab_module_css_default.capabilitySwitch,
 												type: "button",
 												role: "switch",
@@ -239,10 +265,12 @@ window.__ModuleLoader__.load({
 												"aria-label": `${toggleLabel} ${title}`,
 												title: `${toggleLabel} ${title}`,
 												"data-capability-field": field,
+												"data-plugin-id": field === void 0 ? entry.entryId : void 0,
 												"data-checked": configured ? "true" : "false",
 												disabled: !canWrite,
 												onClick: () => {
-													chooseCapability(field, !configured);
+													if (field !== void 0) chooseCapability(field, !configured);
+													else choosePlugin(String(entry.entryId), !configured);
 												},
 												children: (0, react_jsx_runtime.jsx)("span", { "aria-hidden": "true" })
 											}) : null]
@@ -256,7 +284,7 @@ window.__ModuleLoader__.load({
 											}), (0, react_jsx_runtime.jsxs)("dl", {
 												className: PluginInventorySettingsTab_module_css_default.details,
 												children: [
-													(0, react_jsx_runtime.jsxs)("div", { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("configuration") }), (0, react_jsx_runtime.jsx)("dd", { children: field === void 0 ? t("coreTag") : t(configured ? "enabledTag" : "disabledTag") })] }),
+													(0, react_jsx_runtime.jsxs)("div", { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("configuration") }), (0, react_jsx_runtime.jsx)("dd", { children: field === void 0 && !dynamicToggleable ? t("coreTag") : t(configured ? "enabledTag" : "disabledTag") })] }),
 													(0, react_jsx_runtime.jsxs)("div", { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("runtime") }), (0, react_jsx_runtime.jsx)("dd", { children: runtime })] }),
 													entry.enabled ? (0, react_jsx_runtime.jsxs)("div", { children: [(0, react_jsx_runtime.jsx)("dt", { children: t("cordis") }), (0, react_jsx_runtime.jsx)("dd", { children: status })] }) : null
 												]
@@ -278,6 +306,7 @@ window.__ModuleLoader__.load({
 			tab: "能力开关",
 			loading: "正在读取能力…",
 			error: "暂时无法读取能力。",
+			writeError: "设置未保存，请稍后重试。",
 			retry: "重试",
 			search: "搜索能力",
 			catalog: "能力列表",
@@ -305,6 +334,7 @@ window.__ModuleLoader__.load({
 			tab: "Capabilities",
 			loading: "Reading capabilities…",
 			error: "Capabilities are temporarily unavailable.",
+			writeError: "The setting was not saved. Try again later.",
 			retry: "Retry",
 			search: "Search capabilities",
 			catalog: "Capabilities",
@@ -338,7 +368,8 @@ window.__ModuleLoader__.load({
 			"locale",
 			"remote",
 			"remote.pluginInventory",
-			"settingsScope"
+			"settingsScope",
+			"connection"
 		];
 		const CAPABILITY_FIELDS = [
 			"context",
@@ -375,6 +406,7 @@ window.__ModuleLoader__.load({
 				decode: decodeCapabilities
 			});
 			const t = ctx.locale.bind(NS);
+			const connection = ctx.get("connection");
 			const list = async () => {
 				const result = await ctx.remote.pluginInventory.list();
 				if (!result.ok) throw new Error(`pluginInventory.list failed: ${result.error.code}: ${result.error.message}`);
@@ -383,11 +415,25 @@ window.__ModuleLoader__.load({
 			const getCapabilities = () => capabilityScope.getSnapshot();
 			const subscribeCapabilities = (listener) => capabilityScope.subscribe(listener);
 			const setCapability = (field, enabled) => capabilityScope.set(field, enabled);
+			const setPlugin = async (pluginId, enabled) => {
+				const revision = capabilityScope.getSnapshot().revision;
+				const response = await connection.api.settings.mutate({
+					ns: "yunxi-capabilities",
+					ops: [{
+						op: "set",
+						path: ["plugins", pluginId],
+						value: enabled
+					}],
+					...revision === void 0 ? {} : { expectedRevision: revision }
+				});
+				if (!response.result.ok) throw new Error(`plugin setting failed: ${response.result.error.code}: ${response.result.error.message}`);
+			};
 			const injected = () => ({
 				list,
 				getCapabilities,
 				subscribeCapabilities,
-				setCapability
+				setCapability,
+				setPlugin
 			});
 			ctx.slots.inject("settings.plugins.tab", () => ctx.slots.register({
 				name: "settings.plugins.tab",

@@ -134,7 +134,10 @@ order when enabled:
    policy.
 4. `companion.mailbox@1:enqueue` stores emitted plans with encrypted content.
 
-The model path currently uses complete responses rather than token streaming.
+The model capability and Agent spine expose a bounded streaming adapter at the
+library boundary, but the current CLI/Web request carrier still collects and
+returns a complete response. End-to-end token/tool event streaming and
+in-flight cancellation through that carrier remain later work.
 The REPL keeps at most 32 user/assistant turns in working memory. `/clear`
 clears only that working context; `/new` starts a new persistent session, and
 `/resume <id>` restores a saved conversation. Legacy sessions are read-only and

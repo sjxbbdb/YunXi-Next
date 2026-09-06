@@ -27,7 +27,7 @@ use yunxi_web_gateway::GatewaySessionSummary;
 
 use crate::management::{ManagementCommand, ManagementResult};
 
-use super::{ChatSession, call_lost_route};
+use super::{ChatSession, call_lost_route, dynamic_inventory_entry, dynamic_plugin_phase};
 
 impl ChatSession {
     pub(crate) fn create_web_session(&mut self) -> Result<yunxi_protocol::SessionSnapshot, String> {
@@ -263,6 +263,7 @@ impl ChatSession {
     }
 
     pub(super) fn plugin_inventory(&mut self) -> PluginInventorySnapshot {
+        self.refresh_dynamic_plugins();
         let snapshot = self.host.snapshot();
         let phases = snapshot
             .plugins()
@@ -280,7 +281,24 @@ impl ChatSession {
                 Some((entry_id, phase))
             })
             .collect::<BTreeMap<_, _>>();
-        PluginInventorySnapshot::with_phases(&self.composition, &phases)
+        let inventory = PluginInventorySnapshot::with_phases(&self.composition, &phases);
+        let Some(manager) = self.dynamic_plugins.as_ref() else {
+            return inventory;
+        };
+        let additions = manager
+            .packages()
+            .values()
+            .filter_map(|plugin| {
+                let id = plugin.manifest().id().clone();
+                let enabled = self
+                    .capability_settings
+                    .plugin_enabled(id.as_str(), plugin.manifest().default_enabled());
+                let phase = dynamic_plugin_phase(&id, enabled, &snapshot, manager.last_report());
+                dynamic_inventory_entry(plugin, self.capability_settings.plugin_overrides(), phase)
+                    .ok()
+            })
+            .collect::<Vec<_>>();
+        inventory.with_additional(additions)
     }
 
     pub(super) fn web_session_summaries(&mut self) -> Vec<GatewaySessionSummary> {

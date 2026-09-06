@@ -17,6 +17,7 @@ YunXi Next/
 |-- docs/                              repository-wide design documents
 |   |-- README.md                      documentation index
 |   |-- capability-migration.md        legacy capability ledger and acceptance gates
+|   |-- acceptance-audit.md            release, security, and legacy-isolation acceptance gate
 |   |-- chat-runtime.md                end-to-end chat process and failure flow
 |   |-- development-roadmap.md         ordered implementation phases and exit gates
 |   |-- dsh-web-compatibility.md       dsh source record and Web wire boundary
@@ -104,16 +105,19 @@ YunXi Next/
     |   |-- README.md                  loop, approval, bounds, and extension seams
     |   `-- src/                       synchronous Agent orchestration
     |       |-- agent.rs               turn loop and approval continuation
+    |       |-- background.rs          bounded background task state and cancellation boundary
     |       |-- cancellation.rs        cloneable cancellation token
     |       |-- context.rs             context assembler contract
     |       |-- error.rs               bounded Agent/component errors
     |       |-- lib.rs                 public spine facade
     |       |-- model.rs               model provider contract
     |       |-- session.rs              append-only bounded session events
-    |       |-- state.rs                Agent and turn state snapshots
+    |       |-- stream.rs              bounded Agent event stream and sinks
+    |       |-- state.rs               Agent and turn state snapshots
     |       `-- tool.rs                 tool broker and fail-closed approval policy
     |   `-- tests/                     loop and approval continuation tests
     |       |-- agent_loop.rs          model/tool/budget/cancellation tests
+    |       `-- streaming.rs           stream ordering, bounds, and cancellation tests
     |       `-- tool_approval.rs       approval matching and denial tests
     |-- yunxi-cli/                     user-facing multi-plugin terminal host
     |   |-- Cargo.toml                 CLI package and `yunxi-next` binary
@@ -121,6 +125,7 @@ YunXi Next/
     |   |-- src/                       terminal host implementation
     |   |   |-- README.md              source file index
     |   |   |-- args.rs                command-line parser
+    |   |   |-- control.rs             detached status, diagnostics, enable/disable, and reload commands
     |   |   |-- lib.rs                 CLI coordinator and public entry point
     |   |   |-- management.rs          session, memory, and mailbox command types
     |   |   |-- main.rs                executable and built-in child mode switch
@@ -205,6 +210,8 @@ YunXi Next/
     |       |-- config.rs               provider and credential resolution
     |       |-- lib.rs                  stable model-plugin facade
     |       |-- plugin.rs               request loop and API error containment
+    |       |-- streaming.rs            bounded SSE response adapter
+    |       |-- streaming-README.md     streaming adapter ownership and limits
     |       `-- bin/                    standalone plugin entry points
     |           |-- README.md           binary purpose
     |           `-- yunxi-model-openai.rs standalone plugin executable
@@ -238,14 +245,20 @@ YunXi Next/
     |-- yunxi-plugin-host/              multi-process capability host
     |   |-- Cargo.toml                  serde, kernel, and protocol dependencies
     |   |-- README.md                   crate scope and exclusions
-    |   |-- src/                        catalog and process runtime
+    |   |-- src/                        catalog, package discovery, and process runtime
     |   |   |-- README.md               source file index
     |   |   |-- catalog.rs              provider indexing and route resolution
+    |   |   |-- discovery.rs            bounded package manifest scanning and dependency ordering
     |   |   |-- lib.rs                  stable plugin-host facade
-    |   |   `-- runtime.rs              launch, invoke, failure removal, and shutdown
+    |   |   |-- manager.rs              package rescan, replacement, and unload coordination
+    |   |   |-- runtime.rs              launch, invoke, failure removal, and shutdown
+    |   |   `-- bin/                    plugin-host process fixtures
+    |   |       `-- yunxi-plugin-fixture.rs deterministic package lifecycle fixture
     |   `-- tests/                      process/protocol isolation tests
     |       |-- README.md               integration test purpose
-    |       `-- process_runtime.rs      crashed-route and healthy-sibling verification
+    |       |-- discovery.rs            invalid package and dependency graph verification
+    |       |-- manager_runtime.rs      replacement, disable, and unload verification
+    |       `-- process_runtime.rs       crashed-route and healthy-sibling verification
     |-- yunxi-scheduler/                proactive scheduling policy plugin
     |   |-- Cargo.toml                 protocol-only scheduler package
     |   |-- README.md                  scheduling boundary and exclusions
@@ -352,12 +365,15 @@ YunXi Next/
     |       |-- lib.rs                 public voice facade
     |       |-- message.rs             transcribe/synthesize request contracts
     |       |-- plugin.rs              protocol plugin fixture and dispatch
+    |       |-- provider.rs             replaceable device/provider traits and test doubles
+    |       |-- stream.rs               bounded audio queues, backpressure, and deadlines
     |       |-- state.rs               cancellation/backpressure state
     |       |-- transcript.rs          partial/final transcript events
     |       `-- bin/yunxi-voice-fixture.rs test-only child process
     |   `-- tests/                     contract and Host process tests
     |       |-- host_runtime.rs        expected capabilities and disable removal
-    |       `-- loopback.rs            bounded fixture protocol behavior
+    |       |-- loopback.rs             bounded fixture protocol behavior
+    |       `-- providers.rs            mock/loopback provider boundary tests
     |-- yunxi-weixin/                 Weixin channel contract and process fixture
     |   |-- Cargo.toml                 protocol and Host-test dependencies
     |   |-- README.md                  channel boundary and non-production status
@@ -368,6 +384,8 @@ YunXi Next/
     |       |-- lib.rs                 public Weixin facade
     |       |-- media.rs               bounded media metadata
     |       |-- message.rs              typed direction and delivery contracts
+    |       |-- adapter.rs              replaceable transport, secret, and signature boundaries
+    |       |-- control.rs              bounded channel lifecycle and idempotency control
     |       |-- plugin.rs              process-host fixture and state dispatch
     |       |-- state.rs               ACK/retry/cancel/backpressure state
     |       `-- bin/                   fixture entry points
@@ -399,6 +417,7 @@ YunXi Next/
     |       |-- sessions.rs             persistent-session payload contracts
     |       |-- skills.rs               bounded Skill metadata/context contracts
     |       |-- tool_calls.rs           versioned model tool orchestration contracts
+    |       |-- stream.rs               bounded streaming event contracts
     |       `-- transport.rs            bounded JSONL TCP transport
     |-- yunxi-web-gateway/              dsh-compatible Web dispatcher and HTTP/SSE carrier
     |   |-- Cargo.toml                  gateway metadata and inward dependencies

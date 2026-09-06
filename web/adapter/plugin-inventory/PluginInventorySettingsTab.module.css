@@ -20,6 +20,13 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+.writeError {
+  margin: 0;
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
 .failure {
   display: flex;
   align-items: center;

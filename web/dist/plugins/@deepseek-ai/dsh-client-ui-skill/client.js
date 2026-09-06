@@ -7,8 +7,8 @@ window.__ModuleLoader__.load({
 		let react_jsx_runtime = require("react/jsx-runtime");
 		let react = require("react");
 		let _deepseek_ai_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
-		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-ab5a0433e27742b99ef765dc97041378\packages\client\ui-skill\src\client\SkillRow.module.css.mjs
-		const css = ".LoFtMa_card{flex-direction:column;display:flex}.LoFtMa_row{align-items:center;min-width:0;height:24px;display:flex;position:relative;overflow:hidden}.LoFtMa_row[data-expandable]{cursor:pointer}.LoFtMa_card[data-state=running] .LoFtMa_row:after{content:\"\";background:linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--dsw-alias-bg-base) 60%, transparent) 55%, transparent 100%);pointer-events:none;width:300px;animation:2.6s ease-out infinite LoFtMa_dsh-skill-row-sweep;position:absolute;inset:0 auto 0 0}@keyframes LoFtMa_dsh-skill-row-sweep{0%{left:-300px}90%,to{left:100%}}.LoFtMa_leading{width:16px;height:16px;color:var(--dsw-alias-label-tertiary);flex:none;justify-content:center;align-items:center;margin-right:6px;display:inline-flex;position:relative}.LoFtMa_chevron{color:var(--dsw-alias-label-secondary)}.LoFtMa_iconIdle{opacity:1;transition:opacity .1s;display:inline-flex}.LoFtMa_chevronHover{opacity:0;margin:auto;transition:opacity .1s;position:absolute;inset:0}.LoFtMa_row:hover .LoFtMa_iconIdle{opacity:0}.LoFtMa_row:hover .LoFtMa_chevronHover{opacity:1}.LoFtMa_title{color:var(--dsw-alias-label-secondary);flex:none;font-size:14px;line-height:24px}.LoFtMa_separator{background:var(--dsw-alias-label-caption);border-radius:1px;flex:none;width:2px;height:2px;margin:0 8px}.LoFtMa_summary{text-overflow:ellipsis;white-space:nowrap;min-width:0;color:var(--dsw-alias-label-tertiary);flex:auto;font-size:14px;line-height:24px;overflow:hidden}.LoFtMa_errorSummary{color:var(--dsw-alias-state-error-primary)}.LoFtMa_bodyWrap{flex-direction:column;display:flex}.LoFtMa_instructionsCard{border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-markdown-code-block);border-radius:12px;flex-direction:column;max-height:260px;margin:4px 0 4px 4px;display:flex;overflow:hidden}.LoFtMa_instructionsHeader{border-bottom:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-markdown-code-block-banner);color:var(--dsw-alias-label-caption);text-transform:uppercase;letter-spacing:.04em;flex:none;padding:8px 12px;font-size:11px;font-weight:500;line-height:16px}.LoFtMa_instructions{white-space:pre-wrap;overflow-wrap:anywhere;min-height:0;font:var(--dsw-font-markdown-code-block-small);color:var(--dsw-alias-label-secondary);margin:0;padding:10px 12px 12px;overflow:auto}.LoFtMa_instructions[data-error]{color:var(--dsw-alias-state-error-primary)}.LoFtMa_instructions::-webkit-scrollbar-thumb{background-clip:padding-box;border:2px solid #0000;border-radius:6px}.LoFtMa_instructions::-webkit-scrollbar-track{margin:6px 0}.LoFtMa_inspectButton{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-secondary);cursor:pointer;opacity:0;border-radius:999px;align-self:flex-start;align-items:center;gap:4px;margin:4px 0 2px 4px;padding:2px 8px;font-size:11px;line-height:16px;transition:opacity .1s;display:inline-flex}.LoFtMa_card:hover .LoFtMa_inspectButton,.LoFtMa_inspectButton:focus-visible{opacity:1}.LoFtMa_inspectButton:hover{background:var(--dsw-alias-interactive-bg-hover-solid);color:var(--dsw-alias-label-primary)}.LoFtMa_visuallyHidden{clip:rect(0 0 0 0);white-space:nowrap;width:1px;height:1px;position:absolute;overflow:hidden}@media (prefers-reduced-motion:reduce){.LoFtMa_card[data-state=running] .LoFtMa_row:after{animation:none;display:none}.LoFtMa_iconIdle,.LoFtMa_chevronHover,.LoFtMa_inspectButton{transition:none}}";
+		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-9c80724d56484e56a43c2b8dbb125407\packages\client\ui-skill\src\client\SkillRow.module.css.mjs
+		const css = ".uiL3VG_card{flex-direction:column;display:flex}.uiL3VG_row{align-items:center;min-width:0;height:24px;display:flex;position:relative;overflow:hidden}.uiL3VG_row[data-expandable]{cursor:pointer}.uiL3VG_card[data-state=running] .uiL3VG_row:after{content:\"\";background:linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--dsw-alias-bg-base) 60%, transparent) 55%, transparent 100%);pointer-events:none;width:300px;animation:2.6s ease-out infinite uiL3VG_dsh-skill-row-sweep;position:absolute;inset:0 auto 0 0}@keyframes uiL3VG_dsh-skill-row-sweep{0%{left:-300px}90%,to{left:100%}}.uiL3VG_leading{width:16px;height:16px;color:var(--dsw-alias-label-tertiary);flex:none;justify-content:center;align-items:center;margin-right:6px;display:inline-flex;position:relative}.uiL3VG_chevron{color:var(--dsw-alias-label-secondary)}.uiL3VG_iconIdle{opacity:1;transition:opacity .1s;display:inline-flex}.uiL3VG_chevronHover{opacity:0;margin:auto;transition:opacity .1s;position:absolute;inset:0}.uiL3VG_row:hover .uiL3VG_iconIdle{opacity:0}.uiL3VG_row:hover .uiL3VG_chevronHover{opacity:1}.uiL3VG_title{color:var(--dsw-alias-label-secondary);flex:none;font-size:14px;line-height:24px}.uiL3VG_separator{background:var(--dsw-alias-label-caption);border-radius:1px;flex:none;width:2px;height:2px;margin:0 8px}.uiL3VG_summary{text-overflow:ellipsis;white-space:nowrap;min-width:0;color:var(--dsw-alias-label-tertiary);flex:auto;font-size:14px;line-height:24px;overflow:hidden}.uiL3VG_errorSummary{color:var(--dsw-alias-state-error-primary)}.uiL3VG_bodyWrap{flex-direction:column;display:flex}.uiL3VG_instructionsCard{border:1px solid var(--dsw-alias-border-l1);background:var(--dsw-alias-markdown-code-block);border-radius:12px;flex-direction:column;max-height:260px;margin:4px 0 4px 4px;display:flex;overflow:hidden}.uiL3VG_instructionsHeader{border-bottom:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-markdown-code-block-banner);color:var(--dsw-alias-label-caption);text-transform:uppercase;letter-spacing:.04em;flex:none;padding:8px 12px;font-size:11px;font-weight:500;line-height:16px}.uiL3VG_instructions{white-space:pre-wrap;overflow-wrap:anywhere;min-height:0;font:var(--dsw-font-markdown-code-block-small);color:var(--dsw-alias-label-secondary);margin:0;padding:10px 12px 12px;overflow:auto}.uiL3VG_instructions[data-error]{color:var(--dsw-alias-state-error-primary)}.uiL3VG_instructions::-webkit-scrollbar-thumb{background-clip:padding-box;border:2px solid #0000;border-radius:6px}.uiL3VG_instructions::-webkit-scrollbar-track{margin:6px 0}.uiL3VG_inspectButton{border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-secondary);cursor:pointer;opacity:0;border-radius:999px;align-self:flex-start;align-items:center;gap:4px;margin:4px 0 2px 4px;padding:2px 8px;font-size:11px;line-height:16px;transition:opacity .1s;display:inline-flex}.uiL3VG_card:hover .uiL3VG_inspectButton,.uiL3VG_inspectButton:focus-visible{opacity:1}.uiL3VG_inspectButton:hover{background:var(--dsw-alias-interactive-bg-hover-solid);color:var(--dsw-alias-label-primary)}.uiL3VG_visuallyHidden{clip:rect(0 0 0 0);white-space:nowrap;width:1px;height:1px;position:absolute;overflow:hidden}@media (prefers-reduced-motion:reduce){.uiL3VG_card[data-state=running] .uiL3VG_row:after{animation:none;display:none}.uiL3VG_iconIdle,.uiL3VG_chevronHover,.uiL3VG_inspectButton{transition:none}}";
 		const tagId = "@deepseek-ai/dsh-client-ui-skill/SkillRow.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -18,23 +18,23 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var SkillRow_module_css_default = {
-			"bodyWrap": "LoFtMa_bodyWrap",
-			"card": "LoFtMa_card",
-			"chevron": "LoFtMa_chevron",
-			"chevronHover": "LoFtMa_chevronHover",
-			"dsh-skill-row-sweep": "LoFtMa_dsh-skill-row-sweep",
-			"errorSummary": "LoFtMa_errorSummary",
-			"iconIdle": "LoFtMa_iconIdle",
-			"inspectButton": "LoFtMa_inspectButton",
-			"instructions": "LoFtMa_instructions",
-			"instructionsCard": "LoFtMa_instructionsCard",
-			"instructionsHeader": "LoFtMa_instructionsHeader",
-			"leading": "LoFtMa_leading",
-			"row": "LoFtMa_row",
-			"separator": "LoFtMa_separator",
-			"summary": "LoFtMa_summary",
-			"title": "LoFtMa_title",
-			"visuallyHidden": "LoFtMa_visuallyHidden"
+			"bodyWrap": "uiL3VG_bodyWrap",
+			"card": "uiL3VG_card",
+			"chevron": "uiL3VG_chevron",
+			"chevronHover": "uiL3VG_chevronHover",
+			"dsh-skill-row-sweep": "uiL3VG_dsh-skill-row-sweep",
+			"errorSummary": "uiL3VG_errorSummary",
+			"iconIdle": "uiL3VG_iconIdle",
+			"inspectButton": "uiL3VG_inspectButton",
+			"instructions": "uiL3VG_instructions",
+			"instructionsCard": "uiL3VG_instructionsCard",
+			"instructionsHeader": "uiL3VG_instructionsHeader",
+			"leading": "uiL3VG_leading",
+			"row": "uiL3VG_row",
+			"separator": "uiL3VG_separator",
+			"summary": "uiL3VG_summary",
+			"title": "uiL3VG_title",
+			"visuallyHidden": "uiL3VG_visuallyHidden"
 		};
 		//#endregion
 		//#region lib/types/client/SkillRow.js

@@ -28,7 +28,61 @@ domain independently. This crate does not claim to provide an OS sandbox.
 The crate does not execute capability code, decide approvals, parse provider
 responses, or render user interfaces.
 
+## Package discovery
+
+`PluginDirectory` is the explicit, opt-in package boundary. It scans only
+immediate child directories and reads `plugin.json`; it never searches PATH,
+loads a dylib, or executes a package during discovery. A package is accepted
+only after all of these checks pass:
+
+- the manifest is valid JSON, uses schema `1`, and is at most 64 KiB;
+- the plugin id, semantic version, capabilities, grants, dependency list, and
+  executable declaration are valid and bounded;
+- the executable is a regular, non-symlink file below the package directory;
+- the executable protocol version matches the host protocol version; and
+- an unsafe (`external` or `high`) plugin is not enabled by default.
+
+The accepted manifest shape is:
+
+```json
+{
+  "schema_version": 1,
+  "plugin_id": "yunxi.example",
+  "display_name": "Example",
+  "plugin_version": "1.0.0",
+  "executable": {
+    "path": "bin/example.exe",
+    "version": "1.0.0",
+    "protocol_version": 2,
+    "args": []
+  },
+  "capabilities": [{ "id": "example.run", "version": 1 }],
+  "dependencies": [{ "id": "yunxi.base", "version": "1.0.0" }],
+  "grants": [],
+  "runtime": { "host_group": "default", "risk": "safe" },
+  "default_enabled": true
+}
+```
+
+`PluginDirectory::discover()` returns a `DiscoveryReport`. Filesystem/root
+errors are returned as `Result` errors; an invalid package is instead a
+bounded `DiscoveryFailure`, so a bad package cannot hide or start a healthy
+sibling. `DiscoveryReport::load_order()` performs deterministic topological
+ordering and reports missing, mismatched, or cyclic exact dependencies.
+
+`PluginDiscoveryManager` layers a stable directory rescan and per-package
+reconciliation over the process host. It applies dependency order and user
+enablement, and reconciles package changes at a bounded refresh boundary. A
+replacement stops and unregisters the old Host slot before the new package is
+launched; if cleanup fails, the old metadata is retained and the replacement
+is blocked until a later refresh can retry. Its `unload_all` operation is used
+when a configured directory disappears or is replaced, so dropping the manager
+cannot silently leak registrations. A missing root is reported as a bounded
+discovery failure with an empty package set; malformed siblings do not abort
+healthy packages. This remains package-based Rust executable loading, not an
+unsafe in-place `cdylib`/WASM loader or an OS resource sandbox.
+
 | Path | Responsibility |
 | --- | --- |
-| [`src/`](src/README.md) | Capability catalog, recovery slot, process host, and public facade |
-| `Cargo.toml` | Serde, kernel, and protocol boundary dependencies |
+| [`src/`](src/README.md) | Capability catalog, package discovery/manager, recovery slot, process host, and public facade |
+| `Cargo.toml` | Serde/JSON, kernel, and protocol boundary dependencies |

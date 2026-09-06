@@ -91,8 +91,11 @@ context by a proxy service. Its implementation runs in a Rust Host process.
 
 - Host processes are grouped by trust and failure domain; the current CLI
   starts enabled built-ins during Host composition.
-- Lazy start, host reuse, and finer-grained failure-domain grouping remain
-  planned runtime work.
+- The explicit package directory is discovered and reconciled by
+  `PluginDiscoveryManager`; dependency ordering, enablement, replacement, and
+  manager-owned unload are bounded and deterministic at refresh boundaries.
+- Lazy start, host reuse, arbitrary package formats, and finer-grained
+  failure-domain grouping remain planned runtime work.
 - High-risk or unstable capabilities receive a dedicated Host.
 - IPC uses a bounded, versioned request/response/event protocol.
 - A replacement Host generation is started and handshaken before new traffic is
@@ -101,7 +104,8 @@ context by a proxy service. Its implementation runs in a Rust Host process.
 
 The first implementation uses standalone Rust executables and does not load
 arbitrary Rust dynamic libraries. WASM or another in-process format can be
-added only after the protocol and security boundary are stable.
+added only after the protocol and security boundary are stable. Package
+discovery and lifecycle reconciliation do not change that boundary.
 
 ## Plugin Switches
 
@@ -181,8 +185,9 @@ full YunXi feature parity. Tests demonstrate:
 - the legacy repository remains unchanged and runnable.
 
 Remaining planned work includes direct service discovery from the Cordis
-runtime, dynamic/external plugin packaging, live hot-unmount semantics, and
-production Voice/Weixin adapters. The current Voice and Weixin crates provide
-process fixtures and typed contracts plus launch/inventory wiring. The present
-Web switch path rebuilds the Host before applying a change rather than
-hot-unloading a running CLI Host.
+runtime, arbitrary dynamic-library/WASM package formats, true live hot-unmount
+semantics, and production Voice/Weixin adapters. Package-based external
+discovery and lifecycle reconciliation are already part of the Plugin Host
+baseline. The current Voice and Weixin crates provide process fixtures and typed
+contracts plus launch/inventory wiring. The present Web switch path rebuilds the
+Host before applying a change rather than hot-unloading a running CLI Host.

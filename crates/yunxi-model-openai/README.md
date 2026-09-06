@@ -8,8 +8,11 @@ The host never calls its HTTP client directly. The library entry point exists
 so a distribution can package the plugin inside a child-process mode while
 preserving process isolation.
 
-The plugin currently returns complete responses rather than streaming tokens.
-An API error is reported as a failed request and does not end the plugin loop.
+The client supports bounded OpenAI-compatible SSE streaming for text and tool
+call deltas. The current legacy plugin invocation remains completion-shaped so
+older Hosts stay compatible; the stream API is the bridge used by the newer
+Agent event path. An API or observer error is reported as a failed request and
+does not end the plugin loop.
 Configuration is documented in
 [`../../docs/provider-configuration.md`](../../docs/provider-configuration.md).
 

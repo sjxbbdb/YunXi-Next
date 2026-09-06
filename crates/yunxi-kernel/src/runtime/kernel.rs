@@ -152,6 +152,36 @@ impl YunxiKernel {
         }
     }
 
+    /// Remove a quiescent plugin from the authoritative registry.
+    ///
+    /// A plugin must be stopped (or have already failed) before it can be
+    /// removed.  This keeps a late supervisor event from being applied to a
+    /// replacement registration and gives callers a deterministic lifecycle
+    /// boundary for hot reload.
+    pub fn unregister(&mut self, id: &PluginId) -> Result<(), KernelError> {
+        self.ensure_running()?;
+        self.refresh();
+        let Some(slot) = self.plugins.get_mut(id) else {
+            return Err(KernelError::UnknownPlugin { id: id.clone() });
+        };
+        if slot.state.is_active() {
+            return Err(KernelError::PluginBusy {
+                id: id.clone(),
+                state: slot.state.clone(),
+            });
+        }
+
+        // Failed and stopped supervisors may still have a join handle after
+        // their terminal event was observed.  Join before removing the slot
+        // so no worker outlives the registry entry.
+        if let Some(worker) = slot.worker.take() {
+            let _ignored = worker.join();
+        }
+        slot.commands = None;
+        self.plugins.remove(id);
+        Ok(())
+    }
+
     pub fn fail(&mut self, id: &PluginId, failure: PluginFailure) -> Result<(), KernelError> {
         self.ensure_running()?;
         self.refresh();
@@ -337,5 +367,19 @@ mod tests {
             kernel.plugin(&id).expect("plugin snapshot").state(),
             &PluginState::Stopped
         );
+    }
+
+    #[test]
+    fn unregister_removes_a_stopped_plugin_without_spawning_it() {
+        let mut kernel = YunxiKernel::new();
+        let id = PluginId::new("yunxi.test").expect("valid plugin id");
+        kernel.register(spec(id.as_str())).expect("register plugin");
+        kernel.stop(&id).expect("stop plugin");
+        kernel.unregister(&id).expect("unregister plugin");
+        assert!(kernel.plugin(&id).is_none());
+        assert!(matches!(
+            kernel.unregister(&id),
+            Err(KernelError::UnknownPlugin { .. })
+        ));
     }
 }

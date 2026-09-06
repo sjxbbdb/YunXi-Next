@@ -1,7 +1,7 @@
 # YunXi Next 开发路线图
 
 > 版本：v1.2
-> 基线提交：`0a73001`
+> 基线提交：`b850e8d`
 > 制定日期：2026-08-22；更新日期：2026-09-06
 > 状态：Cordis core/runtime、Agent spine、CLI/Web 默认执行链和 Voice/Weixin
 > fixture 接线已完成基线；异步多智能体、真实语音/微信适配和完整 parity 仍在开发
@@ -26,10 +26,10 @@ YunXi Next 最终应成为一个以 Rust trusted kernel 为中心、所有业务
 
 | 领域 | 当前状态 | 说明 |
 | --- | --- | --- |
-| Cordis core / runtime | 基础版已接入 | `Context`、`Service`、`inject`、`Event`、`Effect`、Fiber 生命周期，以及静态插件注册、开关和失败隔离；尚未替换全部 CLI 编排或支持动态加载。 |
+| Cordis core / runtime | 基础版已接入 | `Context`、`Service`、`inject`、`Event`、`Effect`、Fiber 生命周期，以及静态插件注册、开关和失败隔离；动态包生命周期由 Plugin Host 承担，任意 `cdylib`/WASM 仍未开放。 |
 | Agent spine | 默认执行链已接入 | 独立 Rust loop、bounded session/context/model/tool seams、cancellation、budget 和 fail-closed approval continuation 已接入 CLI/Web；`ChatSession` 保留应用生命周期、持久化和 Web projection，不再承担第二套模型工具循环。 |
 | Kernel / Plugin Host | 已接入 | 进程监督、握手、能力路由、崩溃隔离、兄弟插件存活，以及每次启用最多 3 次的 refresh 驱动自动恢复。 |
-| Model Chat | 基础版已接入 | OpenAI/DeepSeek 兼容 Chat Completions；当前是完整响应，不是 token streaming。 |
+| Model Chat | 基础版已接入 | OpenAI/DeepSeek 兼容 Chat Completions；库层已有有界 SSE 流式适配，CLI/Web 当前仍走完整响应载体。 |
 | Context / Persona | 基础版已接入 | `AGENTS.md`、Persona profile 和 `soul.txt` 的受限读取与组合。 |
 | Memory | 基础版已接入 | 召回、规则提取、隐私过滤、去重、待审核写入；默认关闭。 |
 | Storage | 基础版已接入 | 会话 append/list/load/resume 和旧记录只读投影。 |
@@ -40,7 +40,7 @@ YunXi Next 最终应成为一个以 Rust trusted kernel 为中心、所有业务
 | MCP stdio/HTTP bridge | 基础版已接入 | 独立二层进程、MCP initialize/list/call/cancel、JSON/SSE、session id、动态工具投影、Host approval 和崩溃恢复；默认关闭。HTTP 需要显式 network scope，Secret 只通过 reference grant 发放。 |
 | Skills | 基础版已接入 | 独立只读进程、受限发现/上下文、禁用过滤和 metadata-only 动态工具声明；默认关闭。 |
 | Multi-agent | 基础版已接入 | 独立协调进程、父子图、预算、持久化、恢复和独立子模型进程；默认关闭。当前子回合同步执行，不宣称后台并行或执行中即时中断。 |
-| Composition | 基础版已接入 | Profile、Bundle、Layer 和插件 inventory 已有；settings crate 的 15 个内置可选键全部进入 CLI/Web 启动组合，顺序和任意第三方 bundle 配置仍未开放。 |
+| Composition | 基础版已接入 | Profile、Bundle、Layer 和插件 inventory 已有；settings crate 的 15 个内置可选键全部进入 CLI/Web 启动组合，动态插件目录支持受约束的包发现/重载；任意第三方 bundle 配置仍未开放。 |
 | Voice / Weixin contracts | fixture 接线已接入 | `yunxi-voice` 和 `yunxi-weixin` 已有版本化 Rust 契约、loopback process fixture、Host 边界测试，并在开关开启时进入 CLI/Web inventory；仍不提供真实设备、登录或网络能力。 |
 | Web | Phase 3 本地基线已接入 | 固定 dsh Web 客户端、session create/history/prompt、审批响应、mux/host 事件、健康/inventory/session projection 和 Settings > Plugins 能力开关共用同一个 CLI Host；当前仍是 loopback、单 Host、完整响应模式，Voice/Weixin 为默认关闭的 fixture route。 |
 
@@ -52,6 +52,18 @@ Voice、Weixin 关闭。Web 当前写入
 的显式值优先于旧 capability 环境/文件设置，后者作为兼容性回退入口。
 Voice/Weixin 开关现在会建立对应的隔离 fixture launch/route；打开它们不会
 授予真实设备、登录或网络后端权限，生产适配器仍按 Phase 5 交付。
+
+### 当前完成边界
+
+本基线已经完成：Rust Cordis 核心原语、默认 Agent spine、进程级插件隔离、
+内置能力的启停与故障恢复、受约束的动态 Rust 可执行包发现/依赖排序/重载/卸载、
+CLI 控制命令、Web 插件开关和 Voice/Weixin 的可替换 fixture 契约。上述能力均有
+针对协议边界、坏帧、崩溃、超时、禁用和兄弟存活的测试。
+
+仍未完成的产品级能力是：真实 Secret broker、操作系统级资源/网络沙箱、真实
+麦克风/扬声器和语音 SDK、真实 Weixin 登录/网络通道、CLI/Web 的端到端 token
+streaming、后台并行多 Agent、执行中即时取消、可执行 Skill，以及认证和多客户端
+Web 服务。它们不能由 fixture、库层接口或静态 inventory 视为已上线。
 
 ## 3. 开发排序
 
@@ -264,7 +276,8 @@ Phase 0 和 Phase 1 已按下列顺序完成。后续仍保持一次只推进一
 5. `P3-04` 已完成：`yunxi-next web` 嵌入固定 dsh Web bundle，覆盖启动、聊天、
    会话恢复、插件状态、Host 事件和审批。
 6. `P3-05` 已完成：新增 `yunxi-settings`，接入 `settings.describe/update/replace/mutate`
-   和 dsh Plugins 能力开关；写入只决定下一次 Host 组合，不热卸载运行中插件。
+   和 dsh Plugins 能力开关；内置开关通过 Host 重建应用，动态插件目录在刷新边界
+   重扫并支持受控替换/卸载，不宣称单插件原地热卸载。
 7. `P4-01` 已完成：冻结多智能体协议、grant 子集、预算、父子图、持久化和重启恢复。
 8. `P4-02` 基线已完成：接入 Host 审批、独立子 Model 进程及
    `agent.spawn/list/message/interrupt` 模型工具。
@@ -276,7 +289,8 @@ Phase 0 和 Phase 1 已按下列顺序完成。后续仍保持一次只推进一
 11. `P5-02` fixture 接线已完成：Weixin channel 契约、process fixture、CLI/Web
      composition 和开关路由已有；待登录/网络适配、Secret broker 和失败回退。
 12. `P6-01` 已完成首版：Agent spine 已成为 CLI/Web 默认模型工具编排路径；
-     后续继续收敛 Cordis service discovery、应用钩子和动态插件装载。
+      Cordis service discovery 和应用钩子仍继续收敛，包式动态插件装载已进入
+      Plugin Host 基线。
 
 ### 执行记录：2026-08-23
 
@@ -333,7 +347,8 @@ transport 超时会尽力发送远端 cancellation notification，但这不等�
 Phase 3 的本地单 Host 基线已完成：固定 dsh 浏览器产品、CLI WebHost、session
 prompt/history/approval RPC、独立 HTTP/SSE carrier、插件 inventory 和持久化能力
 开关均通过同一 Host 路径。设置只包含可选能力布尔值，不能写入 Provider Secret、
-可执行路径或任意插件配置；运行中不热卸载，重启后 disabled 插件不启动且没有路由。
+可执行路径或任意插件配置；内置开关更新通过 Host 重建应用，动态包目录在刷新边界
+重扫并支持生成代际安全的替换和卸载，不宣称运行中单插件原地热卸载。
 
 Phase 4 已形成第一版隔离基线：协调状态和子模型都位于受监督的独立进程，
 Agent grant 不能超过父级，单个子模型 API 失败只结束对应分支。当前仍按同步回合

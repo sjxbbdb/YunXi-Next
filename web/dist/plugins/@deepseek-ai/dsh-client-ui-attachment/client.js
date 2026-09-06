@@ -23,8 +23,8 @@ window.__ModuleLoader__.load({
 			return n;
 		}
 		//#endregion
-		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-ab5a0433e27742b99ef765dc97041378\packages\client\ui-attachment\src\AttachmentRail.module.css.mjs
-		const css$4 = ".suojJW_root{min-width:0;position:relative}.suojJW_rail{scrollbar-width:none;--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);gap:10px;display:flex;overflow:auto hidden}.suojJW_rail::-webkit-scrollbar{display:none}.suojJW_item{flex:0 0 64px;width:64px;height:64px;position:relative}.suojJW_thumbnail{border:1px solid var(--dsw-alias-border-l2-darkmode-thin);background:var(--dsw-alias-interactive-bg-hover);cursor:zoom-in;border-radius:16px;width:64px;height:64px;padding:0;overflow:hidden}.suojJW_thumbnail img{object-fit:cover;width:100%;height:100%;display:block}.suojJW_remove{z-index:1;background:var(--dsw-alias-button-contrast-fill);width:18px;height:18px;color:var(--dsw-alias-label-primary-inverted);cursor:pointer;opacity:0;border:none;border-radius:50%;place-items:center;padding:0;transition:opacity .2s ease-in-out;display:grid;position:absolute;top:4px;right:4px}.suojJW_item:hover .suojJW_remove,.suojJW_remove:focus-visible{opacity:1}@media (pointer:coarse){.suojJW_remove{opacity:1}}@media (prefers-reduced-motion:reduce){.suojJW_remove{transition:none}}.suojJW_arrow{z-index:2;border:1px solid var(--dsw-alias-border-l2-darkmode-thin);background:var(--dsw-specific-input-major);width:24px;height:24px;color:var(--dsw-alias-label-secondary);box-shadow:var(--dsw-shadow-lv2);cursor:pointer;border-radius:999px;place-items:center;padding:0;display:grid;position:absolute;top:50%;transform:translateY(-50%)}.suojJW_arrow:hover{background:var(--dsw-alias-interactive-bg-hover-solid)}.suojJW_arrowLeft{left:4px}.suojJW_arrowRight{right:4px}";
+		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-9c80724d56484e56a43c2b8dbb125407\packages\client\ui-attachment\src\AttachmentRail.module.css.mjs
+		const css$4 = ".Oper6q_root{min-width:0;position:relative}.Oper6q_rail{scrollbar-width:none;--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);gap:10px;display:flex;overflow:auto hidden}.Oper6q_rail::-webkit-scrollbar{display:none}.Oper6q_item{flex:0 0 64px;width:64px;height:64px;position:relative}.Oper6q_thumbnail{border:1px solid var(--dsw-alias-border-l2-darkmode-thin);background:var(--dsw-alias-interactive-bg-hover);cursor:zoom-in;border-radius:16px;width:64px;height:64px;padding:0;overflow:hidden}.Oper6q_thumbnail img{object-fit:cover;width:100%;height:100%;display:block}.Oper6q_remove{z-index:1;background:var(--dsw-alias-button-contrast-fill);width:18px;height:18px;color:var(--dsw-alias-label-primary-inverted);cursor:pointer;opacity:0;border:none;border-radius:50%;place-items:center;padding:0;transition:opacity .2s ease-in-out;display:grid;position:absolute;top:4px;right:4px}.Oper6q_item:hover .Oper6q_remove,.Oper6q_remove:focus-visible{opacity:1}@media (pointer:coarse){.Oper6q_remove{opacity:1}}@media (prefers-reduced-motion:reduce){.Oper6q_remove{transition:none}}.Oper6q_arrow{z-index:2;border:1px solid var(--dsw-alias-border-l2-darkmode-thin);background:var(--dsw-specific-input-major);width:24px;height:24px;color:var(--dsw-alias-label-secondary);box-shadow:var(--dsw-shadow-lv2);cursor:pointer;border-radius:999px;place-items:center;padding:0;display:grid;position:absolute;top:50%;transform:translateY(-50%)}.Oper6q_arrow:hover{background:var(--dsw-alias-interactive-bg-hover-solid)}.Oper6q_arrowLeft{left:4px}.Oper6q_arrowRight{right:4px}";
 		const tagId$4 = "@deepseek-ai/dsh-client-ui-attachment/AttachmentRail.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$4) + "]") === null) {
 			const tag = document.createElement("style");
@@ -34,14 +34,14 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var AttachmentRail_module_css_default = {
-			"arrow": "suojJW_arrow",
-			"arrowLeft": "suojJW_arrowLeft",
-			"arrowRight": "suojJW_arrowRight",
-			"item": "suojJW_item",
-			"rail": "suojJW_rail",
-			"remove": "suojJW_remove",
-			"root": "suojJW_root",
-			"thumbnail": "suojJW_thumbnail"
+			"arrow": "Oper6q_arrow",
+			"arrowLeft": "Oper6q_arrowLeft",
+			"arrowRight": "Oper6q_arrowRight",
+			"item": "Oper6q_item",
+			"rail": "Oper6q_rail",
+			"remove": "Oper6q_remove",
+			"root": "Oper6q_root",
+			"thumbnail": "Oper6q_thumbnail"
 		};
 		//#endregion
 		//#region lib/types/AttachmentRail.js
@@ -192,8 +192,8 @@ window.__ModuleLoader__.load({
 			});
 		}
 		//#endregion
-		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-ab5a0433e27742b99ef765dc97041378\packages\client\ui-attachment\src\DropOverlay.module.css.mjs
-		const css$3 = "._2LFDha_mask{z-index:1000;pointer-events:none;background-color:var(--dsw-alias-bg-mask-drop);backdrop-filter:blur(10px);justify-content:center;align-items:center;animation:.16s ease-out _2LFDha_fade-in;display:flex;position:fixed;inset:0}@keyframes _2LFDha_fade-in{0%{opacity:0}to{opacity:1}}@media (prefers-reduced-motion:reduce){._2LFDha_mask{animation:none}}._2LFDha_wrap{color:var(--dsw-alias-label-primary);text-align:center;flex-direction:column;align-items:center;margin-top:-3%;padding:0 40px;display:flex}._2LFDha_illustration{width:115px;height:84px}._2LFDha_title{font:var(--dsw-font-l-20);margin-top:16px}._2LFDha_desc{font:var(--dsw-font-s-14);color:var(--dsw-alias-label-tertiary);white-space:pre-wrap;margin-top:16px}";
+		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-9c80724d56484e56a43c2b8dbb125407\packages\client\ui-attachment\src\DropOverlay.module.css.mjs
+		const css$3 = ".Wy-vIa_mask{z-index:1000;pointer-events:none;background-color:var(--dsw-alias-bg-mask-drop);backdrop-filter:blur(10px);justify-content:center;align-items:center;animation:.16s ease-out Wy-vIa_fade-in;display:flex;position:fixed;inset:0}@keyframes Wy-vIa_fade-in{0%{opacity:0}to{opacity:1}}@media (prefers-reduced-motion:reduce){.Wy-vIa_mask{animation:none}}.Wy-vIa_wrap{color:var(--dsw-alias-label-primary);text-align:center;flex-direction:column;align-items:center;margin-top:-3%;padding:0 40px;display:flex}.Wy-vIa_illustration{width:115px;height:84px}.Wy-vIa_title{font:var(--dsw-font-l-20);margin-top:16px}.Wy-vIa_desc{font:var(--dsw-font-s-14);color:var(--dsw-alias-label-tertiary);white-space:pre-wrap;margin-top:16px}";
 		const tagId$3 = "@deepseek-ai/dsh-client-ui-attachment/DropOverlay.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$3) + "]") === null) {
 			const tag = document.createElement("style");
@@ -203,12 +203,12 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var DropOverlay_module_css_default = {
-			"desc": "_2LFDha_desc",
-			"fade-in": "_2LFDha_fade-in",
-			"illustration": "_2LFDha_illustration",
-			"mask": "_2LFDha_mask",
-			"title": "_2LFDha_title",
-			"wrap": "_2LFDha_wrap"
+			"desc": "Wy-vIa_desc",
+			"fade-in": "Wy-vIa_fade-in",
+			"illustration": "Wy-vIa_illustration",
+			"mask": "Wy-vIa_mask",
+			"title": "Wy-vIa_title",
+			"wrap": "Wy-vIa_wrap"
 		};
 		//#endregion
 		//#region lib/types/DropOverlay.js
@@ -378,8 +378,8 @@ window.__ModuleLoader__.load({
 			]
 		});
 		//#endregion
-		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-ab5a0433e27742b99ef765dc97041378\packages\client\ui-attachment\src\ImageLightbox.module.css.mjs
-		const css$2 = "._5a-dqG_backdrop{z-index:1000;place-items:center;padding:40px;display:grid;position:fixed;inset:0}._5a-dqG_mask{background:var(--dsw-alias-bg-mask-1);backdrop-filter:var(--dsw-mask-blur);position:absolute;inset:0}._5a-dqG_image{object-fit:contain;background:var(--dsw-specific-input-major);max-width:min(100%,1600px);max-height:calc(100vh - 80px);box-shadow:var(--dsw-shadow-lv3);border-radius:12px;position:relative}._5a-dqG_close{z-index:1;border:1px solid var(--dsw-alias-border-l2-darkmode-thin);background:var(--dsw-specific-input-major);width:36px;height:36px;color:var(--dsw-alias-label-primary);cursor:pointer;border-radius:999px;place-items:center;display:grid;position:fixed;top:20px;right:20px}";
+		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-9c80724d56484e56a43c2b8dbb125407\packages\client\ui-attachment\src\ImageLightbox.module.css.mjs
+		const css$2 = ".whtMaW_backdrop{z-index:1000;place-items:center;padding:40px;display:grid;position:fixed;inset:0}.whtMaW_mask{background:var(--dsw-alias-bg-mask-1);backdrop-filter:var(--dsw-mask-blur);position:absolute;inset:0}.whtMaW_image{object-fit:contain;background:var(--dsw-specific-input-major);max-width:min(100%,1600px);max-height:calc(100vh - 80px);box-shadow:var(--dsw-shadow-lv3);border-radius:12px;position:relative}.whtMaW_close{z-index:1;border:1px solid var(--dsw-alias-border-l2-darkmode-thin);background:var(--dsw-specific-input-major);width:36px;height:36px;color:var(--dsw-alias-label-primary);cursor:pointer;border-radius:999px;place-items:center;display:grid;position:fixed;top:20px;right:20px}";
 		const tagId$2 = "@deepseek-ai/dsh-client-ui-attachment/ImageLightbox.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$2) + "]") === null) {
 			const tag = document.createElement("style");
@@ -389,10 +389,10 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var ImageLightbox_module_css_default = {
-			"backdrop": "_5a-dqG_backdrop",
-			"close": "_5a-dqG_close",
-			"image": "_5a-dqG_image",
-			"mask": "_5a-dqG_mask"
+			"backdrop": "whtMaW_backdrop",
+			"close": "whtMaW_close",
+			"image": "whtMaW_image",
+			"mask": "whtMaW_mask"
 		};
 		//#endregion
 		//#region lib/types/ImageLightbox.js
@@ -507,8 +507,8 @@ window.__ModuleLoader__.load({
 			};
 		}
 		//#endregion
-		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-ab5a0433e27742b99ef765dc97041378\packages\client\ui-attachment\src\client\ComposerAttachments.module.css.mjs
-		const css$1 = ".LJ8bZW_rail{min-width:0;padding:4px 12px 0}";
+		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-9c80724d56484e56a43c2b8dbb125407\packages\client\ui-attachment\src\client\ComposerAttachments.module.css.mjs
+		const css$1 = ".uCYIza_rail{min-width:0;padding:4px 12px 0}";
 		const tagId$1 = "@deepseek-ai/dsh-client-ui-attachment/ComposerAttachments.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId$1) + "]") === null) {
 			const tag = document.createElement("style");
@@ -517,7 +517,7 @@ window.__ModuleLoader__.load({
 			tag.textContent = css$1;
 			document.head.appendChild(tag);
 		}
-		var ComposerAttachments_module_css_default = { "rail": "LJ8bZW_rail" };
+		var ComposerAttachments_module_css_default = { "rail": "uCYIza_rail" };
 		//#endregion
 		//#region lib/types/client/ComposerAttachments.js
 		/** Draft-image rail, document drop target, and original-image preview slot entry. */
@@ -614,8 +614,8 @@ window.__ModuleLoader__.load({
 			] });
 		}
 		//#endregion
-		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-ab5a0433e27742b99ef765dc97041378\packages\client\ui-attachment\src\MessageImage.module.css.mjs
-		const css = "._4dwkcq_gallery{flex-wrap:wrap;gap:10px;max-width:100%;display:flex}._4dwkcq_gallery[data-align=end]{justify-content:flex-end;align-self:flex-end}._4dwkcq_gallery[data-align=start]{justify-content:flex-start;align-self:flex-start}._4dwkcq_frame{border:1px solid var(--dsw-alias-border-l2-darkmode-thin);background:var(--dsw-alias-interactive-bg-hover);cursor:zoom-in;border-radius:16px;flex:none;place-items:center;min-width:44px;min-height:44px;padding:0;display:grid;overflow:hidden}._4dwkcq_frame[data-variant=tile]{width:64px;min-width:64px;height:64px;min-height:64px}._4dwkcq_frame img{object-fit:cover;width:100%;height:100%;display:block}._4dwkcq_loading,._4dwkcq_error{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}._4dwkcq_error{border:1px solid var(--dsw-alias-border-l2-darkmode-thin);background:var(--dsw-alias-interactive-bg-hover-danger);cursor:pointer;border-radius:10px;max-width:240px;padding:10px 12px}._4dwkcq_error[data-variant=tile]{border-radius:16px;width:64px;height:64px;padding:4px;overflow:hidden}";
+		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-9c80724d56484e56a43c2b8dbb125407\packages\client\ui-attachment\src\MessageImage.module.css.mjs
+		const css = ".KH8FfG_gallery{flex-wrap:wrap;gap:10px;max-width:100%;display:flex}.KH8FfG_gallery[data-align=end]{justify-content:flex-end;align-self:flex-end}.KH8FfG_gallery[data-align=start]{justify-content:flex-start;align-self:flex-start}.KH8FfG_frame{border:1px solid var(--dsw-alias-border-l2-darkmode-thin);background:var(--dsw-alias-interactive-bg-hover);cursor:zoom-in;border-radius:16px;flex:none;place-items:center;min-width:44px;min-height:44px;padding:0;display:grid;overflow:hidden}.KH8FfG_frame[data-variant=tile]{width:64px;min-width:64px;height:64px;min-height:64px}.KH8FfG_frame img{object-fit:cover;width:100%;height:100%;display:block}.KH8FfG_loading,.KH8FfG_error{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:18px}.KH8FfG_error{border:1px solid var(--dsw-alias-border-l2-darkmode-thin);background:var(--dsw-alias-interactive-bg-hover-danger);cursor:pointer;border-radius:10px;max-width:240px;padding:10px 12px}.KH8FfG_error[data-variant=tile]{border-radius:16px;width:64px;height:64px;padding:4px;overflow:hidden}";
 		const tagId = "@deepseek-ai/dsh-client-ui-attachment/MessageImage.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -625,10 +625,10 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var MessageImage_module_css_default = {
-			"error": "_4dwkcq_error",
-			"frame": "_4dwkcq_frame",
-			"gallery": "_4dwkcq_gallery",
-			"loading": "_4dwkcq_loading"
+			"error": "KH8FfG_error",
+			"frame": "KH8FfG_frame",
+			"gallery": "KH8FfG_gallery",
+			"loading": "KH8FfG_loading"
 		};
 		//#endregion
 		//#region lib/types/MessageImage.js

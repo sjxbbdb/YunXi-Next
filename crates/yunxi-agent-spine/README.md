@@ -104,14 +104,15 @@ without changing the loop.
 
 ## Cordis integration boundary
 
-This first crate has no dependency on a not-yet-created `yunxi-cordis-core`.
-When that runtime is introduced, an adapter only needs the smallest stable
-surface:
+This first crate intentionally depends only on the protocol. The Cordis bridge
+is supplied by the CLI/runtime layer rather than leaking Cordis internals into
+the replaceable Agent spine. An adapter needs only the smallest stable surface:
 
 - scoped service lookup and registration;
 - lifecycle-owned cleanup for registrations and subscriptions;
 - typed event publication/subscription;
 - loader activation and deactivation hooks.
 
-The Agent loop and protocol adapters should remain above that surface. No
-Cordis implementation is included or modified here.
+The Agent loop and protocol adapters remain above that surface. The concrete
+Cordis implementation lives in `yunxi-cordis-core` and
+`yunxi-cordis-runtime`; this crate does not duplicate it.

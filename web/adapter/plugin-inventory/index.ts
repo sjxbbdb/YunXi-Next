@@ -3,6 +3,7 @@
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { ConnectionHandle } from '@deepseek-ai/dsh-api-remotes/client'
 import {
   PluginInventorySettingsTab,
   type CapabilityField,
@@ -30,7 +31,7 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 export const NS = 'settings.pluginInventory'
 
 /** Services required by the Settings registration and generated Remote face. */
-export const inject = ['slots', 'locale', 'remote', 'remote.pluginInventory', 'settingsScope']
+export const inject = ['slots', 'locale', 'remote', 'remote.pluginInventory', 'settingsScope', 'connection']
 
 const CAPABILITY_FIELDS: readonly CapabilityField[] = [
   'context', 'persona', 'memory', 'companion', 'storage', 'mailbox',
@@ -55,6 +56,7 @@ export function apply(ctx: ClientContext): void {
     decode: decodeCapabilities,
   })
   const t = ctx.locale.bind(NS)
+  const connection = ctx.get('connection') as ConnectionHandle
   const list: PluginInventorySettingsTabInjected['list'] = async () => {
     const result = await ctx.remote.pluginInventory.list()
     if (!result.ok) {
@@ -65,11 +67,23 @@ export function apply(ctx: ClientContext): void {
   const getCapabilities: PluginInventorySettingsTabInjected['getCapabilities'] = () => capabilityScope.getSnapshot()
   const subscribeCapabilities: PluginInventorySettingsTabInjected['subscribeCapabilities'] = listener => capabilityScope.subscribe(listener)
   const setCapability: PluginInventorySettingsTabInjected['setCapability'] = (field, enabled) => capabilityScope.set(field, enabled)
+  const setPlugin: PluginInventorySettingsTabInjected['setPlugin'] = async (pluginId, enabled) => {
+    const revision = capabilityScope.getSnapshot().revision
+    const response = await connection.api.settings.mutate({
+      ns: 'yunxi-capabilities',
+      ops: [{ op: 'set', path: ['plugins', pluginId], value: enabled }],
+      ...(revision === undefined ? {} : { expectedRevision: revision }),
+    })
+    if (!response.result.ok) {
+      throw new Error(`plugin setting failed: ${response.result.error.code}: ${response.result.error.message}`)
+    }
+  }
   const injected = (): PluginInventorySettingsTabInjected => ({
     list,
     getCapabilities,
     subscribeCapabilities,
     setCapability,
+    setPlugin,
   })
 
   ctx.slots.inject('settings.plugins.tab', () => ctx.slots.register({

@@ -147,6 +147,10 @@ impl AgentError {
         matches!(self, Self::Cancelled(_))
     }
 
+    pub const fn is_timeout(&self) -> bool {
+        matches!(self, Self::Cancelled(error) if error.is_timeout())
+    }
+
     pub fn cancellation_reason(&self) -> Option<&str> {
         match self {
             Self::Cancelled(error) => Some(error.reason()),

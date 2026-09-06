@@ -45,6 +45,8 @@ export interface PluginInventorySettingsTabInjected {
   subscribeCapabilities: (listener: () => void) => () => void
   /** Persist one composition-scoped capability choice. */
   setCapability: (field: CapabilityField, enabled: boolean) => Promise<void>
+  /** Persist an arbitrary user-installed optional plugin choice. */
+  setPlugin: (pluginId: string, enabled: boolean) => Promise<void>
 }
 
 export type PluginInventorySettingsTabProps =
@@ -114,6 +116,7 @@ export function PluginInventorySettingsTab({
   getCapabilities,
   subscribeCapabilities,
   setCapability,
+  setPlugin,
   t,
 }: PluginInventorySettingsTabProps): ReactNode {
   const catalogId = useId()
@@ -121,7 +124,8 @@ export function PluginInventorySettingsTab({
   const [query, setQuery] = useState('')
   const [expanded, setExpanded] = useState<PluginInventoryEntry['entryId'] | null>(null)
   const [state, setState] = useState<ViewState>({ status: 'loading' })
-  const [savingFields, setSavingFields] = useState<ReadonlySet<CapabilityField>>(() => new Set())
+  const [savingFields, setSavingFields] = useState<ReadonlySet<string>>(() => new Set())
+  const [writeError, setWriteError] = useState(false)
   const capabilities = useSyncExternalStore(
     subscribeCapabilities,
     getCapabilities,
@@ -157,14 +161,32 @@ export function PluginInventorySettingsTab({
   }
 
   const chooseCapability = (field: CapabilityField, enabled: boolean): void => {
+    setWriteError(false)
     setSavingFields(previous => new Set([...previous, field]))
-    void setCapability(field, enabled).finally(() => {
-      setSavingFields((previous) => {
-        const next = new Set(previous)
-        next.delete(field)
-        return next
+    void setCapability(field, enabled)
+      .catch(() => { setWriteError(true) })
+      .finally(() => {
+        setSavingFields((previous) => {
+          const next = new Set(previous)
+          next.delete(field)
+          return next
+        })
       })
-    })
+  }
+
+  const choosePlugin = (pluginId: string, enabled: boolean): void => {
+    setWriteError(false)
+    setSavingFields(previous => new Set([...previous, pluginId]))
+    void setPlugin(pluginId, enabled)
+      .then(() => { setRequest(value => value + 1) })
+      .catch(() => { setWriteError(true) })
+      .finally(() => {
+        setSavingFields((previous) => {
+          const next = new Set(previous)
+          next.delete(pluginId)
+          return next
+        })
+      })
   }
 
   return (
@@ -178,6 +200,7 @@ export function PluginInventorySettingsTab({
       ) : null}
       {state.status === 'ready' ? (
         <div className={css.catalog}>
+          {writeError ? <p className={css.writeError} role="alert">{t('writeError')}</p> : null}
           <label className={css.search}>
             <IconSearchOutline16 aria-hidden="true" />
             <span className={css.visuallyHidden}>{t('search')}</span>
@@ -203,11 +226,16 @@ export function PluginInventorySettingsTab({
                 const status = phaseLabel(entry.fiberPhase, t)
                 const title = moduleShortName(entry.moduleName)
                 const field = CAPABILITY_BY_ENTRY[String(entry.entryId)]
+                // The Rust Gateway removes local manifest metadata from the
+                // strict dsh inventory response. The reserved module prefix
+                // is the stable wire-level marker for user-installed entries.
+                const dynamicToggleable = field === undefined
+                  && entry.moduleName.startsWith('yunxi.dynamic.')
                 const configured = field === undefined
                   ? entry.enabled
                   : capabilities.value?.[field] ?? entry.enabled
-                const restartPending = field !== undefined && configured !== entry.enabled
-                const configuration = field === undefined
+                const restartPending = (field !== undefined || dynamicToggleable) && configured !== entry.enabled
+                const configuration = field === undefined && !dynamicToggleable
                   ? t('coreTag')
                   : restartPending
                     ? t('restartPendingTag')
@@ -215,12 +243,12 @@ export function PluginInventorySettingsTab({
                 const runtime = t(entry.enabled ? 'enabledTag' : 'disabledTag')
                 const open = expanded === entry.entryId
                 const detailId = `${catalogId}-details-${encodeURIComponent(entry.entryId)}`
-                const saving = field !== undefined && savingFields.has(field)
-                const canWrite = field !== undefined
-                  && capabilities.status === 'ready'
+                const saving = savingFields.has(field ?? String(entry.entryId))
+                const canWrite = capabilities.status === 'ready'
                   && capabilities.writable
+                  && (field !== undefined || dynamicToggleable)
                   && !saving
-                const toggleLabel = field === undefined
+                const toggleLabel = field === undefined && !dynamicToggleable
                   ? t('unavailable')
                   : t(configured ? 'disable' : 'enable')
                 return (
@@ -263,7 +291,7 @@ export function PluginInventorySettingsTab({
                           <IconChevronDownOutline14 className={css.chevron} size={12} aria-hidden="true" />
                         </span>
                       </button>
-                      {field !== undefined ? (
+                      {field !== undefined || dynamicToggleable ? (
                         <button
                           className={css.capabilitySwitch}
                           type="button"
@@ -272,9 +300,13 @@ export function PluginInventorySettingsTab({
                           aria-label={`${toggleLabel} ${title}`}
                           title={`${toggleLabel} ${title}`}
                           data-capability-field={field}
+                          data-plugin-id={field === undefined ? entry.entryId : undefined}
                           data-checked={configured ? 'true' : 'false'}
                           disabled={!canWrite}
-                          onClick={() => { chooseCapability(field, !configured) }}
+                          onClick={() => {
+                            if (field !== undefined) chooseCapability(field, !configured)
+                            else choosePlugin(String(entry.entryId), !configured)
+                          }}
                         >
                           <span aria-hidden="true" />
                         </button>
@@ -286,7 +318,7 @@ export function PluginInventorySettingsTab({
                         <dl className={css.details}>
                           <div>
                             <dt>{t('configuration')}</dt>
-                            <dd>{field === undefined ? t('coreTag') : t(configured ? 'enabledTag' : 'disabledTag')}</dd>
+                          <dd>{field === undefined && !dynamicToggleable ? t('coreTag') : t(configured ? 'enabledTag' : 'disabledTag')}</dd>
                           </div>
                           <div>
                             <dt>{t('runtime')}</dt>

@@ -6,7 +6,8 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    CompositionEntry, CompositionSnapshot, EntryId, PluginManifest, PluginRisk, PluginRole,
+    CompositionEntry, CompositionSnapshot, EntryError, EntryId, PluginManifest, PluginRisk,
+    PluginRole,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -106,6 +107,21 @@ impl PluginInventoryEntry {
             manifest,
         }
     }
+
+    /// Build an inventory item for a package discovered outside the static
+    /// composition profile.  Dynamic packages still use the same validated
+    /// entry and manifest rules exposed to the Web UI.
+    pub fn external(
+        entry_id: impl Into<String>,
+        module_name: impl Into<String>,
+        enabled: bool,
+        fiber_phase: Option<PluginFiberPhase>,
+        manifest: PluginManifest,
+    ) -> Result<Self, EntryError> {
+        let entry = CompositionEntry::new_with_manifest(entry_id, module_name, manifest)?
+            .with_enabled(enabled);
+        Ok(Self::from_entry(&entry, fiber_phase))
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -135,6 +151,25 @@ impl PluginInventorySnapshot {
                 })
                 .collect(),
         }
+    }
+
+    /// Append additional package entries while preserving the static profile
+    /// order and ignoring duplicate ids deterministically.
+    pub fn with_additional(
+        mut self,
+        additions: impl IntoIterator<Item = PluginInventoryEntry>,
+    ) -> Self {
+        let mut ids = self
+            .entries
+            .iter()
+            .map(|entry| entry.entry_id().clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        for entry in additions {
+            if ids.insert(entry.entry_id().clone()) {
+                self.entries.push(entry);
+            }
+        }
+        self
     }
 }
 

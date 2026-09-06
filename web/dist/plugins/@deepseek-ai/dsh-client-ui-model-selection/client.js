@@ -230,8 +230,8 @@ window.__ModuleLoader__.load({
 			return n;
 		}
 		//#endregion
-		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-ab5a0433e27742b99ef765dc97041378\packages\client\ui-model-selection\src\client\ModelSelect.module.css.mjs
-		const css = ".g9VU8q_root{min-width:0;position:relative}.g9VU8q_trigger{min-width:0;max-width:min(360px,45cqw);height:28px;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border:none;border-radius:24px;outline:none;align-items:center;gap:4px;padding:0 4px 0 8px;font-size:13px;font-weight:500;line-height:20px;display:flex}.g9VU8q_trigger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.g9VU8q_trigger:focus-visible{box-shadow:0 0 0 2px var(--dsw-alias-border-l3)}.g9VU8q_trigger:disabled{color:var(--dsw-alias-label-dimmed);cursor:default}.g9VU8q_triggerLabel{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}.g9VU8q_triggerEffort{color:var(--dsw-alias-label-caption);flex:none}.g9VU8q_chevron{color:var(--dsw-alias-label-caption);flex:none;transition:transform .12s}.g9VU8q_chevronOpen{transform:rotate(180deg)}.g9VU8q_menu{z-index:20;border:1px solid var(--dsw-alias-border-inverted);background:var(--dsw-specific-menu);width:max-content;min-width:min(240px,100vw - 32px);max-width:min(420px,100vw - 32px);max-height:min(360px,100vh - 96px);box-shadow:var(--dsw-shadow-lv3);color:var(--dsw-alias-label-primary);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);border-radius:12px;flex-direction:column;padding:4px;display:flex;position:absolute;bottom:calc(100% + 8px);right:0;overflow:hidden}.g9VU8q_status,.g9VU8q_empty{color:var(--dsw-alias-label-tertiary);padding:10px;font-size:13px;line-height:20px}.g9VU8q_error,.g9VU8q_warning{background:var(--dsw-alias-interactive-bg-hover-danger);color:var(--dsw-alias-state-error-primary);border-radius:8px;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px;padding:7px 8px;font-size:12px;line-height:18px;display:flex}.g9VU8q_warning{background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-state-warn-label)}.g9VU8q_retry{color:inherit;font:inherit;cursor:pointer;background:0 0;border:none;flex:none;padding:0;font-weight:600}.g9VU8q_groups{min-height:0;overflow-y:auto}.g9VU8q_group+.g9VU8q_group{margin-top:4px}.g9VU8q_groupTitle{z-index:1;background:var(--dsw-specific-menu);color:var(--dsw-alias-label-tertiary);padding:5px 8px 3px;font-size:12px;font-weight:500;line-height:18px;position:sticky;top:0}.g9VU8q_option{box-sizing:border-box;width:auto;min-width:100%;min-height:38px;color:inherit;text-align:left;cursor:pointer;background:0 0;border:none;border-radius:10px;outline:none;align-items:center;gap:8px;padding:6px 8px;display:flex}.g9VU8q_option:hover:not(:disabled),.g9VU8q_option:focus-visible{background:var(--dsw-alias-interactive-bg-hover)}.g9VU8q_selected{background:0 0}.g9VU8q_option:disabled{color:var(--dsw-alias-label-dimmed);cursor:default}.g9VU8q_optionCopy{flex-direction:column;flex:1;min-width:0;display:flex}.g9VU8q_modelName{color:inherit;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:500;line-height:20px;overflow:hidden}.g9VU8q_description{color:var(--dsw-alias-label-tertiary);text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:18px;overflow:hidden}.g9VU8q_check{color:var(--dsw-alias-label-primary);flex:0 0 18px;place-items:center;display:grid}.g9VU8q_cell{box-sizing:border-box;width:auto;min-width:100%;height:40px;color:var(--dsw-alias-label-primary);cursor:pointer;text-align:left;background:0 0;border:none;border-radius:10px;align-items:center;gap:8px;padding:0 10px;font-size:14px;line-height:22px;display:flex}.g9VU8q_cell:hover{background:var(--dsw-alias-interactive-bg-hover)}.g9VU8q_cellLabel{white-space:nowrap;flex:none}.g9VU8q_cellValue{text-overflow:ellipsis;white-space:nowrap;text-align:right;min-width:0;color:var(--dsw-alias-label-tertiary);flex:auto;overflow:hidden}.g9VU8q_cellChevron{color:var(--dsw-alias-label-tertiary);flex:none}";
+		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-9c80724d56484e56a43c2b8dbb125407\packages\client\ui-model-selection\src\client\ModelSelect.module.css.mjs
+		const css = "._1pR_9G_root{min-width:0;position:relative}._1pR_9G_trigger{min-width:0;max-width:min(360px,45cqw);height:28px;color:var(--dsw-alias-label-secondary);cursor:pointer;background:0 0;border:none;border-radius:24px;outline:none;align-items:center;gap:4px;padding:0 4px 0 8px;font-size:13px;font-weight:500;line-height:20px;display:flex}._1pR_9G_trigger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}._1pR_9G_trigger:focus-visible{box-shadow:0 0 0 2px var(--dsw-alias-border-l3)}._1pR_9G_trigger:disabled{color:var(--dsw-alias-label-dimmed);cursor:default}._1pR_9G_triggerLabel{text-overflow:ellipsis;white-space:nowrap;min-width:0;overflow:hidden}._1pR_9G_triggerEffort{color:var(--dsw-alias-label-caption);flex:none}._1pR_9G_chevron{color:var(--dsw-alias-label-caption);flex:none;transition:transform .12s}._1pR_9G_chevronOpen{transform:rotate(180deg)}._1pR_9G_menu{z-index:20;border:1px solid var(--dsw-alias-border-inverted);background:var(--dsw-specific-menu);width:max-content;min-width:min(240px,100vw - 32px);max-width:min(420px,100vw - 32px);max-height:min(360px,100vh - 96px);box-shadow:var(--dsw-shadow-lv3);color:var(--dsw-alias-label-primary);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);border-radius:12px;flex-direction:column;padding:4px;display:flex;position:absolute;bottom:calc(100% + 8px);right:0;overflow:hidden}._1pR_9G_status,._1pR_9G_empty{color:var(--dsw-alias-label-tertiary);padding:10px;font-size:13px;line-height:20px}._1pR_9G_error,._1pR_9G_warning{background:var(--dsw-alias-interactive-bg-hover-danger);color:var(--dsw-alias-state-error-primary);border-radius:8px;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:4px;padding:7px 8px;font-size:12px;line-height:18px;display:flex}._1pR_9G_warning{background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-state-warn-label)}._1pR_9G_retry{color:inherit;font:inherit;cursor:pointer;background:0 0;border:none;flex:none;padding:0;font-weight:600}._1pR_9G_groups{min-height:0;overflow-y:auto}._1pR_9G_group+._1pR_9G_group{margin-top:4px}._1pR_9G_groupTitle{z-index:1;background:var(--dsw-specific-menu);color:var(--dsw-alias-label-tertiary);padding:5px 8px 3px;font-size:12px;font-weight:500;line-height:18px;position:sticky;top:0}._1pR_9G_option{box-sizing:border-box;width:auto;min-width:100%;min-height:38px;color:inherit;text-align:left;cursor:pointer;background:0 0;border:none;border-radius:10px;outline:none;align-items:center;gap:8px;padding:6px 8px;display:flex}._1pR_9G_option:hover:not(:disabled),._1pR_9G_option:focus-visible{background:var(--dsw-alias-interactive-bg-hover)}._1pR_9G_selected{background:0 0}._1pR_9G_option:disabled{color:var(--dsw-alias-label-dimmed);cursor:default}._1pR_9G_optionCopy{flex-direction:column;flex:1;min-width:0;display:flex}._1pR_9G_modelName{color:inherit;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:500;line-height:20px;overflow:hidden}._1pR_9G_description{color:var(--dsw-alias-label-tertiary);text-overflow:ellipsis;white-space:nowrap;font-size:12px;line-height:18px;overflow:hidden}._1pR_9G_check{color:var(--dsw-alias-label-primary);flex:0 0 18px;place-items:center;display:grid}._1pR_9G_cell{box-sizing:border-box;width:auto;min-width:100%;height:40px;color:var(--dsw-alias-label-primary);cursor:pointer;text-align:left;background:0 0;border:none;border-radius:10px;align-items:center;gap:8px;padding:0 10px;font-size:14px;line-height:22px;display:flex}._1pR_9G_cell:hover{background:var(--dsw-alias-interactive-bg-hover)}._1pR_9G_cellLabel{white-space:nowrap;flex:none}._1pR_9G_cellValue{text-overflow:ellipsis;white-space:nowrap;text-align:right;min-width:0;color:var(--dsw-alias-label-tertiary);flex:auto;overflow:hidden}._1pR_9G_cellChevron{color:var(--dsw-alias-label-tertiary);flex:none}";
 		const tagId = "@deepseek-ai/dsh-client-ui-model-selection/ModelSelect.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -241,31 +241,31 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var ModelSelect_module_css_default = {
-			"cell": "g9VU8q_cell",
-			"cellChevron": "g9VU8q_cellChevron",
-			"cellLabel": "g9VU8q_cellLabel",
-			"cellValue": "g9VU8q_cellValue",
-			"check": "g9VU8q_check",
-			"chevron": "g9VU8q_chevron",
-			"chevronOpen": "g9VU8q_chevronOpen",
-			"description": "g9VU8q_description",
-			"empty": "g9VU8q_empty",
-			"error": "g9VU8q_error",
-			"group": "g9VU8q_group",
-			"groupTitle": "g9VU8q_groupTitle",
-			"groups": "g9VU8q_groups",
-			"menu": "g9VU8q_menu",
-			"modelName": "g9VU8q_modelName",
-			"option": "g9VU8q_option",
-			"optionCopy": "g9VU8q_optionCopy",
-			"retry": "g9VU8q_retry",
-			"root": "g9VU8q_root",
-			"selected": "g9VU8q_selected",
-			"status": "g9VU8q_status",
-			"trigger": "g9VU8q_trigger",
-			"triggerEffort": "g9VU8q_triggerEffort",
-			"triggerLabel": "g9VU8q_triggerLabel",
-			"warning": "g9VU8q_warning"
+			"cell": "_1pR_9G_cell",
+			"cellChevron": "_1pR_9G_cellChevron",
+			"cellLabel": "_1pR_9G_cellLabel",
+			"cellValue": "_1pR_9G_cellValue",
+			"check": "_1pR_9G_check",
+			"chevron": "_1pR_9G_chevron",
+			"chevronOpen": "_1pR_9G_chevronOpen",
+			"description": "_1pR_9G_description",
+			"empty": "_1pR_9G_empty",
+			"error": "_1pR_9G_error",
+			"group": "_1pR_9G_group",
+			"groupTitle": "_1pR_9G_groupTitle",
+			"groups": "_1pR_9G_groups",
+			"menu": "_1pR_9G_menu",
+			"modelName": "_1pR_9G_modelName",
+			"option": "_1pR_9G_option",
+			"optionCopy": "_1pR_9G_optionCopy",
+			"retry": "_1pR_9G_retry",
+			"root": "_1pR_9G_root",
+			"selected": "_1pR_9G_selected",
+			"status": "_1pR_9G_status",
+			"trigger": "_1pR_9G_trigger",
+			"triggerEffort": "_1pR_9G_triggerEffort",
+			"triggerLabel": "_1pR_9G_triggerLabel",
+			"warning": "_1pR_9G_warning"
 		};
 		//#endregion
 		//#region lib/types/client/ModelSelect.js

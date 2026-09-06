@@ -67,12 +67,16 @@ single `yunxi-capabilities` namespace. Only one-level known boolean fields are
 accepted, writes are revision-fenced and bounded to 64 mutations, and a
 successful change emits `settings/document-updated` on `events.host`.
 `yunxi-settings` persists the target composition to `settings.json`; the live
-Host keeps its current children and routes until the next Host composition.
-Explicit environment switches override that document for the process. The
-required Model entry is read-only. The settings domain has 15 built-in keys,
-and the current CLI/Web launch schema exposes all 15 connected composition-scoped
-optional switches, including Multi-agent. `voice` and `weixin` launch
-deterministic fixture routes when enabled and remain off by default.
+Host applies built-in switch changes by rebuilding its composition. The WebHost
+does not perform a true in-place single-plugin unmount. An explicitly configured
+dynamic package directory is rescanned at inventory/refresh boundaries; the
+Plugin Host can generation-safely replace changed packages and unload routes
+and processes when packages or the directory disappear. Explicit environment
+switches override that document for the process. The required Model entry is
+read-only. The settings domain has 15 built-in keys, and the current CLI/Web
+launch schema exposes all 15 connected composition-scoped optional switches,
+including Multi-agent. `voice` and `weixin` launch deterministic fixture routes
+when enabled and remain off by default.
 
 `yunxi-web-gateway/build.rs` recursively validates `web/dist` and generates an
 exact embedded resource table. It admits only the required document, script,

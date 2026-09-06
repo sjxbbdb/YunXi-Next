@@ -7,8 +7,10 @@ fixture for the first process-isolated Weixin migration baseline. It exercises t
 
 The crate contains no Weixin SDK, network client, credentials, device access,
 or async runtime. Media is represented by bounded metadata only; this crate
-does not carry media bytes or fetch remote content. The plugin fixture is not
-currently wired into the CLI Host or Web inventory.
+does not carry media bytes or fetch remote content. Its process fixture is
+launch-wired into the CLI/Web Host and appears in inventory when `weixin` is
+enabled, proving the replaceable channel boundary without claiming a real
+login or network integration.
 
 ## Contract
 

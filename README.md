@@ -27,7 +27,16 @@ enable/disable lifecycle. `yunxi-agent-spine` is a separate replaceable Agent
 loop with bounded sessions, context/model/tool seams, cancellation, budgets,
 and fail-closed tool approval. The CLI supplies these seams through the process
 Host, so model/tool turns use the spine while application hooks remain outside
-the trusted loop.
+  the trusted loop.
+
+The plugin Host also has a package-based dynamic boundary. An explicit plugin
+directory is scanned for validated `plugin.json` packages, dependencies are
+ordered deterministically, and enabled packages are launched through the same
+handshake, grant, retry, and route-removal path as built-ins. Directory changes
+are reconciled at Host refresh/inventory boundaries; replacement is
+generation-safe, and `unload_all` removes manager-owned routes and processes
+when a directory is removed or replaced. This is dynamic Rust executable
+loading, not arbitrary `cdylib`/WASM loading or an operating-system sandbox.
 
 The L0 kernel owns only the minimum lifecycle needed to run plugins safely:
 
@@ -104,9 +113,9 @@ limit, the plugin is disabled until explicit user enable or manual restart.
 Process isolation protects the kernel from plugin crashes. It is not yet a
 filesystem, network, or resource-usage sandbox.
 
-The remaining inheritance plan for richer model-based memory extraction,
-companion automation, production Voice/Weixin adapters, streaming, and
-management parity is tracked in
+The remaining product plan for richer model-based memory extraction, companion
+automation, production Voice/Weixin adapters, CLI/Web streaming transport,
+background multi-agent execution, and executable Skills is tracked in
 [`docs/capability-migration.md`](docs/capability-migration.md). A capability is
 counted as migrated only after it has a real process boundary, versioned
 contract, explicit grants, and failure-containment tests.
@@ -119,9 +128,11 @@ projects the current plugin set into the inventory shape needed by the dsh Web
 client. `yunxi-cordis-core` provides generic Context, Service, Event, Effect,
 and Fiber primitives; `yunxi-cordis-runtime` adds a static registry and
 enable/disable lifecycle for in-process composition. The runtime is the trusted
-bootstrap and the spine is the default turn loop, while dynamic Rust plugin
-loading and live in-place Web unmounting remain later work. The upstream record
-and reuse boundary are documented in
+bootstrap, the spine is the default turn loop, and `yunxi-plugin-host` now
+provides validated package discovery, reload, and unload for external Rust
+executables. Web switch changes rebuild the current Host rather than performing
+a true in-place single-plugin unmount. The upstream record and reuse boundary
+are documented in
 [`docs/dsh-web-compatibility.md`](docs/dsh-web-compatibility.md).
 User capability choices are stored by
 [`yunxi-settings`](crates/yunxi-settings/README.md) in a bounded, versioned

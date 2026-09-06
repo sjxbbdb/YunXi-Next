@@ -168,8 +168,8 @@ window.__ModuleLoader__.load({
 			});
 		}
 		//#endregion
-		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-ab5a0433e27742b99ef765dc97041378\packages\session-query\session-log-export\src\client\HeaderAction.module.css.mjs
-		const css = ".H5jB_q_sessionLogButton{border:1px solid var(--dsw-alias-border-l2);min-width:111px;height:32px;color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family);cursor:pointer;background:0 0;border-radius:18px;justify-content:center;align-items:center;gap:4px;padding:6px 12px;font-size:13px;font-weight:400;line-height:20px;display:inline-flex}.H5jB_q_sessionLogButton:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.H5jB_q_sessionLogButton:disabled{color:var(--dsw-alias-label-dimmed);cursor:wait}.H5jB_q_sessionLogButton span,.H5jB_q_sessionLogButton svg{flex:none}.H5jB_q_sessionLogButton span{white-space:nowrap}";
+		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-9c80724d56484e56a43c2b8dbb125407\packages\session-query\session-log-export\src\client\HeaderAction.module.css.mjs
+		const css = ".ssvTYa_sessionLogButton{border:1px solid var(--dsw-alias-border-l2);min-width:111px;height:32px;color:var(--dsw-alias-label-primary);font-family:var(--dsw-font-family);cursor:pointer;background:0 0;border-radius:18px;justify-content:center;align-items:center;gap:4px;padding:6px 12px;font-size:13px;font-weight:400;line-height:20px;display:inline-flex}.ssvTYa_sessionLogButton:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover)}.ssvTYa_sessionLogButton:disabled{color:var(--dsw-alias-label-dimmed);cursor:wait}.ssvTYa_sessionLogButton span,.ssvTYa_sessionLogButton svg{flex:none}.ssvTYa_sessionLogButton span{white-space:nowrap}";
 		const tagId = "@deepseek-ai/dsh-session-log-export/HeaderAction.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -178,7 +178,7 @@ window.__ModuleLoader__.load({
 			tag.textContent = css;
 			document.head.appendChild(tag);
 		}
-		var HeaderAction_module_css_default = { "sessionLogButton": "H5jB_q_sessionLogButton" };
+		var HeaderAction_module_css_default = { "sessionLogButton": "ssvTYa_sessionLogButton" };
 		//#endregion
 		//#region lib/types/client/HeaderAction.js
 		/**

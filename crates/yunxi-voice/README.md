@@ -7,9 +7,10 @@ first voice migration baseline:
 - `voice.synthesize@1`: bounded text input and bounded synthesized audio output.
 
 The crate contains no device access, SDK binding, codec implementation, network
-client, async runtime, process host, or `unsafe` code. It is suitable for
-contract tests and Host-boundary integration before a real voice plugin is
-implemented. It is not currently a CLI/Web-routable capability.
+client, async runtime, process host, or `unsafe` code. Its fixture is launch-wired
+into the CLI/Web Host and appears in inventory when `voice` is enabled, which
+proves the replaceable process boundary. It remains a contract/test backend,
+not a real microphone, speaker, or speech-service implementation.
 
 ## Contract boundaries
 
@@ -68,6 +69,39 @@ adapter must be a separate implementation that requests host-issued device
 authority and is integrated into the CLI/Web composition before this crate can
 be marked as an enabled user feature.
 
+## Replaceable provider boundary
+
+The crate now exposes a low-dependency, synchronous provider boundary without
+claiming to own a microphone, speaker, codec, or speech service:
+
+- `Device` is the capture/playback boundary.
+- `Transcriber` consumes an `AudioChunkSource` and emits streaming
+  `TranscriptEvent` values through `TranscriptSink`.
+- `Synthesizer` emits bounded `SynthesizedAudioChunk` values through
+  `SynthesizedAudioSink`.
+- `TextFallback` provides a text-only path when an audio provider is disabled
+  or unavailable.
+- `OperationContext` and `CancellationToken` propagate cancellation and a
+  monotonic deadline through every blocking call.
+- `AudioChunkQueue` is a byte-bounded `Mutex`/`Condvar` queue. `push` waits for
+  capacity while honoring cancellation and timeout; `try_push` returns an
+  explicit backpressure error. `AudioChunkIterator` revalidates stream ID,
+  format, sequence, and chunk bounds.
+- `ProviderGate` is the Host-facing enable/disable semantic. A disabled gate
+  fails before provider work begins and does not contain or clear session data.
+
+`MockDevice`, `MockTranscriber`, `MockSynthesizer`, `LoopbackProvider`, and
+`TextFallbackProvider` are deterministic test doubles. Their output is
+synthetic; it is not playable audio and no implementation opens a device or
+contacts an external speech API. Debug output reports counts and sizes only,
+never audio bytes.
+
+The traits are the production integration point. A real implementation must
+be a separate process/plugin that requests Host-issued device authority and
+keeps SDK credentials outside protocol payloads. Platform device handles,
+codec libraries, provider credentials, and an async runtime remain external
+prerequisites; this crate intentionally does not add them.
+
 ## Files
 
 | Path | Responsibility |
@@ -77,6 +111,8 @@ be marked as an enabled user feature.
 | `src/state.rs` | cancellation and backpressure state machine |
 | `src/fixture.rs` | in-process deterministic contract fixtures |
 | `src/plugin.rs` | loopback process handshake, dispatch, and fixture errors |
+| `src/stream.rs` | bounded queues, chunk iterator, cancellation, and deadlines |
+| `src/provider.rs` | Device/Transcriber/Synthesizer/TextFallback traits and test doubles |
 | `src/bin/yunxi-voice-fixture.rs` | executable child-process entry point |
 
 ## Workspace status

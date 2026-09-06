@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 mod args;
+mod control;
 mod management;
 mod repl;
 mod session;
@@ -50,6 +51,9 @@ pub fn run_from_env() -> Result<(), CliError> {
             Ok(())
         }
         CliAction::Web(options) => run_web(options),
+        CliAction::Control(options) => control::run(options).map_err(|error| CliError {
+            kind: CliErrorKind::Control(error),
+        }),
         CliAction::Run(options) => {
             let color = !options.no_color
                 && env::var_os("NO_COLOR").is_none()
@@ -113,7 +117,7 @@ fn run_web(options: WebOptions) -> Result<(), CliError> {
 
 fn print_help() {
     println!(
-        "YunXi Next\n\nUSAGE:\n    yunxi-next [OPTIONS]\n    yunxi-next web [OPTIONS]\n\nCLI OPTIONS:\n    --once <PROMPT>   Send one prompt and exit\n    --plugin <PATH>   Use an external compatible model plugin\n    --no-color        Disable ANSI terminal colors\n\nWEB OPTIONS:\n    --bind <ADDR>     Bind the HTTP server (default: 127.0.0.1:8787)\n    --plugin <PATH>   Use an external compatible model plugin\n\nGLOBAL OPTIONS:\n    -h, --help        Print help\n    -V, --version     Print version"
+        "YunXi Next\n\nUSAGE:\n    yunxi-next [OPTIONS]\n    yunxi-next web [OPTIONS]\n    yunxi-next <status|diagnostics|enable|disable|reload> [PLUGIN_ID] [--json]\n\nCLI OPTIONS:\n    --once <PROMPT>   Send one prompt and exit\n    --plugin <PATH>   Use an external compatible model plugin\n    --no-color        Disable ANSI terminal colors\n\nWEB OPTIONS:\n    --bind <ADDR>     Bind the HTTP server (default: 127.0.0.1:8787)\n    --plugin <PATH>   Use an external compatible model plugin\n\nCONTROL COMMANDS:\n    status             Show the effective plugin inventory\n    diagnostics        Show settings warnings and inventory diagnostics\n    enable <ID>        Persistently enable an optional plugin\n    disable <ID>       Persistently disable an optional plugin\n    reload [ID]        Validate the next plugin generation\n    --json             Emit machine-readable output\n\nGLOBAL OPTIONS:\n    -h, --help        Print help\n    -V, --version     Print version"
     );
 }
 
@@ -128,6 +132,7 @@ enum CliErrorKind {
     Session(SessionError),
     Chat(ChatFailure),
     WebHost(WebHostError),
+    Control(control::ControlError),
     Io(io::Error),
 }
 
@@ -140,6 +145,7 @@ impl fmt::Display for CliError {
             }
             CliErrorKind::Chat(error) => error.fmt(formatter),
             CliErrorKind::WebHost(error) => error.fmt(formatter),
+            CliErrorKind::Control(error) => write!(formatter, "control command failed: {error}"),
             CliErrorKind::Io(error) => write!(formatter, "terminal I/O failed: {error}"),
         }
     }
@@ -152,6 +158,7 @@ impl Error for CliError {
             CliErrorKind::Session(error) => Some(error),
             CliErrorKind::Chat(error) => Some(error),
             CliErrorKind::WebHost(error) => Some(error),
+            CliErrorKind::Control(error) => Some(error),
             CliErrorKind::Io(error) => Some(error),
         }
     }

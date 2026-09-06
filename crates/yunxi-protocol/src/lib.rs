@@ -18,6 +18,7 @@ mod multi_agent;
 mod scheduler;
 mod sessions;
 mod skills;
+mod stream;
 mod tool_calls;
 mod tools;
 mod transport;
@@ -108,6 +109,13 @@ pub use skills::{
     SkillListRequest, SkillListResult, SkillMetadata, SkillProtocolError, SkillRuntimeState,
     SkillStatusRequest, SkillStatusResult, SkillToolDescriptor, TOOL_SKILLS_CONTEXT_OPERATION,
     TOOL_SKILLS_LIST_OPERATION, TOOL_SKILLS_STATUS_OPERATION,
+};
+pub use stream::{
+    AgentStreamEnvelope, AgentStreamEvent, MAX_STREAM_ERROR_CODE_BYTES,
+    MAX_STREAM_ERROR_MESSAGE_BYTES, MAX_STREAM_EVENT_BYTES, MAX_STREAM_EVENTS_PER_TURN,
+    MAX_STREAM_FINISH_REASON_BYTES, MAX_STREAM_TEXT_BYTES, MAX_STREAM_TURN_ID_BYTES,
+    STREAM_PROTOCOL_VERSION, StreamEnvelope, StreamError, StreamEvent, StreamProtocolError,
+    StreamTurnState,
 };
 pub use tool_calls::{
     DEFAULT_MAX_TOOL_CALLS_PER_ROUND, DEFAULT_MAX_TOOL_ROUNDS, MAX_APPROVAL_GRANTS,

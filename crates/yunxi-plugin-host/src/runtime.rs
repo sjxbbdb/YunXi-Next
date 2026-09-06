@@ -38,6 +38,7 @@ pub struct PluginLaunch {
     write_timeout: Option<Duration>,
     required_grants: Vec<GrantKind>,
     expected_capabilities: Option<Vec<CapabilityDescriptor>>,
+    expected_plugin_version: Option<String>,
 }
 
 /// Launch state retained for one registered plugin.
@@ -82,6 +83,7 @@ impl PluginLaunch {
             write_timeout: Some(DEFAULT_WRITE_TIMEOUT),
             required_grants: Vec::new(),
             expected_capabilities: None,
+            expected_plugin_version: None,
         }
     }
 
@@ -137,6 +139,32 @@ impl PluginLaunch {
             .dedup_by(|left, right| left.id() == right.id() && left.version() == right.version());
         self.expected_capabilities = Some(capabilities);
         self
+    }
+
+    /// Requires the child to announce this exact version during readiness.
+    ///
+    /// The value is intentionally optional for backwards compatibility with
+    /// low-level callers that let a plugin choose its own catalog metadata.
+    pub fn with_expected_plugin_version(mut self, version: impl Into<String>) -> Self {
+        let version = version.into();
+        self.expected_plugin_version = (!version.trim().is_empty()).then_some(version);
+        self
+    }
+
+    pub fn expected_plugin_version(&self) -> Option<&str> {
+        self.expected_plugin_version.as_deref()
+    }
+
+    pub fn id(&self) -> &PluginId {
+        &self.id
+    }
+
+    pub fn display_name(&self) -> &str {
+        &self.display_name
+    }
+
+    pub fn command(&self) -> &PluginCommand {
+        &self.command
     }
 }
 
@@ -280,6 +308,26 @@ impl ProcessPluginHost {
         self.stop_current(id)
     }
 
+    /// Fully remove a quiescent plugin and all of its capability routes.
+    ///
+    /// This is the Host-side half of hot reload.  `disable` deliberately
+    /// keeps a slot for a later user enable; `unregister` releases the slot,
+    /// acceptor, connection, catalog record, and kernel supervisor together.
+    pub fn unregister(&mut self, id: &PluginId) -> Result<(), PluginHostError> {
+        self.ensure_slot(id)?;
+        self.disable_retry(id);
+        self.stop_current(id)?;
+        self.kernel.refresh();
+        self.kernel.unregister(id)?;
+        self.detach_connection(id);
+        self.slots.remove(id);
+        Ok(())
+    }
+
+    pub fn is_registered(&self, id: &PluginId) -> bool {
+        self.slots.contains_key(id)
+    }
+
     /// Starts a fresh enable cycle for a registered plugin.
     ///
     /// The retry budget is reset only here (or through [`Self::enable`]).
@@ -406,6 +454,7 @@ impl ProcessPluginHost {
             write_timeout,
             required_grants,
             expected_capabilities,
+            expected_plugin_version,
         ) = {
             let slot = self
                 .slots
@@ -417,6 +466,7 @@ impl ProcessPluginHost {
                 slot.launch.write_timeout,
                 slot.launch.required_grants.clone(),
                 slot.launch.expected_capabilities.clone(),
+                slot.launch.expected_plugin_version.clone(),
             )
         };
 
@@ -437,6 +487,17 @@ impl ProcessPluginHost {
         if let Err(error) =
             validate_expected_capabilities(connection.info(), expected_capabilities.as_deref())
         {
+            self.fail_connection(id, Some(generation), error.to_string());
+            return Err(PluginHostError::Protocol(error));
+        }
+        if let Some(expected) = expected_plugin_version.as_deref()
+            && connection.info().plugin_version() != expected
+        {
+            let error = ProtocolError::Handshake(format!(
+                "plugin `{}` announced version `{}`; expected `{expected}`",
+                connection.info().plugin_id(),
+                connection.info().plugin_version(),
+            ));
             self.fail_connection(id, Some(generation), error.to_string());
             return Err(PluginHostError::Protocol(error));
         }

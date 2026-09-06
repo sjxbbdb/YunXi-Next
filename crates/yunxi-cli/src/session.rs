@@ -8,7 +8,7 @@ mod spine_runtime;
 mod stateful;
 mod tool_loop;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::error::Error;
 use std::fmt;
@@ -20,7 +20,9 @@ use std::time::Duration;
 use yunxi_companion::COMPANION_PLUGIN_ID;
 use yunxi_companion_mailbox::MAILBOX_PLUGIN_ID;
 use yunxi_composition::{
-    CompositionEntry, CompositionError, CompositionSnapshot, ConfigLayer, Profile,
+    CompositionEntry, CompositionError, CompositionSnapshot, ConfigLayer, DefaultEnablement,
+    PluginFiberPhase, PluginInventoryEntry, PluginInventorySnapshot, PluginManifest, PluginRisk,
+    PluginRole, Profile,
 };
 use yunxi_context::CONTEXT_PLUGIN_ID;
 use yunxi_cordis_runtime::RuntimeError;
@@ -30,7 +32,9 @@ use yunxi_model_openai::{MODEL_PLUGIN_ID, ProviderConfig, ProviderConfigError};
 use yunxi_multi_agent::MULTI_AGENT_PLUGIN_ID;
 use yunxi_persona::PERSONA_PLUGIN_ID;
 use yunxi_plugin_host::{
-    CatalogError, PluginCallError, PluginHostError, PluginLaunch, ProcessPluginHost,
+    CatalogError, PluginCallError, PluginDirectory, PluginDiscoveryManager,
+    PluginDiscoveryManagerError, PluginHostError, PluginLaunch, PluginReloadReport,
+    ProcessPluginHost,
 };
 use yunxi_protocol::{
     ActionGrant, COMPANION_DECIDE_OPERATION, CONTEXT_COMPOSE_OPERATION, CapabilityDescriptor,
@@ -43,7 +47,7 @@ use yunxi_protocol::{
     ToolApprovalRequest, ToolCall, ToolCallBatch, ToolLoopPolicy, ToolResultOutcome, capabilities,
 };
 use yunxi_scheduler::SCHEDULER_PLUGIN_ID;
-use yunxi_settings::CapabilitySettingsStore;
+use yunxi_settings::{CapabilitySettingsStore, next_state_root};
 use yunxi_storage::STORAGE_PLUGIN_ID;
 use yunxi_tool_files::FILES_PLUGIN_ID;
 use yunxi_tool_mcp::{
@@ -79,6 +83,11 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const READ_ONLY_RESPONSE_TIMEOUT: Duration = Duration::from_secs(5);
 const ACTION_RESPONSE_TIMEOUT: Duration = Duration::from_secs(125);
 const RESPONSE_TIMEOUT_MARGIN: Duration = Duration::from_secs(5);
+
+/// Optional package root for user-installed Rust capability plugins.
+pub(crate) const DYNAMIC_PLUGIN_DIRECTORY_ENV: &str = "YUNXI_NEXT_PLUGIN_DIR";
+const DYNAMIC_PLUGIN_DIRECTORY_ALIAS_ENV: &str = "YUNXI_NEXT_PLUGIN_DIRECTORY";
+const DYNAMIC_PLUGIN_DIRECTORY_NAME: &str = "plugins";
 
 // A plugin process starts with a small launch environment.  Provider and MCP
 // credentials/configuration are copied only by their dedicated helpers below.
@@ -182,6 +191,7 @@ pub(crate) struct BackendStatus {
 pub(crate) struct ChatSession {
     cordis: CordisBridge,
     host: ProcessPluginHostHandle,
+    dynamic_plugins: Option<PluginDiscoveryManager>,
     spine: Option<SpineController>,
     composition: CompositionSnapshot,
     capability_settings: CapabilitySettingsStore,
@@ -785,6 +795,16 @@ impl ChatSession {
             None
         };
 
+        let mut dynamic_plugins = configured_dynamic_plugin_root()
+            .map(|root| PluginDiscoveryManager::new(PluginDirectory::new(root)));
+        if let Some(manager) = dynamic_plugins.as_mut() {
+            let overrides = capability_settings.plugin_overrides().clone();
+            match manager.reload(&mut host, &overrides) {
+                Ok(report) => append_dynamic_report_notices(&report, &mut notices),
+                Err(error) => notices.push(error.to_string()),
+            }
+        }
+
         let host = ProcessPluginHostHandle::new(host);
 
         let agent_session_id = multi_agent::new_agent_session_id();
@@ -794,6 +814,7 @@ impl ChatSession {
         let mut session = Self {
             cordis,
             host,
+            dynamic_plugins,
             spine: None,
             composition,
             capability_settings,
@@ -885,6 +906,56 @@ impl ChatSession {
         }
     }
 
+    /// Reconcile user-installed packages before exposing the inventory.  A
+    /// scan is bounded and each package is isolated by the manager, so this
+    /// also provides the Web UI's hot-add/hot-remove boundary.
+    pub(super) fn refresh_dynamic_plugins(&mut self) {
+        let Some(root) = configured_dynamic_plugin_root() else {
+            if let Some(mut manager) = self.dynamic_plugins.take() {
+                let report = manager.unload_all(&mut self.host.borrow_mut());
+                append_dynamic_report_notices(&report, &mut self.notices);
+                if report.has_failures() {
+                    // Keep ownership of any package that could not be
+                    // unregistered so a later refresh can retry cleanup.
+                    self.dynamic_plugins = Some(manager);
+                }
+            }
+            return;
+        };
+        if self
+            .dynamic_plugins
+            .as_ref()
+            .is_some_and(|manager| manager.directory().root() != root)
+        {
+            if let Some(mut manager) = self.dynamic_plugins.take() {
+                let report = manager.unload_all(&mut self.host.borrow_mut());
+                append_dynamic_report_notices(&report, &mut self.notices);
+                if report.has_failures() {
+                    // Do not replace a manager while it still owns a live
+                    // registration. Retrying on the next refresh preserves
+                    // the old route instead of leaking it into the new root.
+                    self.dynamic_plugins = Some(manager);
+                    return;
+                }
+            }
+        }
+        if self.dynamic_plugins.is_none() {
+            self.dynamic_plugins = Some(PluginDiscoveryManager::new(PluginDirectory::new(root)));
+        }
+        let overrides = self.capability_settings.plugin_overrides().clone();
+        let result = {
+            let Some(manager) = self.dynamic_plugins.as_mut() else {
+                return;
+            };
+            let mut host = self.host.borrow_mut();
+            manager.reload(&mut host, &overrides)
+        };
+        match result {
+            Ok(report) => append_dynamic_report_notices(&report, &mut self.notices),
+            Err(error) => self.push_notice(error.to_string()),
+        }
+    }
+
     pub(super) fn has_pending_action(&self) -> bool {
         self.pending_action.is_some()
             || self.tool_continuation.is_some()
@@ -929,6 +1000,30 @@ impl ChatSession {
         GatewayProjection::new(gateway_status, inventory)
             .with_sessions(sessions)
             .with_host_paths(self.cwd.to_string_lossy(), home.to_string_lossy())
+    }
+
+    /// Build the same bounded plugin catalog used by a live session without
+    /// starting any child process. Management commands use this adapter so
+    /// read-only inspection and settings validation stay side-effect free.
+    pub(crate) fn plugin_inventory_for_settings(
+        settings: &CapabilitySettingsStore,
+    ) -> Result<PluginInventorySnapshot, SessionError> {
+        let legacy_switches = settings.effective_from_environment();
+        let switches = PluginSwitches::resolve(settings, &legacy_switches);
+        let inventory = build_composition(&switches)?.inventory();
+        let Some(root) = configured_dynamic_plugin_root() else {
+            return Ok(inventory);
+        };
+        let report = PluginDirectory::new(root)
+            .discover_or_empty()
+            .map_err(PluginDiscoveryManagerError::from)
+            .map_err(SessionError::DynamicDiscovery)?;
+        let additions = report
+            .plugins()
+            .iter()
+            .map(|plugin| dynamic_inventory_entry(plugin, settings.plugin_overrides(), None))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(inventory.with_additional(additions))
     }
 
     pub(crate) fn capability_settings(&self) -> &CapabilitySettingsStore {
@@ -2468,6 +2563,124 @@ fn build_composition(switches: &PluginSwitches) -> Result<CompositionSnapshot, C
     profile.compose()
 }
 
+pub(crate) fn configured_dynamic_plugin_root() -> Option<PathBuf> {
+    if let Some(path) = env::var_os(DYNAMIC_PLUGIN_DIRECTORY_ENV)
+        .or_else(|| env::var_os(DYNAMIC_PLUGIN_DIRECTORY_ALIAS_ENV))
+        .filter(|path| !path.is_empty())
+    {
+        return Some(PathBuf::from(path));
+    }
+    let default_root = next_state_root().join(DYNAMIC_PLUGIN_DIRECTORY_NAME);
+    default_root.is_dir().then_some(default_root)
+}
+
+pub(super) fn dynamic_inventory_entry(
+    plugin: &yunxi_plugin_host::DiscoveredPlugin,
+    overrides: &BTreeMap<String, bool>,
+    phase: Option<PluginFiberPhase>,
+) -> Result<PluginInventoryEntry, CompositionError> {
+    let package = plugin.manifest();
+    let risk = match package.runtime_metadata().map(|metadata| metadata.risk()) {
+        None | Some(yunxi_protocol::PluginRiskLevel::Safe) => PluginRisk::None,
+        Some(yunxi_protocol::PluginRiskLevel::External | yunxi_protocol::PluginRiskLevel::High) => {
+            PluginRisk::External
+        }
+    };
+    let default_enablement = if package.default_enabled() {
+        DefaultEnablement::Safe
+    } else {
+        DefaultEnablement::Never
+    };
+    let manifest = PluginManifest::new(PluginRole::Optional, risk, default_enablement);
+    let enabled = overrides
+        .get(package.id().as_str())
+        .copied()
+        .unwrap_or_else(|| package.default_enabled());
+    PluginInventoryEntry::external(
+        package.id().as_str(),
+        format!("yunxi.dynamic.{}", package.id()),
+        enabled,
+        phase,
+        manifest,
+    )
+    .map_err(CompositionError::from)
+}
+
+pub(super) fn dynamic_plugin_phase(
+    id: &PluginId,
+    enabled: bool,
+    snapshot: &yunxi_kernel::KernelSnapshot,
+    report: Option<&PluginReloadReport>,
+) -> Option<PluginFiberPhase> {
+    if !enabled {
+        return Some(PluginFiberPhase::Disabled);
+    }
+    if report.is_some_and(|report| {
+        report
+            .skipped()
+            .iter()
+            .chain(report.failures().iter())
+            .any(|failure| failure.id() == Some(id))
+    }) {
+        return Some(PluginFiberPhase::Failed);
+    }
+    let state = snapshot
+        .plugins()
+        .iter()
+        .find(|plugin| plugin.id() == id)
+        .map(|plugin| plugin.state());
+    match state {
+        Some(yunxi_kernel::PluginState::Registered) => Some(PluginFiberPhase::Pending),
+        Some(yunxi_kernel::PluginState::Starting) => Some(PluginFiberPhase::Loading),
+        Some(yunxi_kernel::PluginState::Running { .. }) => Some(PluginFiberPhase::Active),
+        Some(yunxi_kernel::PluginState::Stopping) => Some(PluginFiberPhase::Unloading),
+        Some(yunxi_kernel::PluginState::Stopped) => Some(PluginFiberPhase::Disabled),
+        Some(yunxi_kernel::PluginState::Failed(_)) => Some(PluginFiberPhase::Failed),
+        None => Some(PluginFiberPhase::Pending),
+    }
+}
+
+fn append_dynamic_report_notices(report: &PluginReloadReport, notices: &mut Vec<String>) {
+    if !report.launched().is_empty() {
+        notices.push(format!(
+            "dynamic plugins launched: {}",
+            report
+                .launched()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    if !report.removed().is_empty() {
+        notices.push(format!(
+            "dynamic plugins removed: {}",
+            report
+                .removed()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    for failure in report.discovery_failures() {
+        notices.push(format!(
+            "dynamic plugin package `{}` was rejected: {}",
+            failure.path().display(),
+            failure.error()
+        ));
+    }
+    for failure in report.skipped().iter().chain(report.failures().iter()) {
+        let id = failure
+            .id()
+            .map_or_else(|| "<unknown>".to_string(), ToString::to_string);
+        notices.push(format!(
+            "dynamic plugin `{id}` unavailable: {}",
+            failure.reason()
+        ));
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum SessionError {
     Config(ProviderConfigError),
@@ -2476,6 +2689,7 @@ pub(crate) enum SessionError {
     Capability(CapabilityError),
     Catalog(CatalogError),
     Host(PluginHostError),
+    DynamicDiscovery(PluginDiscoveryManagerError),
     Composition(CompositionError),
     Cordis(RuntimeError),
     ProviderMismatch {
@@ -2494,6 +2708,9 @@ impl fmt::Display for SessionError {
             Self::Capability(error) => write!(formatter, "capability is invalid: {error}"),
             Self::Catalog(error) => write!(formatter, "capability routing failed: {error}"),
             Self::Host(error) => write!(formatter, "plugin host failed: {error}"),
+            Self::DynamicDiscovery(error) => {
+                write!(formatter, "dynamic plugin discovery failed: {error}")
+            }
             Self::Composition(error) => write!(formatter, "plugin composition failed: {error}"),
             Self::Cordis(error) => write!(formatter, "Cordis runtime failed: {error}"),
             Self::ProviderMismatch {
@@ -2519,6 +2736,7 @@ impl Error for SessionError {
             Self::Capability(error) => Some(error),
             Self::Catalog(error) => Some(error),
             Self::Host(error) => Some(error),
+            Self::DynamicDiscovery(error) => Some(error),
             Self::Composition(error) => Some(error),
             Self::Cordis(error) => Some(error),
             Self::ProviderMismatch { .. } => None,
@@ -2559,6 +2777,12 @@ impl From<CatalogError> for SessionError {
 impl From<PluginHostError> for SessionError {
     fn from(error: PluginHostError) -> Self {
         Self::Host(error)
+    }
+}
+
+impl From<PluginDiscoveryManagerError> for SessionError {
+    fn from(error: PluginDiscoveryManagerError) -> Self {
+        Self::DynamicDiscovery(error)
     }
 }
 

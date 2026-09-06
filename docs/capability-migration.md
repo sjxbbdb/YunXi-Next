@@ -31,7 +31,7 @@ surfaces. They are not allowed to bypass the trusted approval or routing layer.
 
 | Domain | Legacy owner | YunXi Next contract | Target process | Status |
 | --- | --- | --- | --- | --- |
-| Model completion | `yunxi-agent-provider` | `model.chat@1:complete` | `yunxi-model-openai` | Baseline integrated: isolated request loop, required network/provider-credential manifest grants, API failure containment, and optional bounded tool-call response; token streaming and credential brokering still pending |
+| Model completion | `yunxi-agent-provider` | `model.chat@1:complete` | `yunxi-model-openai` | Baseline integrated: isolated request loop, required network/provider-credential manifest grants, API failure containment, optional bounded tool-call response, and bounded SSE streaming at the library/Agent adapter; CLI/Web remains full-response until carrier integration, and credential brokering is pending |
 | Prompt and AGENTS context | `yunxi-agent-context` | `context.compose@1:compose` | `yunxi-context` | Integrated: bounded root-to-cwd read path |
 | Persona and soul | `yunxi-agent-persona` | `persona.context@1:compile` | `yunxi-persona` | Integrated: default/custom profile and soul read path |
 | Memory recall | `yunxi-agent-persona`, `yunxi-agent-storage` | `memory.recall@1:recall` | `yunxi-memory` | Integrated: bounded legacy + Next JSONL recall |
@@ -63,13 +63,15 @@ capability contracts rather than migrated as one runtime plugin.
 
 Legacy `yunxi-agent-cli`, `yunxi-agent-tui`, and the embedded Web server are
 interaction surfaces. They consume the same plugin catalog. The current Web
-settings page renders the bounded built-in inventory and persists enable/disable
-state without loading disabled plugin code. A successful Web write rebuilds the
-current Host composition; the WebHost does not hot-unmount a single running
-plugin in place. A standalone CLI process reads the setting when its next Host
-is created. `yunxi-settings` has 15 built-in keys, and the current CLI/Web launch
-path exposes all 15 connected optional entries; `voice` and `weixin` remain
-fixture routes until their production adapters exist.
+settings page renders the bounded built-in and discovered package inventory and
+persists enable/disable state without loading disabled plugin code. A successful
+Web write rebuilds the current Host composition; the WebHost does not hot-unmount
+a single running plugin in place. The dynamic package manager rescans its
+explicit directory at refresh/inventory boundaries and can replace or unload
+manager-owned processes and routes. A standalone CLI process reads the setting
+when its next Host is created. `yunxi-settings` has 15 built-in keys, and the
+current CLI/Web launch path exposes all 15 connected optional entries;
+`voice` and `weixin` remain fixture routes until their production adapters exist.
 
 `yunxi-agent-eval` remains development infrastructure. Its scenarios become
 cross-plugin acceptance fixtures instead of a runtime capability.
@@ -97,6 +99,9 @@ cross-plugin acceptance fixtures instead of a runtime capability.
    changes persisted enable state, and shows lifecycle health from the kernel
    and plugin host. Manifest metadata remains Host-owned at the dsh wire
    boundary; WebHost rebuilds its current composition after a successful write.
+   An explicit dynamic package directory is discovered, dependency-ordered,
+   reconciled, and unloaded through `yunxi-plugin-host`; invalid or crashing
+   packages remain isolated from healthy siblings.
 
 ## Voice Migration Boundary
 

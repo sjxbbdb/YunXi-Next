@@ -52,6 +52,11 @@ pub enum ToolExecutionOutcome {
     AwaitingApproval(ToolApprovalRequest),
 }
 
+/// Receives bounded progress callbacks from a tool adapter.
+pub trait ToolProgressSink {
+    fn progress(&mut self, progress: &str) -> Result<(), ToolError>;
+}
+
 /// Supplies the approval decision for a tool call.
 pub trait ToolApprovalPolicy {
     fn decide(&mut self, request: &ToolRequest<'_>) -> Result<ToolDecision, ToolError>;
@@ -83,6 +88,28 @@ pub trait ToolBroker {
         request: ToolRequest<'_>,
         cancellation: &CancellationToken,
     ) -> Result<ToolResultOutcome, ToolError>;
+
+    /// Streaming extension point with a compatibility default.  Existing
+    /// synchronous brokers continue to use `execute` unchanged.
+    fn execute_with_progress(
+        &mut self,
+        request: ToolRequest<'_>,
+        cancellation: &CancellationToken,
+        _progress: &mut dyn ToolProgressSink,
+    ) -> Result<ToolResultOutcome, ToolError> {
+        self.execute(request, cancellation)
+    }
+
+    /// Approval-aware equivalent of [`Self::execute_with_progress`].
+    fn execute_with_approval_and_progress(
+        &mut self,
+        request: ToolRequest<'_>,
+        approval: Option<&ToolApprovalDecision>,
+        cancellation: &CancellationToken,
+        _progress: &mut dyn ToolProgressSink,
+    ) -> Result<ToolExecutionOutcome, ToolError> {
+        self.execute_with_approval(request, approval, cancellation)
+    }
 
     /// Executes a call after a matching approval has been supplied.
     ///

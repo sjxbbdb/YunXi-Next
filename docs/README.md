@@ -13,3 +13,4 @@ stays beside the crate that owns it.
 | [`cordis-rust-architecture.md`](cordis-rust-architecture.md) | Cordis Rust meta-kernel, Agent spine, plugin isolation, and integration boundary |
 | [`provider-configuration.md`](provider-configuration.md) | Provider configuration, persisted capability settings, and environment precedence |
 | [`dsh-web-compatibility.md`](dsh-web-compatibility.md) | dsh upstream record, MIT attribution, and Web compatibility boundary |
+| [`acceptance-audit.md`](acceptance-audit.md) | Security, release, loopback, legacy-isolation, and failure acceptance gates |

@@ -4,6 +4,8 @@
 //! device, media bytes, or async runtime integration.
 #![forbid(unsafe_code)]
 
+mod adapter;
+mod control;
 mod error;
 mod fixture;
 mod identifiers;
@@ -12,6 +14,15 @@ mod message;
 mod plugin;
 mod state;
 
+pub use adapter::{
+    HttpRequest, HttpResponse, HttpTransport, MAX_ENDPOINT_BYTES, MAX_REPLAY_ENTRIES,
+    MAX_SECRET_BYTES, MAX_SECRET_REF_BYTES, MAX_WEBHOOK_BODY_BYTES, MockTransport, OutboundResult,
+    SecretError, SecretMaterial, SecretRef, SecretResolver, SignatureAlgorithm, SignatureError,
+    SignatureInput, SignatureVerifier, StaticSecretResolver, TransportError, WebhookAck,
+    WebhookAdapter, WebhookAdapterState, WebhookConfig, WebhookRequest, WeixinAdapterError,
+    WeixinSha1Verifier,
+};
+pub use control::{CancellationToken, RequestContext, RequestControlError};
 pub use error::WeixinContractError;
 pub use fixture::{InboundFixture, OutboundFixture, inbound_fixture, outbound_fixture};
 pub use identifiers::{

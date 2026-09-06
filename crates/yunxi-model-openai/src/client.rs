@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use yunxi_protocol::{ChatMessage, ChatRole, ToolCall, ToolCatalog};
 
 use crate::ProviderConfig;
+use crate::streaming::{ChatStreamEvent, StreamObserverError, StreamOptions, consume_response};
 
 const MAX_RESPONSE_BYTES: u64 = 32 * 1024 * 1024;
 
@@ -57,7 +58,73 @@ impl OpenAiChatClient {
             .json(&request)
             .send()
             .map_err(ApiError::Transport)?;
-        parse_response(response)
+        parse_response(response, self.config.api_key())
+    }
+
+    /// Stream an OpenAI-compatible response and return its bounded aggregate.
+    ///
+    /// The observer is called synchronously for every text/tool delta. A
+    /// caller can apply backpressure by doing bounded work in the callback or
+    /// return an error to stop the request. The default limits are deliberately
+    /// finite; use the cancelable form when a Host cancellation token exists.
+    pub fn stream_with_tools<F>(
+        &self,
+        messages: &[ChatMessage],
+        tools: Option<&ToolCatalog>,
+        observer: F,
+    ) -> Result<ChatCompletion, ApiError>
+    where
+        F: FnMut(ChatStreamEvent) -> Result<(), StreamObserverError>,
+    {
+        self.stream_with_tools_cancelable(
+            messages,
+            tools,
+            StreamOptions::default(),
+            || false,
+            observer,
+        )
+    }
+
+    pub fn stream_with_tools_cancelable<F, C>(
+        &self,
+        messages: &[ChatMessage],
+        tools: Option<&ToolCatalog>,
+        options: StreamOptions,
+        is_cancelled: C,
+        observer: F,
+    ) -> Result<ChatCompletion, ApiError>
+    where
+        F: FnMut(ChatStreamEvent) -> Result<(), StreamObserverError>,
+        C: Fn() -> bool,
+    {
+        if messages.is_empty() {
+            return Err(ApiError::InvalidResponse(
+                "chat request must contain at least one message".to_string(),
+            ));
+        }
+        let request = ChatCompletionRequest {
+            model: self.config.model().to_string(),
+            messages: messages
+                .iter()
+                .map(ApiChatMessage::from_protocol)
+                .collect::<Result<Vec<_>, _>>()?,
+            tools: tools.map(ApiToolDefinition::from_protocol),
+            stream: true,
+        };
+        let response = self
+            .client
+            .post(self.config.chat_completions_url())
+            .bearer_auth(self.config.api_key())
+            .json(&request)
+            .send()
+            .map_err(ApiError::Transport)?;
+        consume_response(
+            response,
+            self.config.api_key(),
+            options,
+            is_cancelled,
+            observer,
+        )
     }
 
     pub fn config(&self) -> &ProviderConfig {
@@ -73,6 +140,18 @@ pub struct ChatCompletion {
 }
 
 impl ChatCompletion {
+    pub(crate) fn from_parts(
+        content: String,
+        finish_reason: Option<String>,
+        tool_calls: Vec<ToolCall>,
+    ) -> Self {
+        Self {
+            content,
+            finish_reason,
+            tool_calls,
+        }
+    }
+
     pub fn content(&self) -> &str {
         &self.content
     }
@@ -97,6 +176,11 @@ pub enum ApiError {
     ResponseTooLarge {
         limit: u64,
     },
+    Cancelled,
+    StreamLimitExceeded {
+        limit: usize,
+    },
+    StreamObserver(String),
     InvalidResponse(String),
 }
 
@@ -106,6 +190,9 @@ impl ApiError {
             Self::Transport(_) => "transport_error",
             Self::Http { .. } => "http_error",
             Self::ResponseTooLarge { .. } => "response_too_large",
+            Self::Cancelled => "cancelled",
+            Self::StreamLimitExceeded { .. } => "stream_limit_exceeded",
+            Self::StreamObserver(_) => "stream_observer_error",
             Self::InvalidResponse(_) => "invalid_response",
         }
     }
@@ -114,7 +201,11 @@ impl ApiError {
         match self {
             Self::Transport(error) => error.is_connect() || error.is_timeout(),
             Self::Http { retryable, .. } => *retryable,
-            Self::ResponseTooLarge { .. } | Self::InvalidResponse(_) => false,
+            Self::ResponseTooLarge { .. }
+            | Self::Cancelled
+            | Self::StreamLimitExceeded { .. }
+            | Self::StreamObserver(_)
+            | Self::InvalidResponse(_) => false,
         }
     }
 }
@@ -129,6 +220,13 @@ impl fmt::Display for ApiError {
             Self::ResponseTooLarge { limit } => {
                 write!(formatter, "model API response exceeded {limit} bytes")
             }
+            Self::Cancelled => formatter.write_str("model API stream was cancelled"),
+            Self::StreamLimitExceeded { limit } => {
+                write!(formatter, "model API stream exceeded {limit} events")
+            }
+            Self::StreamObserver(message) => {
+                write!(formatter, "model API stream observer stopped: {message}")
+            }
             Self::InvalidResponse(message) => {
                 write!(formatter, "model API response was invalid: {message}")
             }
@@ -140,7 +238,12 @@ impl Error for ApiError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Transport(error) => Some(error),
-            Self::Http { .. } | Self::ResponseTooLarge { .. } | Self::InvalidResponse(_) => None,
+            Self::Http { .. }
+            | Self::ResponseTooLarge { .. }
+            | Self::Cancelled
+            | Self::StreamLimitExceeded { .. }
+            | Self::StreamObserver(_)
+            | Self::InvalidResponse(_) => None,
         }
     }
 }
@@ -302,7 +405,22 @@ struct ErrorBody {
     message: Option<String>,
 }
 
-fn parse_response(mut response: Response) -> Result<ChatCompletion, ApiError> {
+pub(crate) fn redact_provider_message(message: impl Into<String>, secret: &str) -> String {
+    let mut message = message.into();
+    if !secret.is_empty() {
+        message = message.replace(secret, "[redacted]");
+    }
+    if message.len() > 2_048 {
+        let mut end = 2_048;
+        while !message.is_char_boundary(end) {
+            end = end.saturating_sub(1);
+        }
+        message.truncate(end);
+    }
+    message
+}
+
+fn parse_response(mut response: Response, secret: &str) -> Result<ChatCompletion, ApiError> {
     let status = response.status();
     let body = read_bounded(&mut response)?;
     if !status.is_success() {
@@ -314,11 +432,14 @@ fn parse_response(mut response: Response) -> Result<ChatCompletion, ApiError> {
             .unwrap_or_else(|| String::from_utf8_lossy(&body).trim().to_string());
         return Err(ApiError::Http {
             status: status.as_u16(),
-            message: if message.is_empty() {
-                "empty error response".to_string()
-            } else {
-                message
-            },
+            message: redact_provider_message(
+                if message.is_empty() {
+                    "empty error response".to_string()
+                } else {
+                    message
+                },
+                secret,
+            ),
             retryable: status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error(),
         });
     }
@@ -525,6 +646,56 @@ mod tests {
             completion.tool_calls()[0].arguments()["command"],
             "echo hello"
         );
+        server.join().expect("join mock API");
+    }
+
+    #[test]
+    fn provider_error_diagnostics_redact_the_configured_credential() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+        let address = listener.local_addr().expect("read mock API address");
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept API request");
+            let mut reader = BufReader::new(stream.try_clone().expect("clone API stream"));
+            let mut content_length = 0_usize;
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).expect("read request header");
+                if line == "\r\n" || line.is_empty() {
+                    break;
+                }
+                if let Some((name, value)) = line.split_once(':')
+                    && name.eq_ignore_ascii_case("content-length")
+                {
+                    content_length = value.trim().parse().expect("content length");
+                }
+            }
+            let mut request_body = vec![0_u8; content_length];
+            reader
+                .read_exact(&mut request_body)
+                .expect("read request body");
+            let body = r#"{"error":{"message":"invalid key test-key"}}"#;
+            write!(
+                stream,
+                "HTTP/1.1 401 Unauthorized\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .expect("write API response");
+        });
+        let config = ProviderConfig::new(
+            "fixture",
+            "fixture-model",
+            format!("http://{address}"),
+            "test-key",
+        )
+        .expect("create provider config")
+        .with_timeout(Duration::from_secs(2));
+        let client = OpenAiChatClient::new(config).expect("create API client");
+        let error = client
+            .complete(&[ChatMessage::user("hello")])
+            .expect_err("error response");
+        assert!(!error.to_string().contains("test-key"));
+        assert!(error.to_string().contains("[redacted]"));
         server.join().expect("join mock API");
     }
 }
