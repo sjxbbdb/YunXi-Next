@@ -1,7 +1,7 @@
 //! One-thread-per-plugin child process supervision.
 
 use std::io;
-use std::process::Child;
+use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -127,6 +127,30 @@ fn terminate_child(child: &mut Child) {
     if let Ok(Some(_)) = child.try_wait() {
         return;
     }
+    terminate_process_tree(child.id());
     let _ignored = child.kill();
     let _ignored = child.wait();
 }
+
+#[cfg(windows)]
+fn terminate_process_tree(pid: u32) {
+    let _ignored = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+#[cfg(unix)]
+fn terminate_process_tree(pid: u32) {
+    let _ignored = Command::new("kill")
+        .args(["-KILL", &format!("-{pid}")])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+}
+
+#[cfg(not(any(unix, windows)))]
+fn terminate_process_tree(_pid: u32) {}

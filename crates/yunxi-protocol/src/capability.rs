@@ -18,12 +18,18 @@ pub mod capabilities {
     pub const CONTEXT_COMPOSE_VERSION: u32 = 1;
     pub const PERSONA_CONTEXT: &str = "persona.context";
     pub const PERSONA_CONTEXT_VERSION: u32 = 1;
+    pub const PERSONA_MANAGEMENT: &str = "persona.management";
+    pub const PERSONA_MANAGEMENT_VERSION: u32 = 1;
     pub const MEMORY_RECALL: &str = "memory.recall";
     pub const MEMORY_RECALL_VERSION: u32 = 1;
     pub const MEMORY_WRITE: &str = "memory.write";
     pub const MEMORY_WRITE_VERSION: u32 = 1;
+    pub const MEMORY_MANAGEMENT: &str = "memory.management";
+    pub const MEMORY_MANAGEMENT_VERSION: u32 = 1;
     pub const COMPANION_DECIDE: &str = "companion.decide";
     pub const COMPANION_DECIDE_VERSION: u32 = 1;
+    pub const COMPANION_MANAGEMENT: &str = "companion.management";
+    pub const COMPANION_MANAGEMENT_VERSION: u32 = 1;
     pub const COMPANION_MAILBOX: &str = "companion.mailbox";
     pub const COMPANION_MAILBOX_VERSION: u32 = 1;
     pub const SCHEDULER_PROACTIVE: &str = "scheduler.proactive";
@@ -53,9 +59,12 @@ pub mod capabilities {
         MODEL_CHAT,
         CONTEXT_COMPOSE,
         PERSONA_CONTEXT,
+        PERSONA_MANAGEMENT,
         MEMORY_RECALL,
         MEMORY_WRITE,
+        MEMORY_MANAGEMENT,
         COMPANION_DECIDE,
+        COMPANION_MANAGEMENT,
         COMPANION_MAILBOX,
         SCHEDULER_PROACTIVE,
         STORAGE_SESSIONS,
@@ -342,6 +351,10 @@ mod tests {
                 capabilities::PERSONA_CONTEXT_VERSION,
             ),
             (
+                capabilities::PERSONA_MANAGEMENT,
+                capabilities::PERSONA_MANAGEMENT_VERSION,
+            ),
+            (
                 capabilities::MEMORY_RECALL,
                 capabilities::MEMORY_RECALL_VERSION,
             ),
@@ -350,8 +363,16 @@ mod tests {
                 capabilities::MEMORY_WRITE_VERSION,
             ),
             (
+                capabilities::MEMORY_MANAGEMENT,
+                capabilities::MEMORY_MANAGEMENT_VERSION,
+            ),
+            (
                 capabilities::COMPANION_DECIDE,
                 capabilities::COMPANION_DECIDE_VERSION,
+            ),
+            (
+                capabilities::COMPANION_MANAGEMENT,
+                capabilities::COMPANION_MANAGEMENT_VERSION,
             ),
             (
                 capabilities::COMPANION_MAILBOX,

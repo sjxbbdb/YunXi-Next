@@ -43,6 +43,61 @@ fn once_mode_crosses_the_isolated_plugin_boundary() {
 }
 
 #[test]
+fn configured_host_secret_store_is_encrypted_and_required_key_is_fail_closed() {
+    let workspace = unique_temp_dir("yunxi-host-secret-store");
+    fs::create_dir_all(&workspace).expect("create secret workspace");
+    let store = workspace.join("host-secrets.bin");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let server = thread::spawn(move || serve_one_request(listener));
+
+    let child = configured_cli(address)
+        .current_dir(&workspace)
+        .env("YUNXI_NEXT_HOST_SECRET_STORE", &store)
+        .env("YUNXI_NEXT_HOST_SECRET_KEY_HEX", "3c".repeat(32))
+        .args(["--once", "persist through the host broker"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch CLI with encrypted Host broker");
+    let output = wait_for_cli(child);
+    server.join().expect("join mock API");
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let encoded = fs::read(&store).expect("read encrypted Host store");
+    assert!(encoded.starts_with(b"YXSBRK01"));
+    assert!(
+        !encoded
+            .windows(b"fixture-secret".len())
+            .any(|window| { window == b"fixture-secret" })
+    );
+
+    let rejected = configured_cli("127.0.0.1:1".parse().expect("socket address"))
+        .current_dir(&workspace)
+        .env(
+            "YUNXI_NEXT_HOST_SECRET_STORE",
+            workspace.join("missing-key.bin"),
+        )
+        .args(["--once", "must fail before network"])
+        .output()
+        .expect("launch CLI with incomplete Host secret configuration");
+    assert!(!rejected.status.success());
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr)
+            .contains("YUNXI_NEXT_HOST_SECRET_STORE requires YUNXI_NEXT_HOST_SECRET_KEY_HEX")
+    );
+    assert!(!workspace.join("missing-key.bin").exists());
+
+    fs::remove_dir_all(workspace).expect("remove secret workspace");
+}
+
+#[test]
 fn enabled_skills_inject_bounded_context_and_dynamic_metadata_tools() {
     let workspace = unique_temp_dir("yunxi-skills-context");
     let skill_dir = workspace.join("skills").join("review");
@@ -169,6 +224,94 @@ fn metadata_only_skill_tool_call_is_rejected_without_approval() {
     );
     assert!(String::from_utf8_lossy(&output.stdout).contains("metadata tool stayed isolated"));
     assert!(!String::from_utf8_lossy(&output.stdout).contains("Approval required"));
+    let _ignored = fs::remove_dir_all(workspace);
+}
+
+#[test]
+fn executable_skill_action_requires_approval_and_returns_a_bounded_audit_result() {
+    let workspace = unique_temp_dir("yunxi-skills-executable-action");
+    let skill_dir = workspace.join("skills").join("review");
+    fs::create_dir_all(skill_dir.join("bin")).expect("create Skill action directory");
+    fs::write(skill_dir.join("SKILL.md"), "review instructions\n").expect("write Skill");
+    fs::write(
+        skill_dir.join("tools.json"),
+        r#"[{"name":"check","description":"Run bounded check","input_schema":{"type":"object"}}]"#,
+    )
+    .expect("write Skill tool metadata");
+    let program_name = compile_skill_action_fixture(&skill_dir.join("bin"));
+    fs::write(
+        skill_dir.join("actions.json"),
+        serde_json::to_vec(&serde_json::json!([{
+            "tool_name": "check",
+            "program": format!("bin/{program_name}"),
+            "arguments": [],
+            "timeout_millis": 2_000,
+            "max_output_bytes": 4_096,
+            "requires_workspace_write": false
+        }]))
+        .expect("encode actions manifest"),
+    )
+    .expect("write actions manifest");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let server = thread::spawn(move || {
+        let (first_stream, first_body) = accept_request(&listener);
+        assert!(
+            first_body.contains("approval-required executable action"),
+            "body: {first_body}"
+        );
+        write_response(
+            first_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":null,"tool_calls":[{"id":"skill-action-1","type":"function","function":{"name":"skill.review.check","arguments":"{\"value\":\"hello\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+        );
+        let (second_stream, second_body) = accept_request(&listener);
+        assert!(
+            second_body.contains("skill executed"),
+            "body: {second_body}"
+        );
+        assert!(second_body.contains("audit_id"), "body: {second_body}");
+        assert!(second_body.contains("skill-action-"), "body: {second_body}");
+        write_response(
+            second_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"Skill action complete"},"finish_reason":"stop"}]}"#,
+        );
+    });
+
+    let mut child = configured_cli(address)
+        .current_dir(&workspace)
+        .env("YUNXI_NEXT_SKILLS_ENABLED", "true")
+        .env("YUNXI_NEXT_SKILLS_ACTIONS_ENABLED", "true")
+        .env("YUNXI_NEXT_SKILLS_ROOT", workspace.join("skills"))
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch CLI with executable Skill action");
+    child
+        .stdin
+        .take()
+        .expect("open CLI stdin")
+        .write_all(b"run the Skill action\n/approve\n/quit\n")
+        .expect("write Skill action prompt");
+    let output = wait_for_cli(child);
+    server.join().expect("join mock API");
+
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 output");
+    assert!(stdout.contains("Approval required"), "stdout: {stdout}");
+    assert!(stdout.contains("Skill action complete"), "stdout: {stdout}");
     let _ignored = fs::remove_dir_all(workspace);
 }
 
@@ -1183,6 +1326,118 @@ fn approved_multi_agent_spawn_uses_an_isolated_model_process_and_persists_result
 }
 
 #[test]
+fn child_agent_executes_only_the_granted_file_tool_and_persists_the_turn() {
+    let workspace = unique_temp_dir("yunxi-multi-agent-child-file-tool");
+    let source = workspace.join("src").join("main.rs");
+    fs::create_dir_all(source.parent().expect("source parent")).expect("create source directory");
+    fs::write(
+        &source,
+        "fn delegated() -> &'static str { \"real file plugin\" }\n",
+    )
+    .expect("write delegated source");
+
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock API");
+    listener
+        .set_nonblocking(true)
+        .expect("make mock API nonblocking");
+    let address = listener.local_addr().expect("read mock API address");
+    let server = thread::spawn(move || {
+        let (parent_stream, parent_body) = accept_request(&listener);
+        assert!(
+            parent_body.contains("agent.spawn"),
+            "parent body: {parent_body}"
+        );
+        write_response(
+            parent_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":null,"tool_calls":[{"id":"agent-spawn-file-1","type":"function","function":{"name":"agent.spawn","arguments":"{\"task\":\"read the delegated source\",\"grants\":[\"workspace_read\"]}"}}]},"finish_reason":"tool_calls"}]}"#,
+        );
+
+        let (child_tool_stream, child_tool_body) = accept_request(&listener);
+        assert!(
+            child_tool_body.contains("file.read"),
+            "the child must receive the executable read-only catalog: {child_tool_body}"
+        );
+        assert!(
+            !child_tool_body.contains("shell.execute"),
+            "shell must not be exposed to the child: {child_tool_body}"
+        );
+        write_response(
+            child_tool_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":null,"tool_calls":[{"id":"child-file-read-1","type":"function","function":{"name":"file.read","arguments":"{\"path\":\"src/main.rs\"}"}}]},"finish_reason":"tool_calls"}]}"#,
+        );
+
+        let (child_completion_stream, child_completion_body) = accept_request(&listener);
+        assert!(
+            child_completion_body.contains("real file plugin"),
+            "the real file result must return to the child model: {child_completion_body}"
+        );
+        assert!(
+            child_completion_body.contains("src/main.rs"),
+            "the child model should receive the requested path in the tool result: {child_completion_body}"
+        );
+        write_response(
+            child_completion_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"child read the granted file"},"finish_reason":"stop"}]}"#,
+        );
+
+        let (parent_continuation_stream, parent_continuation_body) = accept_request(&listener);
+        assert!(
+            parent_continuation_body.contains("child read the granted file"),
+            "parent continuation body: {parent_continuation_body}"
+        );
+        write_response(
+            parent_continuation_stream,
+            "200 OK",
+            r#"{"choices":[{"message":{"content":"parent received a real child tool result"},"finish_reason":"stop"}]}"#,
+        );
+    });
+
+    let mut child = configured_cli(address)
+        .current_dir(&workspace)
+        .env("YUNXI_NEXT_MULTI_AGENT_ENABLED", "true")
+        .env("YUNXI_NEXT_FILES_ENABLED", "true")
+        .env("YUNXI_NEXT_CONTEXT_ENABLED", "false")
+        .env("YUNXI_NEXT_PERSONA_ENABLED", "false")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("launch CLI with child file tool");
+    child
+        .stdin
+        .take()
+        .expect("open CLI stdin")
+        .write_all(b"delegate a file inspection\n/approve\n/quit\n")
+        .expect("write child file tool prompt");
+    let output = wait_for_cli(child);
+    server.join().expect("join mock API");
+
+    assert!(
+        output.status.success(),
+        "CLI failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("UTF-8 output");
+    assert!(
+        stdout.contains("parent received a real child tool result"),
+        "stdout: {stdout}"
+    );
+    let state_path = fs::read_dir(workspace.join(".yunxi-next/multi-agent"))
+        .expect("read multi-agent state")
+        .next()
+        .expect("state entry")
+        .expect("state path")
+        .path();
+    let state = fs::read_to_string(state_path).expect("read state");
+    assert!(state.contains("child read the granted file"));
+    assert!(state.contains("\"status\": \"completed\""));
+    fs::remove_dir_all(workspace).expect("remove workspace");
+}
+
+#[test]
 fn child_model_api_failure_ends_only_that_branch_and_parent_model_continues() {
     let workspace = unique_temp_dir("yunxi-multi-agent-failure");
     fs::create_dir_all(&workspace).expect("create workspace");
@@ -1656,9 +1911,47 @@ fn configured_cli(address: std::net::SocketAddr) -> Command {
         .env("YUNXI_NEXT_MAILBOX_ENABLED", "false")
         .env("YUNXI_NEXT_SCHEDULER_ENABLED", "false")
         .env("YUNXI_NEXT_STORAGE_ENABLED", "false")
+        .env_remove("YUNXI_NEXT_HOST_SECRET_STORE")
+        .env_remove("YUNXI_NEXT_HOST_SECRET_KEY_HEX")
         .env("NO_PROXY", "127.0.0.1,localhost")
         .env("no_proxy", "127.0.0.1,localhost");
     command
+}
+
+fn compile_skill_action_fixture(directory: &std::path::Path) -> String {
+    let source = directory.join("action_fixture.rs");
+    let program_name = format!("action-fixture{}", std::env::consts::EXE_SUFFIX);
+    let program = directory.join(&program_name);
+    fs::write(
+        &source,
+        r##"
+use std::io::{self, Read};
+
+fn main() {
+    let mut request = String::new();
+    io::stdin()
+        .read_to_string(&mut request)
+        .expect("read action request");
+    assert!(!request.trim().is_empty());
+    println!("{}", r#"{"protocol_version":1,"outcome":"success","exit_code":0,"stdout":"skill executed","stderr":"","output_truncated":false}"#);
+}
+"##,
+    )
+    .expect("write Skill action fixture source");
+    let rustc = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    let output = Command::new(rustc)
+        .arg("--edition=2024")
+        .arg(&source)
+        .arg("-o")
+        .arg(&program)
+        .output()
+        .expect("compile Skill action fixture");
+    assert!(
+        output.status.success(),
+        "Skill action fixture compilation failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    program_name
 }
 
 fn wait_for_cli(mut child: std::process::Child) -> std::process::Output {

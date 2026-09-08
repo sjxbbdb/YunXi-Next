@@ -17,7 +17,7 @@ struct CancellationInner {
     cancelled: AtomicBool,
     info: OnceLock<CancellationInfo>,
     deadline: Option<Instant>,
-    parent: Option<Arc<CancellationInner>>,
+    parents: Vec<Arc<CancellationInner>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -39,7 +39,7 @@ impl CancellationToken {
                 cancelled: AtomicBool::new(false),
                 info: OnceLock::new(),
                 deadline: None,
-                parent: None,
+                parents: Vec::new(),
             }),
         }
     }
@@ -57,7 +57,7 @@ impl CancellationToken {
                 cancelled: AtomicBool::new(false),
                 info: OnceLock::new(),
                 deadline: Some(deadline),
-                parent: None,
+                parents: Vec::new(),
             }),
         }
     }
@@ -76,7 +76,18 @@ impl CancellationToken {
                 cancelled: AtomicBool::new(false),
                 info: OnceLock::new(),
                 deadline: Some(deadline),
-                parent: Some(Arc::clone(&parent.inner)),
+                parents: vec![Arc::clone(&parent.inner)],
+            }),
+        }
+    }
+
+    pub(crate) fn linked(first: &Self, second: &Self) -> Self {
+        Self {
+            inner: Arc::new(CancellationInner {
+                cancelled: AtomicBool::new(false),
+                info: OnceLock::new(),
+                deadline: None,
+                parents: vec![Arc::clone(&first.inner), Arc::clone(&second.inner)],
             }),
         }
     }
@@ -130,7 +141,7 @@ impl CancellationToken {
     }
 
     fn expire_or_follow_parent(&self) {
-        if let Some(parent) = &self.inner.parent {
+        for parent in &self.inner.parents {
             if let Some(info) = parent_info(parent) {
                 self.trigger(info.kind, info.reason);
                 return;
@@ -245,7 +256,7 @@ fn parent_info(parent: &CancellationInner) -> Option<CancellationInfo> {
             reason: "turn timed out".to_string(),
         });
     }
-    parent.parent.as_deref().and_then(parent_info)
+    parent.parents.iter().find_map(|parent| parent_info(parent))
 }
 
 #[cfg(test)]
@@ -281,5 +292,16 @@ mod tests {
         let error = child.check().expect_err("child cancellation");
         assert_eq!(error.code(), "cancelled");
         assert_eq!(error.reason(), "user stopped");
+    }
+
+    #[test]
+    fn linked_token_follows_either_parent() {
+        let original = CancellationToken::new();
+        let approval_call = CancellationToken::new();
+        let linked = CancellationToken::linked(&original, &approval_call);
+
+        approval_call.cancel("approval call stopped");
+        let error = linked.check().expect_err("linked cancellation");
+        assert_eq!(error.reason(), "approval call stopped");
     }
 }

@@ -6,7 +6,9 @@ use std::thread::JoinHandle;
 
 use super::{KernelSnapshot, KernelState};
 use crate::supervision::{SupervisorCommand, SupervisorEvent, SupervisorHandle, spawn_supervisor};
-use crate::{KernelError, PluginFailure, PluginId, PluginSnapshot, PluginSpec, PluginState};
+use crate::{
+    KernelError, KernelLimits, PluginFailure, PluginId, PluginSnapshot, PluginSpec, PluginState,
+};
 
 struct PluginSlot {
     spec: PluginSpec,
@@ -41,6 +43,7 @@ impl PluginSlot {
 
 pub struct YunxiKernel {
     state: KernelState,
+    limits: KernelLimits,
     plugins: BTreeMap<PluginId, PluginSlot>,
     event_sender: Sender<SupervisorEvent>,
     event_receiver: Receiver<SupervisorEvent>,
@@ -48,9 +51,14 @@ pub struct YunxiKernel {
 
 impl YunxiKernel {
     pub fn new() -> Self {
+        Self::with_limits(KernelLimits::default())
+    }
+
+    pub fn with_limits(limits: KernelLimits) -> Self {
         let (event_sender, event_receiver) = mpsc::channel();
         Self {
             state: KernelState::Running,
+            limits,
             plugins: BTreeMap::new(),
             event_sender,
             event_receiver,
@@ -65,11 +73,29 @@ impl YunxiKernel {
         self.state == KernelState::Running
     }
 
+    pub const fn limits(&self) -> KernelLimits {
+        self.limits
+    }
+
     pub fn register(&mut self, spec: PluginSpec) -> Result<(), KernelError> {
         self.ensure_running()?;
         let id = spec.id().clone();
         if self.plugins.contains_key(&id) {
             return Err(KernelError::DuplicatePlugin { id });
+        }
+        if self.plugins.len() >= self.limits.max_plugins() {
+            return Err(KernelError::PluginLimit {
+                resource: "plugin count",
+                limit: self.limits.max_plugins(),
+            });
+        }
+        if let Err(violation) = self.limits.validate_spec(&spec) {
+            return Err(KernelError::InvalidPluginCommand {
+                id,
+                resource: violation.resource,
+                limit: violation.limit,
+                actual: violation.actual,
+            });
         }
         self.plugins.insert(id, PluginSlot::new(spec));
         Ok(())
@@ -380,6 +406,27 @@ mod tests {
         assert!(matches!(
             kernel.unregister(&id),
             Err(KernelError::UnknownPlugin { .. })
+        ));
+    }
+
+    #[test]
+    fn registration_rejects_commands_over_the_admission_limit() {
+        let limits = KernelLimits::default().with_max_argument_bytes(1);
+        let mut kernel = YunxiKernel::with_limits(limits);
+        let id = PluginId::new("yunxi.test.limit").expect("valid id");
+        let error = kernel
+            .register(PluginSpec::new(
+                id.clone(),
+                PluginCommand::new("plugin").arg("too-long"),
+            ))
+            .expect_err("oversized command must be rejected");
+        assert!(matches!(
+            error,
+            KernelError::InvalidPluginCommand {
+                id: error_id,
+                resource: "argument bytes",
+                ..
+            } if error_id == id
         ));
     }
 }

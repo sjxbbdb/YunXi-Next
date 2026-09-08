@@ -1,0 +1,16 @@
+[package]
+name = "yunxi-secret-broker"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[dependencies]
+atomic-write-file = "0.3.1"
+chacha20poly1305 = "0.10"
+fs2 = "0.4"
+getrandom = "0.3"
+zeroize = "1.8"
+
+[lints]
+workspace = true

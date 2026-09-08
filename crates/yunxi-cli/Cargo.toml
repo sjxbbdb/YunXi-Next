@@ -6,6 +6,7 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+crossterm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 yunxi-companion = { path = "../yunxi-companion" }
@@ -23,6 +24,7 @@ yunxi-persona = { path = "../yunxi-persona" }
 yunxi-plugin-host = { path = "../yunxi-plugin-host" }
 yunxi-protocol = { path = "../yunxi-protocol" }
 yunxi-scheduler = { path = "../yunxi-scheduler" }
+yunxi-secret-broker = { path = "../yunxi-secret-broker" }
 yunxi-settings = { path = "../yunxi-settings" }
 yunxi-storage = { path = "../yunxi-storage" }
 yunxi-tool-patch = { path = "../yunxi-tool-patch" }

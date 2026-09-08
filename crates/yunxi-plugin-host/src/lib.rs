@@ -4,8 +4,10 @@
 mod catalog;
 mod discovery;
 mod manager;
+mod resource;
 mod retry;
 mod runtime;
+mod secret;
 
 pub use catalog::{CapabilityCatalog, CatalogError, PluginRecord};
 pub use discovery::{
@@ -20,8 +22,17 @@ pub use manager::{
     MAX_DYNAMIC_PLUGIN_DIAGNOSTICS, PluginDiscoveryManager, PluginDiscoveryManagerError,
     PluginLifecycleFailure, PluginReloadReport,
 };
+pub use resource::{
+    DEFAULT_MAX_FRAME_BYTES, DEFAULT_MAX_INVOCATION_BYTES, DEFAULT_MAX_INVOCATION_DURATION,
+    DEFAULT_MAX_OUTPUT_BYTES, MAX_CONCURRENT_INVOCATIONS_PER_PLUGIN, MAX_RESOURCE_FRAME_BYTES,
+    MAX_RESOURCE_INVOCATION_BYTES, MAX_RESOURCE_INVOCATION_DURATION, MAX_RESOURCE_OUTPUT_BYTES,
+    PluginResourcePolicy, ResourcePolicyError,
+};
 pub use retry::{
     DEFAULT_MAX_AUTOMATIC_RESTARTS, MAX_AUTOMATIC_RESTARTS, RetryAction, RetryController,
     RetryPolicy, RetrySnapshot,
 };
-pub use runtime::{PluginCallError, PluginHostError, PluginLaunch, ProcessPluginHost};
+pub use runtime::{
+    PluginCallError, PluginHostError, PluginLaunch, ProcessPluginHost, SharedProcessPluginHost,
+};
+pub use secret::HostSecretBroker;

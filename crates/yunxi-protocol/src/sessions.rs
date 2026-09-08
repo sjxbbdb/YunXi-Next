@@ -387,6 +387,8 @@ pub enum SessionMutation {
     Pin,
     Unpin,
     Fork,
+    Rename,
+    SelectModel,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -394,6 +396,10 @@ pub struct SessionMutationRequest {
     grant: WorkspaceGrant,
     session_id: String,
     mutation: SessionMutation,
+    title: Option<String>,
+    provider: Option<String>,
+    model: Option<String>,
+    at_message: Option<usize>,
 }
 
 impl SessionMutationRequest {
@@ -406,7 +412,34 @@ impl SessionMutationRequest {
             grant,
             session_id: session_id.into(),
             mutation,
+            title: None,
+            provider: None,
+            model: None,
+            at_message: None,
         }
+    }
+
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.title = Some(title.into());
+        self
+    }
+
+    pub fn with_provider(mut self, provider: impl Into<String>) -> Self {
+        self.provider = Some(provider.into());
+        self
+    }
+
+    pub fn with_model(mut self, model: impl Into<String>) -> Self {
+        self.model = Some(model.into());
+        self
+    }
+
+    /// Limit a fork to this many persisted chat messages. The Web adapter
+    /// maps its event sequence to this message boundary before invoking the
+    /// storage capability.
+    pub fn with_at_message(mut self, at_message: usize) -> Self {
+        self.at_message = Some(at_message);
+        self
     }
 
     pub fn grant(&self) -> &WorkspaceGrant {
@@ -419,6 +452,22 @@ impl SessionMutationRequest {
 
     pub fn mutation(&self) -> SessionMutation {
         self.mutation
+    }
+
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
+    pub fn provider(&self) -> Option<&str> {
+        self.provider.as_deref()
+    }
+
+    pub fn model(&self) -> Option<&str> {
+        self.model.as_deref()
+    }
+
+    pub fn at_message(&self) -> Option<usize> {
+        self.at_message
     }
 }
 

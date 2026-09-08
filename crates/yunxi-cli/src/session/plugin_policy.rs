@@ -122,19 +122,15 @@ pub(super) fn manifest_for(plugin_id: &str) -> PluginManifest {
         // The model is the replaceable Agent-spine implementation in the
         // current CLI.  It is a required path and is never user-toggleable.
         MODEL_PLUGIN_ID => PluginManifest::agent_spine(),
-        // These plugins only compile/read in-memory prompt context.  They are
-        // the safe optional defaults; an explicit user choice still wins.
-        CONTEXT_PLUGIN_ID | PERSONA_PLUGIN_ID => PluginManifest::optional(PluginRisk::None),
-        // Session storage is local host infrastructure and was enabled by
-        // default before plugin overrides existed.  Keep that compatibility
-        // default while treating network/process/device capabilities as
-        // external below.
-        STORAGE_PLUGIN_ID => PluginManifest::optional(PluginRisk::None),
+        // These plugins have no network, device, or arbitrary workspace side
+        // effects. Memory, Companion, and Storage write only Host-authorized
+        // YunXi Next state, so they remain safe defaults. An explicit user
+        // choice still wins and revokes the process route when disabled.
+        CONTEXT_PLUGIN_ID | PERSONA_PLUGIN_ID | MEMORY_PLUGIN_ID | COMPANION_PLUGIN_ID
+        | STORAGE_PLUGIN_ID => PluginManifest::optional(PluginRisk::None),
         // The current composition manifest has a conservative external class
         // (including high-risk capabilities).  Such entries default off.
-        MEMORY_PLUGIN_ID
-        | COMPANION_PLUGIN_ID
-        | MAILBOX_PLUGIN_ID
+        MAILBOX_PLUGIN_ID
         | SCHEDULER_PLUGIN_ID
         | SHELL_PLUGIN_ID
         | PATCH_PLUGIN_ID
@@ -186,10 +182,11 @@ fn resolve_value(
     }
 }
 
-/// Finds an explicitly supplied legacy setting while preserving the old
-/// environment-over-file precedence.  A value synthesized by
-/// `CapabilitySwitches` (for example mailbox/scheduler from companion) is
-/// accepted only when the source capability was explicit.
+/// Finds an explicitly supplied legacy setting.  A persisted user choice is
+/// authoritative once present; environment variables remain a compatibility
+/// fallback for deployments that have not saved a choice yet.  A value
+/// synthesized by `CapabilitySwitches` (for example mailbox/scheduler from
+/// companion) is accepted only when the source capability was explicit.
 fn legacy_capability_override(
     settings: &CapabilitySettingsStore,
     legacy: &CapabilitySwitches,
@@ -208,11 +205,11 @@ where
     F: Fn(&str) -> Option<bool> + Copy,
 {
     let (primary, legacy_name) = environment_names(setting);
-    if let Some(value) = read(primary).or_else(|| legacy_name.and_then(read)) {
+    if let Some(value) = settings.overrides().get(setting) {
         return Some(value);
     }
-    if settings.overrides().get(setting).is_some() {
-        return Some(legacy.get(setting));
+    if let Some(value) = read(primary).or_else(|| legacy_name.and_then(read)) {
+        return Some(value);
     }
 
     if matches!(
@@ -295,6 +292,8 @@ mod tests {
         let safe = manifest_for(CONTEXT_PLUGIN_ID);
         assert!(safe.default_enabled());
         assert!(manifest_for(PERSONA_PLUGIN_ID).default_enabled());
+        assert!(manifest_for(MEMORY_PLUGIN_ID).default_enabled());
+        assert!(manifest_for(COMPANION_PLUGIN_ID).default_enabled());
         assert!(manifest_for(STORAGE_PLUGIN_ID).default_enabled());
         assert!(resolve_value(safe, None, None));
 
@@ -352,6 +351,38 @@ mod tests {
             manifest_for(SHELL_PLUGIN_ID),
             settings.plugin_overrides().get(SHELL_PLUGIN_ID).copied(),
             legacy_override,
+        ));
+        let _ignored = std::fs::remove_file(settings.path());
+    }
+
+    #[test]
+    fn persisted_user_choice_wins_over_legacy_environment_value() {
+        let mut settings = empty_settings();
+        settings
+            .mutate(
+                [CapabilityEdit::Set(CapabilitySetting::Memory, false)],
+                Some(0),
+            )
+            .expect("persisted memory choice");
+        let legacy = CapabilitySwitches {
+            memory: true,
+            ..CapabilitySwitches::default()
+        };
+        let value = legacy_capability_override_with(
+            &settings,
+            &legacy,
+            CapabilitySetting::Memory,
+            |name| match name {
+                "YUNXI_NEXT_MEMORY_ENABLED" => Some(true),
+                _ => None,
+            },
+        );
+        assert_eq!(value, Some(false));
+        assert!(!resolve_optional(
+            &settings,
+            &legacy,
+            MEMORY_PLUGIN_ID,
+            CapabilitySetting::Memory,
         ));
         let _ignored = std::fs::remove_file(settings.path());
     }

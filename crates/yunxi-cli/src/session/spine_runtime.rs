@@ -5,36 +5,39 @@
 //! into spine traits; optional capabilities still execute in isolated plugin
 //! processes through the shared Host handle.
 
-use std::cell::RefCell;
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 use yunxi_agent_spine::{
-    Agent, AgentConfig, AgentError, AgentTurnOutcome, CancellationToken, ToolApprovalPolicy,
-    ToolBroker, ToolDecision, ToolError, ToolRequest,
+    Agent, AgentConfig, AgentError, AgentTurnOutcome, CancellationToken, EventSink,
+    ToolApprovalPolicy, ToolBroker, ToolDecision, ToolError, ToolRequest,
 };
-use yunxi_kernel::{PluginCommand, PluginId};
-use yunxi_model_openai::MODEL_PLUGIN_ID;
-use yunxi_plugin_host::{PluginCallError, PluginLaunch, ProcessPluginHost};
+use yunxi_kernel::PluginCommand;
+use yunxi_plugin_host::PluginCallError;
 use yunxi_protocol::{
     ActionGrant, AgentBudget, CapabilityDescriptor, ChatMessage, GrantKind, McpToolCallRequest,
-    NetworkGrant, SecretGrant, ToolApprovalDecision, ToolApprovalRequest, ToolApprovalState,
-    ToolCatalog, ToolResultOutcome, WorkspaceGrant,
+    NetworkGrant, SecretGrant, SkillActionRequest, ToolApprovalDecision, ToolApprovalRequest,
+    ToolApprovalState, ToolCatalog, ToolResultOutcome, WorkspaceGrant,
 };
+use yunxi_tool_skills::{SkillActionError, SkillActionExecutor};
 
+use super::child_agent::{ChildAgentFailure, ChildAgentRuntime};
 use super::spine_adapter::{
     ProcessPluginContextAssembler, ProcessPluginHostHandle, ProcessPluginModelProvider,
 };
 use super::tool_loop::{self, ToolAction};
-use super::{ChatFailure, HANDSHAKE_TIMEOUT, WRITE_TIMEOUT, call_lost_route};
+use super::{ChatFailure, call_lost_route};
+use crate::args::{ApprovalMode, SandboxMode};
 
 /// Inputs captured once while the process host is being assembled.
 pub(crate) struct SpineRuntimeConfig {
     pub host: ProcessPluginHostHandle,
     pub model_capability: CapabilityDescriptor,
+    pub model: String,
     pub cwd: PathBuf,
     pub shell_capability: Option<CapabilityDescriptor>,
     pub patch_capability: Option<CapabilityDescriptor>,
@@ -44,12 +47,15 @@ pub(crate) struct SpineRuntimeConfig {
     pub mcp_network_grant: Option<NetworkGrant>,
     pub mcp_secret_grant: SecretGrant,
     pub skill_tools: Vec<tool_loop::SkillToolBinding>,
+    pub skill_action_executor: Option<SkillActionExecutor>,
     pub multi_agent_capability: Option<CapabilityDescriptor>,
     pub agent_session_id: String,
     pub agent_budget: AgentBudget,
     pub child_model_command: PluginCommand,
     pub child_model_required_grants: Vec<GrantKind>,
     pub child_model_response_timeout: Duration,
+    pub approval: ApprovalMode,
+    pub sandbox: SandboxMode,
 }
 
 type SpineAgent = Agent<ProcessPluginModelProvider, ProcessPluginContextAssembler, SpineToolBroker>;
@@ -57,14 +63,14 @@ type SpineAgent = Agent<ProcessPluginModelProvider, ProcessPluginContextAssemble
 /// Owns one approval-aware spine instance and its small outer-session bridge.
 pub(crate) struct SpineController {
     agent: SpineAgent,
-    notices: Rc<RefCell<Vec<String>>>,
+    notices: Arc<Mutex<Vec<String>>>,
     prompt: Option<String>,
     next_approval_ticket: u64,
 }
 
 impl SpineController {
     pub(crate) fn new(config: SpineRuntimeConfig) -> Result<Self, AgentError> {
-        let notices = Rc::new(RefCell::new(Vec::new()));
+        let notices = Arc::new(Mutex::new(Vec::new()));
         let broker = SpineToolBroker::new(config, notices.clone());
         let model =
             ProcessPluginModelProvider::new(broker.host.clone(), broker.model_capability.clone());
@@ -98,6 +104,19 @@ impl SpineController {
         self.prompt = Some(user_message.content().to_string());
         self.agent
             .run_turn_with_approval(user_message, &CancellationToken::new())
+    }
+
+    pub(crate) fn start_streaming<S: EventSink>(
+        &mut self,
+        user_message: ChatMessage,
+        seed: Vec<ChatMessage>,
+        cancellation: &CancellationToken,
+        sink: &mut S,
+    ) -> Result<AgentTurnOutcome, AgentError> {
+        self.agent.reset_conversation(seed)?;
+        self.prompt = Some(user_message.content().to_string());
+        self.agent
+            .run_turn_with_approval_streaming(user_message, cancellation, sink)
     }
 
     pub(crate) fn resolve(&mut self, approved: bool) -> Result<AgentTurnOutcome, AgentError> {
@@ -141,6 +160,44 @@ impl SpineController {
             .approve_pending_tool(decision, &CancellationToken::new())
     }
 
+    pub(crate) fn resolve_streaming<S: EventSink>(
+        &mut self,
+        approved: bool,
+        cancellation: &CancellationToken,
+        sink: &mut S,
+    ) -> Result<AgentTurnOutcome, AgentError> {
+        let request =
+            self.agent
+                .pending_approval()
+                .cloned()
+                .ok_or_else(|| AgentError::InvalidState {
+                    operation: "resolve a pending tool".to_string(),
+                    state: self.agent.state(),
+                })?;
+        let state = if approved {
+            let ticket = format!(
+                "spine-tool-{}-{}",
+                std::process::id(),
+                self.next_approval_ticket
+            );
+            self.next_approval_ticket = self.next_approval_ticket.saturating_add(1);
+            ToolApprovalState::approved(ticket)
+                .map_err(|error| AgentError::protocol("invalid_approval", error.to_string()))?
+        } else {
+            ToolApprovalState::denied("the user denied this tool call")
+                .map_err(|error| AgentError::protocol("invalid_approval", error.to_string()))?
+        };
+        let decision = ToolApprovalDecision::new(
+            request.round(),
+            request.call_id().clone(),
+            request.tool_name().clone(),
+            state,
+        )
+        .map_err(|error| AgentError::protocol("invalid_approval", error.to_string()))?;
+        self.agent
+            .approve_pending_tool_streaming(decision, cancellation, sink)
+    }
+
     pub(crate) fn cancel(&mut self, reason: &str) -> Result<(), AgentError> {
         self.agent.cancel_pending_turn(reason)
     }
@@ -162,7 +219,7 @@ impl SpineController {
     }
 
     pub(crate) fn drain_notices(&mut self) -> Vec<String> {
-        std::mem::take(&mut *self.notices.borrow_mut())
+        std::mem::take(&mut *lock_or_recover(&self.notices))
     }
 }
 
@@ -189,6 +246,7 @@ pub(crate) fn chat_failure_from_agent(error: AgentError) -> ChatFailure {
 struct SpineToolBroker {
     host: ProcessPluginHostHandle,
     model_capability: CapabilityDescriptor,
+    model: String,
     cwd: PathBuf,
     shell_capability: Option<CapabilityDescriptor>,
     patch_capability: Option<CapabilityDescriptor>,
@@ -198,21 +256,25 @@ struct SpineToolBroker {
     mcp_network_grant: Option<NetworkGrant>,
     mcp_secret_grant: SecretGrant,
     skill_tools: Vec<tool_loop::SkillToolBinding>,
+    skill_action_executor: Option<SkillActionExecutor>,
     multi_agent_capability: Option<CapabilityDescriptor>,
     agent_session_id: String,
     agent_budget: AgentBudget,
     child_model_command: PluginCommand,
     child_model_required_grants: Vec<GrantKind>,
     child_model_response_timeout: Duration,
-    notices: Rc<RefCell<Vec<String>>>,
+    notices: Arc<Mutex<Vec<String>>>,
     next_action_ticket: u64,
+    approval: ApprovalMode,
+    sandbox: SandboxMode,
 }
 
 impl SpineToolBroker {
-    fn new(config: SpineRuntimeConfig, notices: Rc<RefCell<Vec<String>>>) -> Self {
+    fn new(config: SpineRuntimeConfig, notices: Arc<Mutex<Vec<String>>>) -> Self {
         Self {
             host: config.host,
             model_capability: config.model_capability,
+            model: config.model,
             cwd: config.cwd,
             shell_capability: config.shell_capability,
             patch_capability: config.patch_capability,
@@ -222,12 +284,15 @@ impl SpineToolBroker {
             mcp_network_grant: config.mcp_network_grant,
             mcp_secret_grant: config.mcp_secret_grant,
             skill_tools: config.skill_tools,
+            skill_action_executor: config.skill_action_executor,
             multi_agent_capability: config.multi_agent_capability,
             agent_session_id: config.agent_session_id,
             agent_budget: config.agent_budget,
             child_model_command: config.child_model_command,
             child_model_required_grants: config.child_model_required_grants,
             child_model_response_timeout: config.child_model_response_timeout,
+            approval: config.approval,
+            sandbox: config.sandbox,
             notices,
             next_action_ticket: 1,
         }
@@ -262,44 +327,150 @@ impl SpineToolBroker {
         .map_err(|error| ToolError::new("invalid_approval_request", error.to_string(), false))
     }
 
-    fn execute_action(&mut self, action: &ToolAction, ticket: &str) -> ToolResultOutcome {
+    fn execute_action(
+        &mut self,
+        action: &ToolAction,
+        ticket: &str,
+        cancellation: &CancellationToken,
+    ) -> ToolResultOutcome {
+        if cancellation.is_cancelled() {
+            return cancelled_outcome(cancellation_reason(cancellation));
+        }
         match action {
-            ToolAction::Skill { binding, .. } => completed_rejection(
-                "skill_tool_unavailable",
-                format!(
-                    "Skill `{}` declared tool `{}` as metadata only; execution is not enabled",
-                    binding.skill_id(),
-                    binding.remote_name()
-                ),
-            ),
+            ToolAction::Skill { binding, arguments } => {
+                self.execute_skill(binding, arguments, ticket, cancellation)
+            }
             ToolAction::Shell {
                 command,
                 timeout_millis,
-            } => self.execute_shell(command, *timeout_millis, ticket),
+            } => self.execute_shell(command, *timeout_millis, ticket, cancellation),
             ToolAction::Patch {
                 patch,
                 timeout_millis,
-            } => self.execute_patch(patch, *timeout_millis, ticket),
-            ToolAction::FileSearch { query, path } => self.execute_file_search(query, path),
-            ToolAction::FileRead { path } => self.execute_file_read(path),
-            ToolAction::Mcp { binding, arguments } => self.execute_mcp(binding, arguments, ticket),
+            } => self.execute_patch(patch, *timeout_millis, ticket, cancellation),
+            ToolAction::FileSearch { query, path } => {
+                self.execute_file_search(query, path, cancellation)
+            }
+            ToolAction::FileRead { path } => self.execute_file_read(path, cancellation),
+            ToolAction::Mcp { binding, arguments } => {
+                self.execute_mcp(binding, arguments, ticket, cancellation)
+            }
             ToolAction::AgentSpawn {
                 task,
                 name,
                 parent_id,
-            } => self.execute_agent_spawn(task, name.as_deref(), parent_id.as_deref(), ticket),
-            ToolAction::AgentList => self.execute_agent_list(ticket),
+                requested_grants,
+            } => self.execute_agent_spawn(
+                task,
+                name.as_deref(),
+                parent_id.as_deref(),
+                requested_grants,
+                ticket,
+                cancellation,
+            ),
+            ToolAction::AgentList => self.execute_agent_list(ticket, cancellation),
             ToolAction::AgentMessage { agent_id, message } => {
-                self.execute_agent_message(agent_id, message, ticket)
+                self.execute_agent_message(agent_id, message, ticket, cancellation)
             }
             ToolAction::AgentInterrupt {
                 agent_id,
                 recursive,
-            } => self.execute_agent_interrupt(agent_id, *recursive, ticket),
+            } => self.execute_agent_interrupt(agent_id, *recursive, ticket, cancellation),
         }
     }
 
-    fn execute_shell(&mut self, command: &str, timeout: u64, ticket: &str) -> ToolResultOutcome {
+    fn invoke_cancellable<Request, Response>(
+        &self,
+        capability: &CapabilityDescriptor,
+        operation: &str,
+        payload: &Request,
+        cancellation: &CancellationToken,
+    ) -> Result<Response, PluginCallError>
+    where
+        Request: Serialize,
+        Response: DeserializeOwned,
+    {
+        self.host.invoke_streaming(
+            capability,
+            operation,
+            payload,
+            || cancellation.is_cancelled(),
+            |_| Ok(()),
+        )
+    }
+
+    fn execute_skill(
+        &mut self,
+        binding: &tool_loop::SkillToolBinding,
+        arguments: &Value,
+        ticket: &str,
+        cancellation: &CancellationToken,
+    ) -> ToolResultOutcome {
+        if !binding.executable() {
+            return completed_rejection(
+                "skill_tool_unavailable",
+                format!(
+                    "Skill `{}` declared tool `{}` as metadata only",
+                    binding.skill_id(),
+                    binding.remote_name()
+                ),
+            );
+        }
+        let Some(executor) = self.skill_action_executor.clone() else {
+            return completed_rejection(
+                "skill_action_disabled",
+                "executable Skill actions are not enabled",
+            );
+        };
+        if binding.requires_workspace_write() && self.sandbox == SandboxMode::ReadOnly {
+            return completed_rejection(
+                "sandbox_read_only",
+                "Skill action requires workspace write access while --sandbox read-only is active",
+            );
+        }
+        let request = match SkillActionRequest::new(
+            binding.skill_id(),
+            binding.remote_name(),
+            arguments.clone(),
+        ) {
+            Ok(request) => request,
+            Err(error) => {
+                return completed_rejection("invalid_skill_action_request", error.to_string());
+            }
+        };
+        let workspace = if binding.requires_workspace_write() {
+            WorkspaceGrant::read_write(&self.cwd).with_workspace_write()
+        } else {
+            WorkspaceGrant::read_only(&self.cwd)
+        };
+        let mut grant = ActionGrant::approved(workspace, &self.cwd, ticket).with_limits(
+            yunxi_protocol::MAX_SKILL_ACTION_TIMEOUT_MILLIS,
+            yunxi_protocol::MAX_SKILL_ACTION_OUTPUT_BYTES,
+        );
+        if binding.requires_workspace_write() {
+            grant = grant.with_write(true);
+        }
+        match executor.execute_with_cancellation(&request, &grant, || cancellation.is_cancelled()) {
+            Ok(execution) => {
+                serialized_outcome(execution, "Skill action returned an invalid bounded result")
+            }
+            Err(error) => {
+                self.notice(format!(
+                    "model Skill tool `{}` failed: {error}",
+                    binding.model_name()
+                ));
+                skill_action_error_outcome(error)
+            }
+        }
+    }
+
+    fn execute_shell(
+        &mut self,
+        command: &str,
+        timeout: u64,
+        ticket: &str,
+        cancellation: &CancellationToken,
+    ) -> ToolResultOutcome {
         let Some(capability) = self.shell_capability.clone() else {
             return failed_outcome(
                 "tool_unavailable",
@@ -309,22 +480,30 @@ impl SpineToolBroker {
         };
         let grant = ActionGrant::approved(WorkspaceGrant::read_only(&self.cwd), &self.cwd, ticket)
             .with_limits(timeout, 64 * 1024);
-        match self.host.invoke::<_, yunxi_protocol::ShellExecuteResult>(
+        match self.invoke_cancellable::<_, yunxi_protocol::ShellExecuteResult>(
             &capability,
             yunxi_protocol::TOOL_SHELL_EXECUTE_OPERATION,
             &yunxi_protocol::ShellExecuteRequest::new(grant, command),
+            cancellation,
         ) {
             Ok(result) => serialized_outcome(result, "shell returned an invalid result"),
-            Err(error) => self.plugin_error_outcome(
+            Err(error) => self.cancellable_plugin_error_outcome(
                 tool_loop::SHELL_TOOL_NAME,
                 error,
                 "tool_unavailable",
+                cancellation,
                 |broker| broker.shell_capability = None,
             ),
         }
     }
 
-    fn execute_patch(&mut self, patch: &str, timeout: u64, ticket: &str) -> ToolResultOutcome {
+    fn execute_patch(
+        &mut self,
+        patch: &str,
+        timeout: u64,
+        ticket: &str,
+        cancellation: &CancellationToken,
+    ) -> ToolResultOutcome {
         let Some(capability) = self.patch_capability.clone() else {
             return failed_outcome(
                 "tool_unavailable",
@@ -339,22 +518,29 @@ impl SpineToolBroker {
         )
         .with_write(true)
         .with_limits(timeout, 64 * 1024);
-        match self.host.invoke::<_, yunxi_protocol::PatchApplyResult>(
+        match self.invoke_cancellable::<_, yunxi_protocol::PatchApplyResult>(
             &capability,
             yunxi_protocol::TOOL_PATCH_APPLY_OPERATION,
             &yunxi_protocol::PatchApplyRequest::new(grant, patch),
+            cancellation,
         ) {
             Ok(result) => serialized_outcome(result, "patch returned an invalid result"),
-            Err(error) => self.plugin_error_outcome(
+            Err(error) => self.cancellable_plugin_error_outcome(
                 tool_loop::PATCH_TOOL_NAME,
                 error,
                 "tool_unavailable",
+                cancellation,
                 |broker| broker.patch_capability = None,
             ),
         }
     }
 
-    fn execute_file_search(&mut self, query: &str, path: &str) -> ToolResultOutcome {
+    fn execute_file_search(
+        &mut self,
+        query: &str,
+        path: &str,
+        cancellation: &CancellationToken,
+    ) -> ToolResultOutcome {
         let Some(capability) = self.files_capability.clone() else {
             return failed_outcome(
                 "file_tool_unavailable",
@@ -367,22 +553,28 @@ impl SpineToolBroker {
             self.cwd.join(path),
             query,
         );
-        match self.host.invoke::<_, yunxi_protocol::FileSearchResult>(
+        match self.invoke_cancellable::<_, yunxi_protocol::FileSearchResult>(
             &capability,
             yunxi_protocol::TOOL_FILES_SEARCH_OPERATION,
             &request,
+            cancellation,
         ) {
             Ok(result) => serialized_outcome(result, "file search returned an invalid result"),
-            Err(error) => self.plugin_error_outcome(
+            Err(error) => self.cancellable_plugin_error_outcome(
                 tool_loop::FILE_SEARCH_TOOL_NAME,
                 error,
                 "file_tool_unavailable",
+                cancellation,
                 |broker| broker.files_capability = None,
             ),
         }
     }
 
-    fn execute_file_read(&mut self, path: &str) -> ToolResultOutcome {
+    fn execute_file_read(
+        &mut self,
+        path: &str,
+        cancellation: &CancellationToken,
+    ) -> ToolResultOutcome {
         let Some(capability) = self.files_capability.clone() else {
             return failed_outcome(
                 "file_tool_unavailable",
@@ -392,16 +584,18 @@ impl SpineToolBroker {
         };
         let request =
             yunxi_protocol::FileReadRequest::new(WorkspaceGrant::read_only(&self.cwd), path);
-        match self.host.invoke::<_, yunxi_protocol::FileReadResult>(
+        match self.invoke_cancellable::<_, yunxi_protocol::FileReadResult>(
             &capability,
             yunxi_protocol::TOOL_FILES_READ_OPERATION,
             &request,
+            cancellation,
         ) {
             Ok(result) => serialized_outcome(result, "file read returned an invalid result"),
-            Err(error) => self.plugin_error_outcome(
+            Err(error) => self.cancellable_plugin_error_outcome(
                 tool_loop::FILE_READ_TOOL_NAME,
                 error,
                 "file_tool_unavailable",
+                cancellation,
                 |broker| broker.files_capability = None,
             ),
         }
@@ -412,6 +606,7 @@ impl SpineToolBroker {
         binding: &tool_loop::McpToolBinding,
         arguments: &Value,
         ticket: &str,
+        cancellation: &CancellationToken,
     ) -> ToolResultOutcome {
         let Some(capability) = self.mcp_capability.clone() else {
             return failed_outcome(
@@ -436,16 +631,18 @@ impl SpineToolBroker {
             Ok(request) => request,
             Err(error) => return completed_rejection("invalid_mcp_request", error.to_string()),
         };
-        match self.host.invoke::<_, yunxi_protocol::McpToolCallResult>(
+        match self.invoke_cancellable::<_, yunxi_protocol::McpToolCallResult>(
             &capability,
             yunxi_protocol::TOOL_MCP_CALL_OPERATION,
             &request,
+            cancellation,
         ) {
             Ok(result) => serialized_outcome(result, "MCP returned an invalid result"),
-            Err(error) => self.plugin_error_outcome(
+            Err(error) => self.cancellable_plugin_error_outcome(
                 binding.model_name().as_str(),
                 error,
                 "mcp_unavailable",
+                cancellation,
                 |broker| {
                     broker.mcp_capability = None;
                     broker.mcp_tools.clear();
@@ -484,8 +681,31 @@ impl SpineToolBroker {
         failed_outcome(&code, message, retryable)
     }
 
+    fn cancellable_plugin_error_outcome<F>(
+        &mut self,
+        tool_name: &str,
+        error: PluginCallError,
+        fallback_code: &str,
+        cancellation: &CancellationToken,
+        disable: F,
+    ) -> ToolResultOutcome
+    where
+        F: FnOnce(&mut Self),
+    {
+        if cancellation.is_cancelled() {
+            if call_lost_route(&error) {
+                disable(self);
+            }
+            let reason = cancellation_reason(cancellation);
+            self.notice(format!("model tool `{tool_name}` cancelled: {reason}"));
+            cancelled_outcome(reason)
+        } else {
+            self.plugin_error_outcome(tool_name, error, fallback_code, disable)
+        }
+    }
+
     fn notice(&self, message: String) {
-        self.notices.borrow_mut().push(message);
+        lock_or_recover(&self.notices).push(message);
     }
 
     fn next_ticket(&mut self) -> String {
@@ -503,7 +723,9 @@ impl SpineToolBroker {
         task: &str,
         name: Option<&str>,
         parent_id: Option<&str>,
+        requested_grants: &[GrantKind],
         ticket: &str,
+        cancellation: &CancellationToken,
     ) -> ToolResultOutcome {
         let Some(capability) = self.multi_agent_capability.clone() else {
             return failed_outcome(
@@ -517,6 +739,10 @@ impl SpineToolBroker {
             Err(error) => return failed_outcome("invalid_agent_grant", error.to_string(), false),
         };
         let mut request = match yunxi_protocol::AgentSpawnRequest::new(grant.clone(), task) {
+            Ok(request) => request,
+            Err(error) => return failed_outcome("invalid_agent_request", error.to_string(), false),
+        };
+        request = match request.with_requested_child_grants(requested_grants.iter().copied()) {
             Ok(request) => request,
             Err(error) => return failed_outcome("invalid_agent_request", error.to_string(), false),
         };
@@ -536,17 +762,19 @@ impl SpineToolBroker {
                 }
             };
         }
-        let spawned = match self.host.invoke::<_, yunxi_protocol::AgentSpawnResult>(
+        let spawned = match self.invoke_cancellable::<_, yunxi_protocol::AgentSpawnResult>(
             &capability,
             yunxi_protocol::TOOL_MULTI_AGENT_SPAWN_OPERATION,
             &request,
+            cancellation,
         ) {
             Ok(result) => result,
             Err(error) => {
-                return self.plugin_error_outcome(
+                return self.cancellable_plugin_error_outcome(
                     tool_loop::AGENT_SPAWN_TOOL_NAME,
                     error,
                     "multi_agent_unavailable",
+                    cancellation,
                     |broker| broker.multi_agent_capability = None,
                 );
             }
@@ -557,6 +785,7 @@ impl SpineToolBroker {
             spawned.agent().id(),
             task,
             tool_loop::AGENT_SPAWN_TOOL_NAME,
+            cancellation,
         )
     }
 
@@ -565,6 +794,7 @@ impl SpineToolBroker {
         agent_id: &str,
         message: &str,
         ticket: &str,
+        cancellation: &CancellationToken,
     ) -> ToolResultOutcome {
         let Some(capability) = self.multi_agent_capability.clone() else {
             return failed_outcome(
@@ -583,10 +813,15 @@ impl SpineToolBroker {
             agent_id,
             message,
             tool_loop::AGENT_MESSAGE_TOOL_NAME,
+            cancellation,
         )
     }
 
-    fn execute_agent_list(&mut self, ticket: &str) -> ToolResultOutcome {
+    fn execute_agent_list(
+        &mut self,
+        ticket: &str,
+        cancellation: &CancellationToken,
+    ) -> ToolResultOutcome {
         let Some(capability) = self.multi_agent_capability.clone() else {
             return failed_outcome(
                 "multi_agent_unavailable",
@@ -598,16 +833,18 @@ impl SpineToolBroker {
             Ok(grant) => grant,
             Err(error) => return failed_outcome("invalid_agent_grant", error.to_string(), false),
         };
-        match self.host.invoke::<_, yunxi_protocol::AgentListResult>(
+        match self.invoke_cancellable::<_, yunxi_protocol::AgentListResult>(
             &capability,
             yunxi_protocol::TOOL_MULTI_AGENT_LIST_OPERATION,
             &yunxi_protocol::AgentListRequest::new(grant),
+            cancellation,
         ) {
             Ok(result) => serialized_outcome(result, "multi-agent list returned invalid data"),
-            Err(error) => self.plugin_error_outcome(
+            Err(error) => self.cancellable_plugin_error_outcome(
                 tool_loop::AGENT_LIST_TOOL_NAME,
                 error,
                 "multi_agent_unavailable",
+                cancellation,
                 |broker| broker.multi_agent_capability = None,
             ),
         }
@@ -618,6 +855,7 @@ impl SpineToolBroker {
         agent_id: &str,
         recursive: bool,
         ticket: &str,
+        cancellation: &CancellationToken,
     ) -> ToolResultOutcome {
         let Some(capability) = self.multi_agent_capability.clone() else {
             return failed_outcome(
@@ -634,16 +872,18 @@ impl SpineToolBroker {
             Ok(request) => request,
             Err(error) => return failed_outcome("invalid_agent_request", error.to_string(), false),
         };
-        match self.host.invoke::<_, yunxi_protocol::AgentMutationResult>(
+        match self.invoke_cancellable::<_, yunxi_protocol::AgentMutationResult>(
             &capability,
             yunxi_protocol::TOOL_MULTI_AGENT_INTERRUPT_OPERATION,
             &request,
+            cancellation,
         ) {
             Ok(result) => serialized_outcome(result, "multi-agent interrupt returned invalid data"),
-            Err(error) => self.plugin_error_outcome(
+            Err(error) => self.cancellable_plugin_error_outcome(
                 tool_loop::AGENT_INTERRUPT_TOOL_NAME,
                 error,
                 "multi_agent_unavailable",
+                cancellation,
                 |broker| broker.multi_agent_capability = None,
             ),
         }
@@ -656,6 +896,7 @@ impl SpineToolBroker {
         agent_id: &str,
         message: &str,
         tool_name: &str,
+        cancellation: &CancellationToken,
     ) -> ToolResultOutcome {
         let start =
             match yunxi_protocol::AgentTurnStartRequest::new(grant.clone(), agent_id, message) {
@@ -664,41 +905,59 @@ impl SpineToolBroker {
                     return failed_outcome("invalid_agent_request", error.to_string(), false);
                 }
             };
-        let started = match self.host.invoke::<_, yunxi_protocol::AgentTurnStartResult>(
+        let started = match self.invoke_cancellable::<_, yunxi_protocol::AgentTurnStartResult>(
             capability,
             yunxi_protocol::TOOL_MULTI_AGENT_TURN_START_OPERATION,
             &start,
+            cancellation,
         ) {
             Ok(result) => result,
             Err(error) => {
-                return self.plugin_error_outcome(
+                return self.cancellable_plugin_error_outcome(
                     tool_name,
                     error,
                     "multi_agent_unavailable",
+                    cancellation,
                     |broker| broker.multi_agent_capability = None,
                 );
             }
         };
-        let reply = match self.run_isolated_child_model(started.transcript()) {
+        let child_grants = started.agent().child_grants().to_vec();
+        let runtime = self.child_agent_runtime();
+        let model = self.model.clone();
+        let child_cancellation = cancellation.clone();
+        let reply = match runtime.run(
+            started.transcript(),
+            message,
+            &model,
+            &child_grants,
+            move || child_cancellation.is_cancelled(),
+            |_| Ok(()),
+        ) {
             Ok(reply) => reply,
             Err(error) => {
+                if cancellation.is_cancelled() || error.code() == "cancelled" {
+                    self.interrupt_cancelled_child(capability, grant, agent_id);
+                    return cancelled_outcome(cancellation_reason(cancellation));
+                }
                 self.report_child_agent_failure(capability, grant, agent_id, &error);
-                return failed_outcome(error.code, error.message, false);
+                return failed_outcome(error.code(), error.message(), false);
             }
         };
         let complete =
             match yunxi_protocol::AgentTurnCompleteRequest::new(grant.clone(), agent_id, &reply) {
                 Ok(request) => request,
                 Err(error) => {
-                    let failure = ChildTurnError::new("child_reply_invalid", error.to_string());
+                    let failure = ChildAgentFailure::new("child_reply_invalid", error.to_string());
                     self.report_child_agent_failure(capability, grant, agent_id, &failure);
-                    return failed_outcome(failure.code, failure.message, false);
+                    return failed_outcome(failure.code(), failure.message(), false);
                 }
             };
-        match self.host.invoke::<_, yunxi_protocol::AgentMutationResult>(
+        match self.invoke_cancellable::<_, yunxi_protocol::AgentMutationResult>(
             capability,
             yunxi_protocol::TOOL_MULTI_AGENT_TURN_COMPLETE_OPERATION,
             &complete,
+            cancellation,
         ) {
             Ok(result) => serialized_outcome(
                 serde_json::json!({
@@ -708,65 +967,44 @@ impl SpineToolBroker {
                 }),
                 "multi-agent completion returned invalid data",
             ),
-            Err(error) => {
-                self.plugin_error_outcome(tool_name, error, "multi_agent_unavailable", |broker| {
-                    broker.multi_agent_capability = None
-                })
-            }
+            Err(error) => self.cancellable_plugin_error_outcome(
+                tool_name,
+                error,
+                "multi_agent_unavailable",
+                cancellation,
+                |broker| broker.multi_agent_capability = None,
+            ),
         }
     }
 
-    fn run_isolated_child_model(
-        &self,
-        transcript: &[yunxi_protocol::AgentTranscriptEntry],
-    ) -> Result<String, ChildTurnError> {
-        let mut messages = vec![ChatMessage::system(
-            "You are an isolated YunXi child agent. Complete only the delegated task. You have no inherited tools, workspace access, or channel authority. Return a concrete result and do not claim actions you could not perform.",
-        )];
-        messages.extend(transcript.iter().map(|entry| match entry.role() {
-            yunxi_protocol::AgentTranscriptRole::User => ChatMessage::user(entry.content()),
-            yunxi_protocol::AgentTranscriptRole::Assistant => {
-                ChatMessage::assistant(entry.content())
+    fn interrupt_cancelled_child(
+        &mut self,
+        capability: &CapabilityDescriptor,
+        grant: &yunxi_protocol::AgentDelegationGrant,
+        agent_id: &str,
+    ) {
+        let request =
+            match yunxi_protocol::AgentInterruptRequest::new(grant.clone(), agent_id, true) {
+                Ok(request) => request,
+                Err(error) => {
+                    self.notice(format!(
+                        "failed to encode cancellation for child agent `{agent_id}`: {error}"
+                    ));
+                    return;
+                }
+            };
+        if let Err(error) = self.host.invoke::<_, yunxi_protocol::AgentMutationResult>(
+            capability,
+            yunxi_protocol::TOOL_MULTI_AGENT_INTERRUPT_OPERATION,
+            &request,
+        ) {
+            if call_lost_route(&error) {
+                self.multi_agent_capability = None;
             }
-        }));
-
-        let id = PluginId::new(MODEL_PLUGIN_ID)
-            .map_err(|error| ChildTurnError::new("child_model_unavailable", error.to_string()))?;
-        let mut child_host = ProcessPluginHost::new();
-        let launch = PluginLaunch::new(id, self.child_model_command.clone())
-            .with_display_name("Isolated child chat model")
-            .with_handshake_timeout(HANDSHAKE_TIMEOUT)
-            .with_io_timeouts(Some(self.child_model_response_timeout), Some(WRITE_TIMEOUT))
-            .with_required_grants(self.child_model_required_grants.iter().copied())
-            .with_expected_capabilities([self.model_capability.clone()]);
-        if let Err(error) = child_host.launch(launch) {
-            child_host.shutdown();
-            return Err(ChildTurnError::new(
-                "child_model_unavailable",
-                error.to_string(),
+            self.notice(format!(
+                "failed to persist cancellation for child agent `{agent_id}`: {error}"
             ));
         }
-        let result = child_host.invoke::<_, yunxi_protocol::ChatResult>(
-            &self.model_capability,
-            yunxi_protocol::MODEL_CHAT_COMPLETE_OPERATION,
-            &yunxi_protocol::ChatRequest::new(messages),
-        );
-        child_host.shutdown();
-        let result =
-            result.map_err(|error| ChildTurnError::new("child_model_failed", error.to_string()))?;
-        if !result.tool_calls().is_empty() {
-            return Err(ChildTurnError::new(
-                "child_tools_not_allowed",
-                "isolated child model returned tool calls without receiving a tool catalog",
-            ));
-        }
-        if result.content().trim().is_empty() {
-            return Err(ChildTurnError::new(
-                "child_empty_response",
-                "isolated child model returned an empty response",
-            ));
-        }
-        Ok(result.content().to_string())
     }
 
     fn report_child_agent_failure(
@@ -774,13 +1012,13 @@ impl SpineToolBroker {
         capability: &CapabilityDescriptor,
         grant: &yunxi_protocol::AgentDelegationGrant,
         agent_id: &str,
-        failure: &ChildTurnError,
+        failure: &ChildAgentFailure,
     ) {
         let request = match yunxi_protocol::AgentTurnFailRequest::new(
             grant.clone(),
             agent_id,
-            failure.code,
-            &failure.message,
+            failure.code(),
+            failure.message(),
         ) {
             Ok(request) => request,
             Err(error) => {
@@ -814,6 +1052,35 @@ impl SpineToolBroker {
             ticket,
             self.agent_budget,
         )
+        .and_then(|grant| grant.with_allowed_child_grants(self.available_child_grants()))
+    }
+
+    fn available_child_grants(&self) -> Vec<GrantKind> {
+        let patch_available =
+            self.patch_capability.is_some() && self.sandbox != SandboxMode::ReadOnly;
+        let read_available = self.files_capability.is_some() || patch_available;
+        let mut grants = Vec::new();
+        if read_available {
+            grants.push(GrantKind::WorkspaceRead);
+        }
+        if patch_available {
+            grants.push(GrantKind::WorkspaceWrite);
+        }
+        grants
+    }
+
+    fn child_agent_runtime(&self) -> ChildAgentRuntime {
+        ChildAgentRuntime::new(
+            self.host.clone(),
+            self.cwd.clone(),
+            self.files_capability.clone(),
+            self.patch_capability.clone(),
+            self.sandbox,
+            self.child_model_command.clone(),
+            self.child_model_required_grants.clone(),
+            self.child_model_response_timeout,
+            self.model_capability.clone(),
+        )
     }
 }
 
@@ -833,7 +1100,7 @@ impl ToolBroker for SpineToolBroker {
     fn execute(
         &mut self,
         request: ToolRequest<'_>,
-        _cancellation: &CancellationToken,
+        cancellation: &CancellationToken,
     ) -> Result<ToolResultOutcome, ToolError> {
         let action = self
             .decode(&request)
@@ -849,14 +1116,14 @@ impl ToolBroker for SpineToolBroker {
             ));
         }
         let ticket = self.next_ticket();
-        Ok(self.execute_action(&action, &ticket))
+        Ok(self.execute_action(&action, &ticket, cancellation))
     }
 
     fn execute_approved(
         &mut self,
         request: ToolRequest<'_>,
         approval: &ToolApprovalDecision,
-        _cancellation: &CancellationToken,
+        cancellation: &CancellationToken,
     ) -> Result<ToolResultOutcome, ToolError> {
         let action = self
             .decode(&request)
@@ -871,7 +1138,7 @@ impl ToolBroker for SpineToolBroker {
                 ));
             }
         };
-        Ok(self.execute_action(&action, ticket))
+        Ok(self.execute_action(&action, ticket, cancellation))
     }
 
     fn decide(&mut self, request: &ToolRequest<'_>) -> Result<ToolDecision, ToolError> {
@@ -884,14 +1151,38 @@ impl ToolBroker for SpineToolBroker {
                 });
             }
         };
-        if matches!(action, ToolAction::Skill { .. }) {
+        if matches!(
+            action,
+            ToolAction::Skill { ref binding, .. }
+                if !binding.executable() || self.skill_action_executor.is_none()
+        ) {
             return Ok(ToolDecision::Reject {
                 code: "skill_tool_unavailable".to_string(),
-                message: "skill tools are metadata-only declarations".to_string(),
+                message: "Skill tool is metadata-only or executable actions are disabled"
+                    .to_string(),
+            });
+        }
+        if self.sandbox == SandboxMode::ReadOnly
+            && (matches!(action, ToolAction::Patch { .. })
+                || matches!(
+                    action,
+                    ToolAction::Skill { ref binding, .. }
+                        if binding.requires_workspace_write()
+                ))
+        {
+            return Ok(ToolDecision::Reject {
+                code: "sandbox_read_only".to_string(),
+                message: "workspace-write execution is disabled by --sandbox read-only".to_string(),
             });
         }
         if !requires_approval(&action) {
             return Ok(ToolDecision::Execute);
+        }
+        if self.approval == ApprovalMode::Never {
+            return Ok(ToolDecision::Reject {
+                code: "approval_disabled".to_string(),
+                message: "model action rejected because --approval never is active".to_string(),
+            });
         }
         self.approval_request(request, &action)
             .map(ToolDecision::RequestApproval)
@@ -905,14 +1196,18 @@ impl ToolApprovalPolicy for SpineToolBroker {
 }
 
 fn requires_approval(action: &ToolAction) -> bool {
-    matches!(
-        action,
+    match action {
         ToolAction::Shell { .. }
-            | ToolAction::Patch { .. }
-            | ToolAction::Mcp { .. }
-            | ToolAction::AgentSpawn { .. }
-            | ToolAction::AgentMessage { .. }
-    )
+        | ToolAction::Patch { .. }
+        | ToolAction::Mcp { .. }
+        | ToolAction::AgentSpawn { .. }
+        | ToolAction::AgentMessage { .. } => true,
+        ToolAction::Skill { binding, .. } => binding.executable(),
+        ToolAction::FileSearch { .. }
+        | ToolAction::FileRead { .. }
+        | ToolAction::AgentList
+        | ToolAction::AgentInterrupt { .. } => false,
+    }
 }
 
 fn requested_grants(action: &ToolAction, broker: &SpineToolBroker) -> Vec<GrantKind> {
@@ -933,17 +1228,31 @@ fn requested_grants(action: &ToolAction, broker: &SpineToolBroker) -> Vec<GrantK
             }
             grants
         }
-        ToolAction::AgentSpawn { .. } | ToolAction::AgentMessage { .. } => vec![
-            GrantKind::Approval,
-            GrantKind::WorkspaceRead,
-            GrantKind::WorkspaceWrite,
-            GrantKind::AgentDelegation,
-        ],
+        ToolAction::AgentSpawn {
+            requested_grants, ..
+        } => {
+            let mut grants = vec![GrantKind::Approval, GrantKind::AgentDelegation];
+            for grant in requested_grants.iter().copied() {
+                if !grants.contains(&grant) {
+                    grants.push(grant);
+                }
+            }
+            grants
+        }
+        ToolAction::AgentMessage { .. } => {
+            vec![GrantKind::Approval, GrantKind::AgentDelegation]
+        }
+        ToolAction::Skill { binding, .. } => {
+            let mut grants = vec![GrantKind::Approval, GrantKind::WorkspaceRead];
+            if binding.requires_workspace_write() {
+                grants.push(GrantKind::WorkspaceWrite);
+            }
+            grants
+        }
         ToolAction::FileSearch { .. }
         | ToolAction::FileRead { .. }
         | ToolAction::AgentList
-        | ToolAction::AgentInterrupt { .. }
-        | ToolAction::Skill { .. } => Vec::new(),
+        | ToolAction::AgentInterrupt { .. } => Vec::new(),
     }
 }
 
@@ -964,26 +1273,34 @@ fn failed_outcome(code: &str, message: impl Into<String>, retryable: bool) -> To
         .unwrap_or_else(|_| ToolResultOutcome::cancelled("tool failure was invalid").unwrap())
 }
 
-struct ChildTurnError {
-    code: &'static str,
-    message: String,
+fn cancelled_outcome(reason: impl Into<String>) -> ToolResultOutcome {
+    ToolResultOutcome::cancelled(reason.into())
+        .unwrap_or_else(|_| ToolResultOutcome::cancelled("tool call was cancelled").unwrap())
 }
 
-impl ChildTurnError {
-    fn new(code: &'static str, message: impl AsRef<str>) -> Self {
-        let mut bounded = String::new();
-        for character in message.as_ref().replace('\0', " ").chars() {
-            if bounded.len() + character.len_utf8() > 3000 {
-                break;
-            }
-            bounded.push(character);
+fn cancellation_reason(cancellation: &CancellationToken) -> String {
+    cancellation
+        .reason()
+        .unwrap_or_else(|| "tool call was cancelled".to_string())
+}
+
+fn skill_action_error_outcome(error: SkillActionError) -> ToolResultOutcome {
+    match error {
+        error @ (SkillActionError::ActionsDisabled
+        | SkillActionError::SkillNotFound { .. }
+        | SkillActionError::ActionNotDeclared { .. }
+        | SkillActionError::WorkspaceWriteRequired
+        | SkillActionError::ForbiddenGrant
+        | SkillActionError::Grant(_)
+        | SkillActionError::Request(_)) => {
+            completed_rejection("skill_action_rejected", error.to_string())
         }
-        if bounded.trim().is_empty() {
-            bounded = "isolated child model turn failed".to_string();
-        }
-        Self {
-            code,
-            message: bounded,
-        }
+        other => failed_outcome("skill_action_failed", other.to_string(), false),
     }
+}
+
+fn lock_or_recover<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }

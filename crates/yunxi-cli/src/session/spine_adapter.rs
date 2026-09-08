@@ -5,23 +5,22 @@
 //! are covered by focused integration tests.
 #![allow(dead_code)]
 
-use std::cell::{Ref, RefCell, RefMut};
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use yunxi_agent_spine::{
     ContextAssembler, ContextAssemblyRequest, ContextError, ConversationContextAssembler,
-    ModelError, ModelProvider, ModelRequest, ToolBroker, ToolError, ToolRequest,
+    ModelError, ModelEventSink, ModelProvider, ModelRequest, ToolBroker, ToolError, ToolRequest,
 };
 use yunxi_kernel::KernelSnapshot;
-use yunxi_plugin_host::{CapabilityCatalog, PluginCallError, ProcessPluginHost};
+use yunxi_plugin_host::{PluginCallError, ProcessPluginHost, SharedProcessPluginHost};
 use yunxi_protocol::{
     CONTEXT_COMPOSE_OPERATION, CapabilityDescriptor, ChatMessage, ChatRequest,
-    ContextComposeRequest, ContextComposeResult, MODEL_CHAT_COMPLETE_OPERATION, ToolCatalog,
-    ToolResultOutcome,
+    ContextComposeRequest, ContextComposeResult, MODEL_CHAT_COMPLETE_OPERATION, ModelStreamEvent,
+    ToolCatalog, ToolResultOutcome,
 };
 
 /// A cloneable handle for the synchronous host used by the CLI.
@@ -31,22 +30,24 @@ use yunxi_protocol::{
 /// retaining the spine's `&mut self` trait contracts.
 #[derive(Clone)]
 pub struct ProcessPluginHostHandle {
-    host: Rc<RefCell<ProcessPluginHost>>,
+    host: SharedProcessPluginHost,
 }
 
 impl ProcessPluginHostHandle {
     pub fn new(host: ProcessPluginHost) -> Self {
         Self {
-            host: Rc::new(RefCell::new(host)),
+            host: SharedProcessPluginHost::new(host),
         }
     }
 
-    pub fn from_shared(host: Rc<RefCell<ProcessPluginHost>>) -> Self {
-        Self { host }
+    pub fn from_shared(host: Arc<Mutex<ProcessPluginHost>>) -> Self {
+        Self {
+            host: SharedProcessPluginHost::from_arc(host),
+        }
     }
 
-    pub fn borrow_mut(&self) -> RefMut<'_, ProcessPluginHost> {
-        self.host.borrow_mut()
+    pub fn borrow_mut(&self) -> MutexGuard<'_, ProcessPluginHost> {
+        self.host.lock()
     }
 
     /// Execute one bounded host call and release the interior borrow before
@@ -62,21 +63,49 @@ impl ProcessPluginHostHandle {
         Request: Serialize,
         Response: DeserializeOwned,
     {
+        self.host.invoke(capability, operation, payload)
+    }
+
+    pub fn invoke_streaming<Request, Response, IsCancelled, OnEvent>(
+        &self,
+        capability: &CapabilityDescriptor,
+        operation: &str,
+        payload: &Request,
+        is_cancelled: IsCancelled,
+        on_event: OnEvent,
+    ) -> Result<Response, PluginCallError>
+    where
+        Request: Serialize,
+        Response: DeserializeOwned,
+        IsCancelled: Fn() -> bool,
+        OnEvent: FnMut(ModelStreamEvent) -> Result<(), String>,
+    {
         self.host
-            .borrow_mut()
-            .invoke(capability, operation, payload)
+            .invoke_streaming(capability, operation, payload, is_cancelled, on_event)
     }
 
     pub fn snapshot(&self) -> KernelSnapshot {
-        self.host.borrow_mut().snapshot()
+        self.borrow_mut().snapshot()
     }
 
-    pub fn catalog(&self) -> Ref<'_, CapabilityCatalog> {
-        Ref::map(self.host.borrow(), ProcessPluginHost::catalog)
+    pub fn provides(
+        &self,
+        capability: &CapabilityDescriptor,
+        plugin_id: &yunxi_kernel::PluginId,
+    ) -> bool {
+        self.borrow_mut()
+            .catalog()
+            .providers(capability.id().as_str(), capability.version())
+            .iter()
+            .any(|provider| provider.id() == plugin_id)
+    }
+
+    pub fn capability_count(&self) -> usize {
+        self.borrow_mut().catalog().capability_count()
     }
 
     pub fn connection_count(&self) -> usize {
-        self.host.borrow().connection_count()
+        self.borrow_mut().connection_count()
     }
 }
 
@@ -85,6 +114,7 @@ pub struct ProcessPluginModelProvider {
     host: ProcessPluginHostHandle,
     capability: CapabilityDescriptor,
     operation: String,
+    cancellation_probe: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
 }
 
 impl ProcessPluginModelProvider {
@@ -93,11 +123,20 @@ impl ProcessPluginModelProvider {
             host,
             capability,
             operation: MODEL_CHAT_COMPLETE_OPERATION.to_string(),
+            cancellation_probe: None,
         }
     }
 
     pub fn with_operation(mut self, operation: impl Into<String>) -> Self {
         self.operation = operation.into();
+        self
+    }
+
+    /// Links an external cancellation source to the spine token used by the
+    /// provider. The probe is intentionally pull-based so no helper thread is
+    /// needed for Web or background child turns.
+    pub fn with_cancellation_probe(mut self, probe: Arc<dyn Fn() -> bool + Send + Sync>) -> Self {
+        self.cancellation_probe = Some(probe);
         self
     }
 }
@@ -106,11 +145,52 @@ impl ModelProvider for ProcessPluginModelProvider {
     fn complete(
         &mut self,
         request: &ModelRequest,
-        _cancellation: &yunxi_agent_spine::CancellationToken,
+        cancellation: &yunxi_agent_spine::CancellationToken,
     ) -> Result<yunxi_protocol::ChatResult, ModelError> {
-        self.host
+        check_external_cancellation(&self.cancellation_probe, cancellation)?;
+        let result = self
+            .host
             .invoke(&self.capability, &self.operation, request.chat())
-            .map_err(|error| component_error("model_plugin_call_failed", error))
+            .map_err(|error| component_error("model_plugin_call_failed", error));
+        check_external_cancellation(&self.cancellation_probe, cancellation)?;
+        result
+    }
+
+    fn complete_streaming(
+        &mut self,
+        request: &ModelRequest,
+        cancellation: &yunxi_agent_spine::CancellationToken,
+        events: &mut dyn ModelEventSink,
+    ) -> Result<yunxi_protocol::ChatResult, ModelError> {
+        check_external_cancellation(&self.cancellation_probe, cancellation)?;
+        let cancellation_probe = self.cancellation_probe.clone();
+        let result: Result<yunxi_protocol::ChatResult, PluginCallError> =
+            self.host.invoke_streaming(
+                &self.capability,
+                &self.operation,
+                request.chat(),
+                || {
+                    if cancellation_probe.as_ref().is_some_and(|probe| probe()) {
+                        cancellation.cancel("external cancellation requested");
+                    }
+                    cancellation.is_cancelled()
+                },
+                |event| match event {
+                    ModelStreamEvent::TextDelta { text } => {
+                        events.text_delta(&text).map_err(|error| error.to_string())
+                    }
+                    ModelStreamEvent::ToolCallDelta { .. } | ModelStreamEvent::Finished { .. } => {
+                        Ok(())
+                    }
+                },
+            );
+        check_external_cancellation(&self.cancellation_probe, cancellation)?;
+        let result =
+            result.map_err(|error| component_error("model_plugin_stream_failed", error))?;
+        for call in result.tool_calls() {
+            events.tool_call_start(call)?;
+        }
+        Ok(result)
     }
 }
 
@@ -332,4 +412,18 @@ fn component_error(code: &str, error: PluginCallError) -> yunxi_agent_spine::Com
         } => yunxi_agent_spine::ComponentError::new(code, message, retryable),
         other => yunxi_agent_spine::ComponentError::new(code, other.to_string(), false),
     }
+}
+
+fn cancellation_model_error(error: yunxi_agent_spine::CancellationError) -> ModelError {
+    ModelError::new(error.code(), error.reason(), false)
+}
+
+fn check_external_cancellation(
+    probe: &Option<Arc<dyn Fn() -> bool + Send + Sync>>,
+    cancellation: &yunxi_agent_spine::CancellationToken,
+) -> Result<(), ModelError> {
+    if probe.as_ref().is_some_and(|probe| probe()) {
+        cancellation.cancel("external cancellation requested");
+    }
+    cancellation.check().map_err(cancellation_model_error)
 }

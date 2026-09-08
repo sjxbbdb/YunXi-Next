@@ -2,7 +2,8 @@
 
 use std::io::{self, BufRead, Write};
 
-use yunxi_protocol::ChatMessage;
+use yunxi_agent_spine::{CancellationToken, EventSinkError};
+use yunxi_protocol::{AgentStreamEvent, ChatMessage};
 
 use crate::management::{ManagementCommand, ManagementResult};
 use crate::session::ChatBackend;
@@ -119,9 +120,47 @@ where
             prompt => {
                 let mut request = history.clone();
                 request.push(ChatMessage::user(prompt));
-                match backend.complete(&request) {
+                let mut streamed_text = false;
+                let result = {
+                    let mut stream = |event: AgentStreamEvent| {
+                        match event {
+                            AgentStreamEvent::TextDelta { delta, .. } => {
+                                if !streamed_text {
+                                    write!(output, "\n{} ", palette.assistant("yunxi>"))
+                                        .map_err(terminal_stream_error)?;
+                                    streamed_text = true;
+                                }
+                                write!(output, "{delta}").map_err(terminal_stream_error)?;
+                                output.flush().map_err(terminal_stream_error)?;
+                            }
+                            AgentStreamEvent::ToolStart { tool_name, .. } => {
+                                if streamed_text {
+                                    writeln!(output).map_err(terminal_stream_error)?;
+                                    streamed_text = false;
+                                }
+                                writeln!(output, "{} {tool_name}", palette.muted("tool:"))
+                                    .map_err(terminal_stream_error)?;
+                            }
+                            AgentStreamEvent::ToolProgress { progress, .. } => {
+                                writeln!(output, "{} {progress}", palette.muted("progress:"))
+                                    .map_err(terminal_stream_error)?;
+                            }
+                            AgentStreamEvent::ToolResult { .. }
+                            | AgentStreamEvent::TurnState { .. }
+                            | AgentStreamEvent::TurnError { .. }
+                            | AgentStreamEvent::TurnDone { .. } => {}
+                        }
+                        Ok(())
+                    };
+                    backend.complete_streaming(&request, &CancellationToken::new(), &mut stream)
+                };
+                match result {
                     Ok(reply) => {
-                        writeln!(output, "\n{} {reply}", palette.assistant("yunxi>"))?;
+                        if streamed_text {
+                            writeln!(output)?;
+                        } else {
+                            writeln!(output, "\n{} {reply}", palette.assistant("yunxi>"))?;
+                        }
                         history.push(ChatMessage::user(prompt));
                         history.push(ChatMessage::assistant(reply));
                         trim_history(&mut history);
@@ -134,6 +173,10 @@ where
             }
         }
     }
+}
+
+fn terminal_stream_error(_error: io::Error) -> EventSinkError {
+    EventSinkError::Closed
 }
 
 fn parse_management_command(value: &str) -> Result<Option<ManagementCommand>, String> {

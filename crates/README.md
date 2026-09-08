@@ -17,6 +17,7 @@ when it owns a stable responsibility and can state its dependency direction.
 | [`yunxi-memory`](yunxi-memory/README.md) | Legacy-compatible recall and Next-only memory write plugin |
 | [`yunxi-model-openai`](yunxi-model-openai/README.md) | OpenAI-compatible HTTP capability running as a child process |
 | [`yunxi-multi-agent`](yunxi-multi-agent/README.md) | Isolated agent graph, budget, transcript, and lifecycle coordination |
+| [`yunxi-secret-broker`](yunxi-secret-broker/README.md) | Host-controlled in-memory secret references and redacted audit boundary |
 | [`yunxi-persona`](yunxi-persona/README.md) | Isolated persona and memory-context compiler plugin |
 | [`yunxi-plugin-host`](yunxi-plugin-host/README.md) | Capability provider catalog, routing checks, isolated processes, and bounded restart recovery |
 | [`yunxi-protocol`](yunxi-protocol/README.md) | Versioned local messages, bounded transport, and readiness handshake |
@@ -27,9 +28,9 @@ when it owns a stable responsibility and can state its dependency direction.
 | [`yunxi-tool-mcp`](yunxi-tool-mcp/README.md) | Isolated stdio MCP Server bridge, discovery, and Host-approved calls |
 | [`yunxi-tool-patch`](yunxi-tool-patch/README.md) | Isolated, Host-approved workspace patch application |
 | [`yunxi-tool-shell`](yunxi-tool-shell/README.md) | Isolated, Host-approved bounded shell execution |
-| [`yunxi-tool-skills`](yunxi-tool-skills/README.md) | Isolated Skill discovery, bounded context, and metadata-only tool declarations |
-| [`yunxi-voice`](yunxi-voice/README.md) | Versioned voice transcribe/synthesize contracts and deterministic process-host fixture; no device runtime |
-| [`yunxi-weixin`](yunxi-weixin/README.md) | Versioned Weixin channel contract and deterministic process-host fixture; no Weixin SDK or network runtime |
+| [`yunxi-tool-skills`](yunxi-tool-skills/README.md) | Isolated Skill discovery, bounded context, metadata declarations, and explicit executable actions |
+| [`yunxi-voice`](yunxi-voice/README.md) | Versioned voice transcribe/synthesize contracts with loopback, Device-granted sidecar, and bounded audio adapters |
+| [`yunxi-weixin`](yunxi-weixin/README.md) | Versioned Weixin channel contract with loopback, encrypted SecretStore, and explicit iLink transport |
 | [`yunxi-web-gateway`](yunxi-web-gateway/README.md) | Bounded in-memory dsh RPC dispatcher, projections, and event buffers |
 | [`yunxi-web-contract`](yunxi-web-contract/README.md) | Bounded dsh-compatible browser RPC and event envelopes |
 
@@ -46,6 +47,7 @@ implementation, catalog, serialization, or HTTP package. The Cordis core/runtime
 and Agent spine are integrated foundation crates. The default CLI turn path uses
 the spine-backed Host adapter, while application storage and Web projection
 remain in the CLI facade. Dynamic Rust plugin loading is intentionally not part
-of v1. Voice and Weixin are launch-wired contract/fixture crates and appear in
-the user-facing inventory when enabled, but they do not yet contain real device,
-login, or network backends.
+of v1. `yunxi-secret-broker` is currently used by the Host for an in-memory
+model-credential boundary. Voice and Weixin are launch-wired local adapter
+routes; their explicit Voice sidecar and Weixin iLink boundaries are usable
+through the Host, but real device/account/media acceptance remains external.

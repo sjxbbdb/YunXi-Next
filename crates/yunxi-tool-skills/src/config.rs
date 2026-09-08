@@ -9,12 +9,14 @@ use std::path::{Path, PathBuf};
 pub const SKILLS_ROOT_ENV: &str = "YUNXI_NEXT_SKILLS_ROOT";
 pub const SKILLS_DISABLED_ENV: &str = "YUNXI_NEXT_SKILLS_DISABLED";
 pub const SKILLS_MODE_ENV: &str = "YUNXI_NEXT_SKILLS_MODE";
+pub const SKILLS_ACTIONS_ENABLED_ENV: &str = "YUNXI_NEXT_SKILLS_ACTIONS_ENABLED";
 const MAX_ROOT_BYTES: usize = 512;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SkillsConfig {
     root: PathBuf,
     disabled: BTreeSet<String>,
+    actions_enabled: bool,
 }
 
 impl SkillsConfig {
@@ -29,8 +31,19 @@ impl SkillsConfig {
         } else {
             current_dir.join(root)
         };
+        Self::for_root_from_env(root)
+    }
+
+    /// Builds the environment-controlled policy for a Host-resolved root.
+    ///
+    /// Hosts use this form after constraining a relative root to their granted
+    /// workspace. It avoids depending on the launcher process current
+    /// directory while retaining the same disabled/action policy parsing as
+    /// the isolated metadata plugin.
+    pub fn for_root_from_env(root: impl Into<PathBuf>) -> Result<Self, SkillsConfigError> {
         let disabled = parse_disabled(env::var(SKILLS_DISABLED_ENV).ok().as_deref())?;
-        Self::new(root, disabled)
+        let actions_enabled = parse_bool(env::var(SKILLS_ACTIONS_ENABLED_ENV).ok().as_deref())?;
+        Ok(Self::new(root, disabled)?.with_actions_enabled(actions_enabled))
     }
 
     pub fn new(
@@ -50,7 +63,18 @@ impl SkillsConfig {
         for id in &disabled {
             validate_skill_id(id)?;
         }
-        Ok(Self { root, disabled })
+        Ok(Self {
+            root,
+            disabled,
+            actions_enabled: false,
+        })
+    }
+
+    /// Executable Skill actions are opt-in even when the read-only Skill
+    /// metadata capability is enabled.
+    pub fn with_actions_enabled(mut self, enabled: bool) -> Self {
+        self.actions_enabled = enabled;
+        self
     }
 
     pub fn root(&self) -> &Path {
@@ -64,6 +88,10 @@ impl SkillsConfig {
     pub fn disabled(&self) -> &BTreeSet<String> {
         &self.disabled
     }
+
+    pub const fn actions_enabled(&self) -> bool {
+        self.actions_enabled
+    }
 }
 
 fn parse_disabled(value: Option<&str>) -> Result<Vec<String>, SkillsConfigError> {
@@ -76,6 +104,17 @@ fn parse_disabled(value: Option<&str>) -> Result<Vec<String>, SkillsConfigError>
         ids.push(id.to_string());
     }
     Ok(ids)
+}
+
+fn parse_bool(value: Option<&str>) -> Result<bool, SkillsConfigError> {
+    match value.map(str::trim) {
+        None | Some("") => Ok(false),
+        Some("1" | "true" | "TRUE" | "yes" | "on") => Ok(true),
+        Some("0" | "false" | "FALSE" | "no" | "off") => Ok(false),
+        Some(value) => Err(SkillsConfigError::InvalidActionsEnabled {
+            value: value.to_string(),
+        }),
+    }
 }
 
 fn validate_root(root: &Path) -> Result<(), SkillsConfigError> {
@@ -119,6 +158,7 @@ pub enum SkillsConfigError {
     RootTooLong { length: usize, maximum: usize },
     RootControlCharacter,
     InvalidSkillId { id: String },
+    InvalidActionsEnabled { value: String },
 }
 
 impl fmt::Display for SkillsConfigError {
@@ -146,6 +186,12 @@ impl fmt::Display for SkillsConfigError {
                     "Skills id `{id}` is not a valid lowercase identifier"
                 )
             }
+            Self::InvalidActionsEnabled { value } => {
+                write!(
+                    formatter,
+                    "invalid {SKILLS_ACTIONS_ENABLED_ENV} value `{value}`"
+                )
+            }
         }
     }
 }
@@ -157,7 +203,8 @@ impl Error for SkillsConfigError {
             Self::EmptyRoot
             | Self::RootTooLong { .. }
             | Self::RootControlCharacter
-            | Self::InvalidSkillId { .. } => None,
+            | Self::InvalidSkillId { .. }
+            | Self::InvalidActionsEnabled { .. } => None,
         }
     }
 }

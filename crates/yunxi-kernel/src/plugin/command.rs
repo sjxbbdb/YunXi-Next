@@ -84,6 +84,7 @@ impl PluginCommand {
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
+        configure_process_group(&mut command);
         if self.clear_environment {
             command.env_clear();
         }
@@ -94,6 +95,26 @@ impl PluginCommand {
         command.spawn()
     }
 }
+
+#[cfg(unix)]
+fn configure_process_group(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+
+    // A dedicated process group lets the supervisor stop plugin descendants
+    // together with the plugin without linking platform-specific native code.
+    command.process_group(0);
+}
+
+#[cfg(windows)]
+fn configure_process_group(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    command.creation_flags(CREATE_NEW_PROCESS_GROUP);
+}
+
+#[cfg(not(any(unix, windows)))]
+fn configure_process_group(_command: &mut Command) {}
 
 impl From<&OsStr> for PluginCommand {
     fn from(program: &OsStr) -> Self {

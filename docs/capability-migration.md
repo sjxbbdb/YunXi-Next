@@ -11,6 +11,14 @@ Pluginization means a process boundary, a declared wire contract, explicit
 grants, and independent failure state. Splitting code into another Rust crate is
 not sufficient by itself.
 
+Status vocabulary used below:
+
+- `integrated`: usable through the current product path and covered by the
+  required process, contract, grant, disable, and failure tests;
+- `baseline`: the Rust contract and isolation evidence exists, but a real
+  provider, product integration, or parity surface is still missing;
+- `planned`: the migration has not reached a usable implementation.
+
 ## Trusted Host Boundary
 
 The following responsibilities remain outside capability plugins:
@@ -31,30 +39,29 @@ surfaces. They are not allowed to bypass the trusted approval or routing layer.
 
 | Domain | Legacy owner | YunXi Next contract | Target process | Status |
 | --- | --- | --- | --- | --- |
-| Model completion | `yunxi-agent-provider` | `model.chat@1:complete` | `yunxi-model-openai` | Baseline integrated: isolated request loop, required network/provider-credential manifest grants, API failure containment, optional bounded tool-call response, and bounded SSE streaming at the library/Agent adapter; CLI/Web remains full-response until carrier integration, and credential brokering is pending |
+| Model completion | `yunxi-agent-provider` | `model.chat@1:complete` | `yunxi-model-openai` | Integrated local path: isolated request loop, required network/provider-secret declarations, API failure containment, bounded tool-call response, provider SSE parsing, and bounded Agent events consumed by REPL, TUI, `run --jsonl`, and Web mux polling |
 | Prompt and AGENTS context | `yunxi-agent-context` | `context.compose@1:compose` | `yunxi-context` | Integrated: bounded root-to-cwd read path |
 | Persona and soul | `yunxi-agent-persona` | `persona.context@1:compile` | `yunxi-persona` | Integrated: default/custom profile and soul read path |
 | Memory recall | `yunxi-agent-persona`, `yunxi-agent-storage` | `memory.recall@1:recall` | `yunxi-memory` | Integrated: bounded legacy + Next JSONL recall |
-| Memory extraction and writes | `yunxi-agent-persona`, `yunxi-agent-storage` | `memory.write@1:extract/review` | `yunxi-memory` | Baseline integrated: rule extraction, privacy policy, dedup, pending review, Next-only writes; provider extractor and bulk management pending |
+| Memory extraction and writes | `yunxi-agent-persona`, `yunxi-agent-storage` | `memory.write@1:extract/review`, `memory.management@1` | `yunxi-memory` | Integrated local path: rule extraction, privacy policy, dedup, pending review, search/list/show/approve/reject/delete/clear/on/off, and Next-only writes through the process Host facade |
 | Companion response policy | `yunxi-agent-companion` | `companion.decide@1:decide` | `yunxi-companion` | Integrated: deterministic emotion/tone/follow-up policy reaches model context |
-| Relationship mailbox | `yunxi-agent-companion`, `yunxi-agent-storage` | `companion.mailbox@1` | `yunxi-companion-mailbox` | Baseline integrated: encrypted Next mailbox, idempotency, list/get/read; legacy credential-store mailbox import pending |
-| Proactive scheduling | `yunxi-agent-runtime`, `yunxi-agent-companion` | `scheduler.proactive@1:evaluate` | `yunxi-scheduler` | Baseline integrated: explicit signals, quiet hours, limits, mailbox enqueue; background daemon and love-letter generation pending |
-| Session history and resume | `yunxi-agent-storage` | `storage.sessions@1` | `yunxi-storage` | Baseline integrated: append/list/load/resume and read-only legacy projection; full legacy event replay pending |
+| Relationship mailbox | `yunxi-agent-companion`, `yunxi-agent-storage` | `companion.mailbox@1` | `yunxi-companion-mailbox` | Integrated local path: encrypted Next mailbox, idempotency, list/get/read, Web projection, and safe migration reporting; opaque legacy credential-store payloads remain unsupported rather than guessed |
+| Proactive scheduling | `yunxi-agent-runtime`, `yunxi-agent-companion` | `scheduler.proactive@1:evaluate` | `yunxi-scheduler` | Integrated local path: explicit signals, quiet hours, limits, encrypted mailbox enqueue, bounded background worker, cancellation, and session-owned shutdown |
+| Session history and resume | `yunxi-agent-storage` | `storage.sessions@1`, `session.management@1` | `yunxi-storage` | Integrated local path: append/list/load/resume/show/history/rollout/graph/fork/archive/pin, read-only legacy projection, explicit migration, and bounded legacy event replay/import |
 | Shell execution | `yunxi-agent-tools`, `yunxi-agent-exec`, `yunxi-agent-sandbox` | `tool.shell@1` | `yunxi-tool-shell` | Baseline integrated: isolated execution, required approval/workspace-read manifest grants, bounded output/timeout, and Host-controlled model loop; OS sandbox and optional write/network policy expansion pending |
 | Patch application | `yunxi-agent-tools`, `yunxi-agent-patch` | `tool.patch@1` | `yunxi-tool-patch` | Baseline integrated: isolated apply, required approval/workspace-read/workspace-write manifest grants, path validation, rollback, and Host-controlled model loop |
 | File search and viewing | `yunxi-agent-tools`, `yunxi-agent-context` | `tool.files@1:search/read` | `yunxi-tool-files` | Baseline integrated: isolated name search and bounded UTF-8 reads under a required read-only workspace grant; write, rename, indexing, and richer ignore policy remain out of scope |
 | MCP bridge | `yunxi-agent-mcp`, `yunxi-agent-tools` | `tool.mcp@1:list/call/cancel/status` | `yunxi-tool-mcp` | Baseline integrated: one explicit stdio or opt-in HTTP Server, bounded JSON-RPC initialize/list/call/cancel, JSON/SSE responses, session reuse, dynamic model projection, Host Approval, exact network scopes, reference-only Secret grants, redaction, and isolated crash recovery |
-| Skills and dynamic tools | `yunxi-agent-skills`, `yunxi-agent-tools` | `tool.skills@1:list/context/status` | `yunxi-tool-skills` | Baseline integrated: isolated workspace-bounded discovery, validated metadata, bounded instruction injection, disabled filtering, and metadata-only model tool projection; executable Skill tools and richer lifecycle management remain pending |
-| Multi-agent coordination | `yunxi-agent-multi-agent` | `tool.multi-agent@1` | `yunxi-multi-agent` | Baseline integrated: isolated coordinator, parent-child grant subset, fixed graph/turn budgets, persisted transcripts/events, restart recovery, Host-approved spawn/message, and a separate Model plugin process per child turn; background parallelism, in-flight cancellation, child tool grants, and Web graph UI remain pending |
-| Weixin channel | `yunxi-agent-weixin` | `channel.weixin@1` | `yunxi-weixin` | Baseline launch-wired contract/fixture: process-host handshake, required Network/Secret declarations, typed inbound/outbound routing, idempotency, ACK/cancel/fail state transitions, malformed-payload handling, disable route removal, and CLI/Web inventory projection; no real login, SDK, or network transport |
-| Voice input (speech recognition) | `yunxi-agent-voice` | `voice.transcribe@1` | `yunxi-voice` | Baseline launch-wired contract/fixture: bounded chunks, partial/final transcript events, cancellation, backpressure, process-host handshake, exact capability check, disable route removal, and CLI/Web inventory projection; no Device grant or device runtime |
-| Voice output (speech synthesis) | `yunxi-agent-voice` | `voice.synthesize@1` | `yunxi-voice` | Baseline launch-wired contract/fixture: bounded text/audio chunks, cancellation, backpressure, process-host handshake, exact capability check, disable route removal, and CLI/Web inventory projection; output bytes are synthetic and no speaker runtime exists |
+| Skills and dynamic tools | `yunxi-agent-skills`, `yunxi-agent-tools` | `tool.skills@1:list/context/status` plus Host-side action facade | `yunxi-tool-skills` | Integrated local path: isolated discovery/injection, inert metadata-only declarations, and separately declared fixed executable actions that are opt-in, approval-gated, grant-bounded, cancellable, and process-isolated |
+| Multi-agent coordination | `yunxi-agent-multi-agent` | `tool.multi-agent@1` | `yunxi-multi-agent` | Integrated local path: isolated coordinator, grant subsets, budgets, exact child file/patch tool catalogs, per-turn model selection, CLI one-shot turns, concurrent Web continuations, streaming, targeted interruption, persisted restart recovery, and sibling failure isolation; remote/multi-host scheduling remains outside the local product |
+| Weixin channel | `yunxi-agent-weixin` | `channel.weixin@1` | `yunxi-weixin` | Integrated local boundary: one Host process plugin selects loopback or explicit production iLink, with QR login polling, non-blocking long poll, send/reply, encrypted SecretStore, session binding, idempotent queue/ACK/cancel/approval, and Agent bridge contracts; real-account/media E2E remains manual |
+| Voice input (speech recognition) | `yunxi-agent-voice` | `voice.transcribe@1` | `yunxi-voice` | Integrated local boundary: one Host process plugin selects loopback or an explicit bounded sidecar, with Device grant, doctor/devices/transcribe/chat/talk, cancellation/backpressure, panic/crash/timeout isolation, and text fallback; physical microphone/provider evidence remains manual |
+| Voice output (speech synthesis) | `yunxi-agent-voice` | `voice.synthesize@1` | `yunxi-voice` | Integrated local boundary: speak/playback/save, bounded playable WAV/PCM file adapter, Device grant, external sidecar transport, hot replacement, cancellation, and text fallback; physical speaker/provider evidence remains manual |
 
-The Voice and Weixin rows remain `baseline`, not full product `integrated`.
-Their crates prove typed contracts and an isolated test process, and the current
-`yunxi-cli` Host composition launches them and exposes their inventory routes
-when enabled. Creating a fixture is evidence for the process boundary only; it
-is not evidence of microphone, speaker, login, or network support.
+The Voice and Weixin rows are integrated as local, replaceable process
+boundaries. Their loopback modes remain fixtures, and only real devices,
+providers, accounts, and media traffic can close the external integration gate.
+Creating or launching a fixture is evidence for the process boundary only.
 
 Legacy `yunxi-agent-core`, `yunxi-agent-protocol`, and
 `yunxi-agent-runtime` contain mixed contracts and orchestration. Their behavior
@@ -71,7 +78,9 @@ explicit directory at refresh/inventory boundaries and can replace or unload
 manager-owned processes and routes. A standalone CLI process reads the setting
 when its next Host is created. `yunxi-settings` has 15 built-in keys, and the
 current CLI/Web launch path exposes all 15 connected optional entries;
-`voice` and `weixin` remain fixture routes until their production adapters exist.
+`voice` and `weixin` use the same Host routes for loopback and explicitly
+configured external adapters; readiness is reported without pretending that
+an untested device or account is online.
 
 `yunxi-agent-eval` remains development infrastructure. Its scenarios become
 cross-plugin acceptance fixtures instead of a runtime capability.
@@ -86,15 +95,16 @@ cross-plugin acceptance fixtures instead of a runtime capability.
 3. **Stateful companion path (baseline complete):** memory writes, storage,
    companion policy, mailbox, and scheduler use process boundaries and explicit
    workspace-scoped grants. Remaining parity items are recorded in the ledger.
-4. **Action path:** shell, patch, MCP, future executable Skill tools, and
+4. **Action path:** shell, patch, MCP, executable Skill actions, and
    multi-agent child turns run only after host-issued approval and resource
    grants. Read-only agent listing and stored-state interruption do not acquire
-   execution authority. Current Skill declarations are metadata-only and cannot
-   execute. A plugin result never upgrades its own authority.
-5. **Channel and media path (baseline contracts):** Voice and Weixin fixtures
-   now exercise the same versioned process boundary, but real adapters still
-   need CLI/Web composition, host-issued device/network/secret authority, and
-   product-level fallback before this phase is integrated.
+   execution authority. Metadata-only Skill declarations remain inert; an
+   executable action requires a separate fixed allowlist entry and approval. A
+   plugin result never upgrades its own authority.
+5. **Channel and media path:** Voice and Weixin process plugins select either a
+   deterministic loopback or an explicitly configured sidecar/iLink adapter.
+   Host-issued device/network/secret authority, failure fallback, and bounded
+   lifecycle are automated; real hardware/account/media validation is external.
 6. **Management surface:** Web settings reads the bounded Host inventory,
    changes persisted enable state, and shows lifecycle health from the kernel
    and plugin host. Manifest metadata remains Host-owned at the dsh wire
@@ -103,23 +113,72 @@ cross-plugin acceptance fixtures instead of a runtime capability.
    reconciled, and unloaded through `yunxi-plugin-host`; invalid or crashing
    packages remain isolated from healthy siblings.
 
+## Operator Prerequisites
+
+The repository supplies contracts, fixtures, and local loopback behavior. The
+operator must supply the following for real integrations:
+
+| Capability | Required outside this repository | Current local behavior |
+| --- | --- | --- |
+| Model chat | A valid `DEEPSEEK_API_KEY` or compatible provider credential, endpoint, and model | Real OpenAI-compatible HTTP model path; credentials are not stored in settings or protocol frames |
+| Files/Shell/Patch/MCP/Skills | An intentional workspace path, external command/server, and approval decisions | Side-effecting/external capabilities are off by default; grants are Host-controlled, not OS sandboxing |
+| Voice input/output | Microphone, speaker, codec/provider SDK, and a separate sidecar implementing the Voice contract | Loopback by default; an explicit JSONL sidecar can be selected, but the repository does not certify its devices or audio |
+| Weixin | Real account, QR scan/device confirmation, network access, account/session material, and media implementation | Loopback by default; explicit production mode uses bounded HTTPS iLink and encrypted file storage, but requires real-account validation |
+| Legacy migration | A reviewed workspace and, optionally, explicit `YUNXI_MIGRATION_LEGACY_HOME`/`YUNXI_HOME` and `YUNXI_NEXT_HOME` roots | `plan` is read-only; `apply` writes only new Next files/manifests; rollback removes only unchanged generated targets |
+
+Enabling a plugin is the only v1 permission control. Enabled means the Host
+starts that plugin and supplies its declared grants; disabled means no process,
+route, or grant. This is an application-level choice, not an OS sandbox.
+
+## Current Completion Boundary
+
+The current branch may claim the following, and no more:
+
+| Area | Completed in-repository | Still outside completion |
+| --- | --- | --- |
+| Streaming | Provider SSE parsing, protocol events, Agent backpressure, REPL/TUI/JSONL output, Web mux projection, cancellation tests | Remote multi-user delivery guarantees and provider-specific production soak testing |
+| Multi-agent | Persisted coordinator, isolated child models, exact child file/patch grants, concurrent Web jobs, per-turn models, stream projection, targeted interruption, reattach recovery, and sibling isolation | Remote workers, multi-host scheduling, and production load/soak evidence |
+| Voice | Typed contracts, loopback and external JSONL sidecar through one Host route, WAV/PCM file IO, Device grants, fallback, replacement, and process-failure tests | Real microphone/speaker/codec/provider implementation and manual device/permission/playback evidence |
+| Weixin | Loopback and production iLink through one Host route, encrypted file store, QR/status/serve/send/reply/session/remote-control operations, non-blocking polling, Agent bridge contracts, and local HTTP/store tests | Real-account QR/login/send/receive/reconnect evidence and real media byte handling |
+| Secrets | Host-scoped one-shot references, redacted provider failures, optional authenticated durable broker storage, and separate encrypted Weixin store | OS keychain/HSM integration and production rotation/redaction audit |
+| Sandbox | Process failure isolation, application-level grants, path checks, request/time/output bounds | OS-enforced filesystem/network/CPU/memory/handle/child-process isolation |
+| Migration | Explicit plan/apply/rollback plus lazy session import-on-first-write; legacy sources remain read-only | Full semantic parity for opaque or unsupported legacy formats and operator backup/restore acceptance |
+
+Passing deterministic fixtures or unit tests does not close any item in the
+right-hand column.
+
+## Migration Boundary
+
+`yunxi-next migrate sessions plan|apply` and `yunxi-next migrate rollback
+<migration-id>` expose the current explicit migration facade. Despite the
+historical `sessions` command name, the plan can include workspace sessions and
+memory plus supported persona/control/memory items from an explicitly selected
+legacy user home. It does not guess or decode opaque mailbox formats.
+
+`plan` performs no write. `apply` revalidates source fingerprints, never
+replaces an existing Next target, writes only Next files and a bounded manifest,
+and leaves every legacy byte unchanged. `rollback` removes only targets still
+matching that manifest and preserves files changed after migration. Normal
+legacy-session resume remains a separate lazy import-on-first-write path.
+
 ## Voice Migration Boundary
 
 Voice input and voice output are both part of the inheritance scope. The current
-repository has a contract and process fixture baseline, but no usable device
-adapter. They are
-separate capabilities even when one executable provides both, so either side
-can be disabled, replaced, or restarted without taking down text chat.
+repository has one Host-supervised process plugin with deterministic loopback,
+a usable external sidecar transport, and a bounded WAV/PCM file adapter, but no
+repository-owned OS microphone/speaker or provider SDK. Input and output remain
+separate versioned capabilities inside the Voice plugin; the user-facing v1
+permission is the single Voice plugin switch, and text chat remains independent.
 
-The current contracts and fixture have these properties:
+The current Host route and provider boundaries have these properties:
 
 - `voice.transcribe@1` accepts bounded audio chunks, emits partial and final
   transcripts, and supports cancellation and backpressure;
 - `voice.synthesize@1` accepts bounded text, emits audio chunks, and supports
   cancellation and backpressure;
-- the fixture requests no `Device` grant because it has no device access;
-  production microphone/speaker permissions must be host-issued grants rather
-  than authority inferred by a voice plugin;
+- loopback requests no `Device` grant because it has no device access; an
+  external sidecar declares feature support and uses Host-issued `DeviceGrant`
+  values rather than authority inferred by a voice plugin;
 - raw audio is not persisted by default; an explicit user action is required
   for recording or diagnostic retention;
 - a missing device, provider timeout, malformed audio frame, or plugin crash
@@ -127,12 +186,15 @@ The current contracts and fixture have these properties:
 - channel adapters such as Weixin consume these same contracts instead of
   embedding a second speech implementation.
 
-The current fixture covers partial/final input, synthetic output,
-cancellation, bounds, malformed payloads, and process disable/removal. Device
-permission denial, playable streaming output, real failure fallback, and SDK
-integration remain required for the production voice wave. A provider-specific
-speech SDK is an implementation detail of the plugin and must not leak into the
-host protocol.
+Loopback covers partial/final input, synthetic output, cancellation, bounds,
+malformed payloads, and process disable/removal. Sidecar and Host tests cover
+bounded JSONL, Device grants, timeout, cancellation, panic/crash quarantine,
+malformed/oversized response, replacement, restart, and text fallback. WAV/PCM
+tests prove real bounded file IO. Physical device permission denial, playable
+speaker output, provider credentials, and SDK integration still require
+external manual evidence. A
+provider-specific speech SDK is an implementation detail and must not leak into
+the host protocol.
 
 ## Per-Plugin Acceptance Gate
 
@@ -155,6 +217,14 @@ The migration ledger status changes only after these gates pass. A typed
 contract or process fixture alone is `baseline`; source copied into the new
 repository but still called in-process remains `planned`.
 
+The release-level proof is `scripts\acceptance-audit.ps1`. It runs the exact
+bad-frame, crash, timeout, bounded-restart, disable/re-enable, replacement,
+unload/ownership, and migration rollback filters in addition to the aggregate
+workspace tests. The script installs only `yunxi-next.exe` into a private
+temporary directory and protects the old executable with before/after SHA-256
+and a read-only legacy-tree fingerprint. It has no permission to modify PATH,
+the registry, services, the old repository, or the current checkout.
+
 ## Phase 0 Evidence
 
 The current baseline records plugin grant declarations in the versioned
@@ -162,8 +232,12 @@ handshake manifest. `yunxi-plugin-host` rejects a launch before route
 registration when a host-required grant is absent, while per-call `ActionGrant`
 validation remains the authority for approval, workspace scope, write, network,
 timeout, and output limits. A manifest declaration is not a secret broker or an
-OS sandbox; the built-in model still reads its provider credential from its
-child-process environment until the later credential-broker work.
+OS sandbox. The Host stores the built-in model credential in a scoped broker and
+resolves a single-use reference before injecting the credential at the final
+model-child environment boundary. The default broker is in-memory; an explicit
+32-byte master key and path enable authenticated durable storage with rotation,
+removal, and redacted audit tests. The child necessarily receives the credential
+needed by the provider; no OS keychain/HSM is claimed.
 
 The process acceptance fixture covers accepted manifests, missing required
 grants, malformed frames, crashes, and read timeouts. The CLI fixture disables
@@ -208,7 +282,8 @@ responses support JSON and bounded SSE, cache `Mcp-Session-Id`, and send
 P2-04 is complete at the bridge boundary. The scope is an authority check in
 the Host/plugin path, not an operating-system network sandbox. It does not
 claim to stop a remote server that has already received a request, and an
-external Secret broker is still future work.
+MCP's configured reference/value map is not the Host's model Secret Broker or a
+platform secret store.
 
 `yunxi-tool-skills` scans only immediate directories beneath a Host-approved
 workspace root. It accepts bounded UTF-8 `SKILL.md` instructions and optional
@@ -217,11 +292,14 @@ provides typed list/context/status responses through `tool.skills@1`. The child
 environment is cleared and receives no Provider credential.
 
 The CLI injects available Skill instruction blocks as system messages and
-projects declarations as `skill.<skill-id>.<tool>`. These declarations do not
-carry executable fields: a model call receives `skill_tool_unavailable` without
-an approval prompt or side effect. Disabled Skills are omitted, and a discovery
-or context-process failure removes only the Skills route while model chat
-continues.
+projects declarations as `skill.<skill-id>.<tool>`. A metadata-only declaration
+receives `skill_tool_unavailable` without approval or side effect. An explicitly
+separate `actions.json` entry may bind the same tool to one fixed relative
+program and fixed arguments when `YUNXI_NEXT_SKILLS_ACTIONS_ENABLED=true`.
+Execution still requires Host approval and a bounded ActionGrant, clears the
+child environment, rejects network/secret authority, propagates cancellation,
+and confines failures to that action. Disabled Skills are omitted, and a
+discovery or action failure does not stop model chat.
 
 ## Phase 4 Baseline Evidence
 
@@ -235,39 +313,54 @@ same-directory replacement beneath `.yunxi-next/multi-agent`.
 The CLI exposes `agent.spawn`, `agent.list`, `agent.message`, and
 `agent.interrupt` only when the capability is enabled. Spawn and message reuse
 the existing user approval continuation. Each child turn starts a separate
-Model plugin process, receives its own transcript and no parent tool catalog,
-and is explicitly shut down afterward. A child API failure marks only that
+Model plugin process, receives its own transcript, and receives only the
+file/patch catalog justified by its stored child-grant subset and the current
+parent sandbox. It is explicitly shut down afterward. A child API failure marks only that
 branch failed and is returned to the parent model as a tool result; the main
-model route remains usable. Restart recovery marks only stale Running branches
-failed, recursive interruption spares siblings, and process fixtures verify
+model route remains usable. Restart recovery requeues stale Running branches,
+preserves transcript/model/budget, excludes cancelled branches, and is
+idempotent; recursive interruption spares siblings, and process fixtures verify
 that Provider credentials are absent from persisted coordinator state.
 
-This is a baseline rather than full integration. Child turns are synchronous,
-so `agent.interrupt` updates stored cancellation between turns but cannot yet
-terminate an in-flight model HTTP request. Parallel/background workers, live
-cancellation, delegated child tools, model selection, and a Web graph/event
-view remain Phase 4 work.
+The CLI model-tool path above remains synchronous and one-shot. Separately,
+WebHost wires `AsyncMultiAgentRuntime` to `subagent.prompt` and
+`subagent.interrupt`: a bounded set of continuable child jobs can run while the
+Host services other requests, each child uses its own model process, model
+deltas become bounded Web events, and interruption propagates to the active
+provider stream. Multiple continuations issue provider requests in parallel;
+reattaching a persisted root session automatically resumes recoverable workers.
+The runtime supports per-turn model selection and validates child-grant subsets.
+Remote/multi-host scheduling is not implemented.
 
 ## Channel and Media Baseline Evidence
 
 `yunxi-voice` provides bounded `voice.transcribe@1` and
-`voice.synthesize@1` request/event types and a Rust child-process fixture. The
-fixture announces both capabilities through the protocol-v2 handshake and
-returns deterministic transcript events or synthetic audio markers. Host
-integration tests verify the expected capability set, malformed requests,
-cancellation, and route removal after disable. It intentionally has no
-microphone, speaker, codec, SDK, network, or `Device` grant.
+`voice.synthesize@1` request/event types behind one launch-wired process plugin.
+Without external configuration it selects deterministic loopback behavior and
+synthetic audio. With `YUNXI_VOICE_SIDECAR_PROGRAM` it announces and requires a
+Host `Device` grant and forwards doctor/devices/transcribe/speak/chat/talk/
+playback/save/cancel through a bounded JSONL child. The same Host route enforces
+deadlines, backpressure, process termination, restart, panic quarantine, and
+text fallback. The included sidecar binary remains a transport fixture; the
+WAV/PCM file adapter is real bounded data IO but not an OS microphone/speaker.
 
-`yunxi-weixin` provides a bounded `channel.weixin@1` contract and a separate
-`yunxi-weixin-plugin-fixture`. The fixture declares required `Network` and
-`Secret` grants so the manifest shape is testable, then performs only local
-in-memory message registration and delivery-state transitions. Host tests
-verify exact capability matching, idempotent inbound/ACK behavior, malformed
-payload handling, and route removal after disable. The grants are declarations
-for a future adapter, not a credential broker or permission to access Weixin.
+`yunxi-weixin` provides a bounded `channel.weixin@1` contract behind one
+launch-wired process plugin. Loopback mode is deterministic; explicit
+`YUNXI_WEIXIN_MODE=production` selects the bounded HTTPS iLink transport and
+authenticated encrypted file store in that same route. The plugin exposes
+login/poll-login/status/doctor, synchronous or non-blocking serve, queued
+messages, send/reply, pair/session, remote ACK/cancel/approval, and logout.
+Long-poll batches enter an idempotent Agent bridge queue, and stop/logout/plugin
+shutdown request cancellation without blocking the Host loop. Host tests cover
+exact grants/capabilities, malformed configuration fallback, real iLink request
+shapes, route removal, and non-blocking lifecycle.
 
-Both fixtures are now launched by `yunxi-cli` and projected as live Host/Web
-inventory routes when enabled. They are not yet connected to real devices or a
-Weixin service. The next production steps are to replace the fixture handlers
-behind the same Host boundary and add failure fallback tests showing text chat
-remains available.
+Voice and Weixin external acceptance is intentionally manual. A local fixture,
+loopback transport, iLink control-plane test, or `production_ready` field does
+not prove a real microphone/speaker or account/network/media integration.
+
+Both process plugins are launched by `yunxi-cli` and projected as live Host/Web
+inventory routes when enabled. Their default loopback providers are not evidence
+of real devices or a real Weixin account. External completion requires supplying
+the sidecar/account/media prerequisites and attaching the manual evidence listed
+in `acceptance-audit.md`.

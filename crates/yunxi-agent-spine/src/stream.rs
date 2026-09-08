@@ -145,6 +145,14 @@ impl EventChannel {
 pub trait EventSink {
     fn emit(&mut self, event: AgentStreamEvent) -> Result<(), EventSinkError>;
 
+    /// Delivers a terminal event without consulting the turn cancellation.
+    ///
+    /// A cancelled turn still needs to publish its terminal state. Sinks that
+    /// have their own cancellation-aware delivery can override this method.
+    fn emit_terminal(&mut self, event: AgentStreamEvent) -> Result<(), EventSinkError> {
+        self.emit(event)
+    }
+
     /// Default cancellation propagation for custom sinks.  Channel sinks
     /// override this to interrupt a blocked send promptly.
     fn emit_with_cancellation(
@@ -234,6 +242,19 @@ impl EventSender {
         event: AgentStreamEvent,
         cancellation: Option<&CancellationToken>,
     ) -> Result<(), EventSinkError> {
+        self.send_inner(event, cancellation, false)
+    }
+
+    fn send_terminal(&self, event: AgentStreamEvent) -> Result<(), EventSinkError> {
+        self.send_inner(event, None, true)
+    }
+
+    fn send_inner(
+        &self,
+        event: AgentStreamEvent,
+        cancellation: Option<&CancellationToken>,
+        terminal: bool,
+    ) -> Result<(), EventSinkError> {
         event.validate()?;
         let mut state = self
             .inner
@@ -251,6 +272,25 @@ impl EventSender {
                         maximum: MAX_STREAM_EVENTS_PER_TURN,
                     });
                 }
+                state.attempted_events += 1;
+                state.queue.push_back(event);
+                self.inner.not_empty.notify_one();
+                return Ok(());
+            }
+
+            if terminal {
+                if state.attempted_events >= MAX_STREAM_EVENTS_PER_TURN {
+                    return Err(EventSinkError::EventLimitReached {
+                        maximum: MAX_STREAM_EVENTS_PER_TURN,
+                    });
+                }
+                let index = state
+                    .queue
+                    .iter()
+                    .position(StreamEvent::is_droppable)
+                    .unwrap_or(0);
+                state.queue.remove(index);
+                state.dropped_events = state.dropped_events.saturating_add(1);
                 state.attempted_events += 1;
                 state.queue.push_back(event);
                 self.inner.not_empty.notify_one();
@@ -303,7 +343,15 @@ impl EventSender {
 
 impl EventSink for EventSender {
     fn emit(&mut self, event: AgentStreamEvent) -> Result<(), EventSinkError> {
-        self.send(event, None)
+        if event.is_terminal() {
+            self.send_terminal(event)
+        } else {
+            self.send(event, None)
+        }
+    }
+
+    fn emit_terminal(&mut self, event: AgentStreamEvent) -> Result<(), EventSinkError> {
+        self.send_terminal(event)
     }
 
     fn emit_with_cancellation(
@@ -311,7 +359,11 @@ impl EventSink for EventSender {
         event: AgentStreamEvent,
         cancellation: &CancellationToken,
     ) -> Result<(), EventSinkError> {
-        self.send(event, Some(cancellation))
+        if event.is_terminal() {
+            self.send_terminal(event)
+        } else {
+            self.send(event, Some(cancellation))
+        }
     }
 }
 
@@ -516,14 +568,27 @@ impl<'a> StreamEmitter<'a> {
         cancellation: &'a CancellationToken,
         turn_id: impl Into<String>,
     ) -> Self {
+        Self::with_sequence(sink, cancellation, turn_id, 1)
+    }
+
+    pub(crate) fn with_sequence(
+        sink: &'a mut dyn EventSink,
+        cancellation: &'a CancellationToken,
+        turn_id: impl Into<String>,
+        next_sequence: u64,
+    ) -> Self {
         Self {
             sink,
             cancellation,
             turn_id: turn_id.into(),
-            next_sequence: 1,
+            next_sequence: next_sequence.max(1),
             emitted: 0,
             announced_tools: BTreeSet::new(),
         }
+    }
+
+    pub(crate) const fn next_sequence(&self) -> u64 {
+        self.next_sequence
     }
 
     pub(crate) fn state(
@@ -607,15 +672,27 @@ impl<'a> StreamEmitter<'a> {
     }
 
     pub(crate) fn send(&mut self, event: AgentStreamEvent) -> Result<(), EventSinkError> {
-        if self.emitted >= MAX_STREAM_EVENTS_PER_TURN {
+        let terminal = event.is_terminal();
+        const TERMINAL_EVENT_RESERVE: usize = 3;
+        let non_terminal_limit = MAX_STREAM_EVENTS_PER_TURN - TERMINAL_EVENT_RESERVE;
+        if self.emitted >= MAX_STREAM_EVENTS_PER_TURN
+            || (!terminal && self.emitted >= non_terminal_limit)
+        {
             return Err(EventSinkError::EventLimitReached {
                 maximum: MAX_STREAM_EVENTS_PER_TURN,
             });
         }
         event.validate()?;
-        self.emitted += 1;
-        self.next_sequence = self.next_sequence.saturating_add(1);
-        self.sink.emit_with_cancellation(event, self.cancellation)
+        let result = if terminal {
+            self.sink.emit_terminal(event)
+        } else {
+            self.sink.emit_with_cancellation(event, self.cancellation)
+        };
+        if result.is_ok() {
+            self.emitted += 1;
+            self.next_sequence = self.next_sequence.saturating_add(1);
+        }
+        result
     }
 }
 
@@ -713,6 +790,29 @@ mod tests {
         let event = receiver.try_recv().expect("terminal is retained");
         assert!(matches!(event, StreamEvent::TurnDone { .. }));
         assert_eq!(receiver.dropped_events(), 2);
+    }
+
+    #[test]
+    fn terminal_send_evicts_a_full_queue_without_waiting_or_honoring_cancellation() {
+        let (mut sender, receiver) = EventChannel::with_config(
+            EventChannelConfig::new(1, BackpressureStrategy::Block).expect("config"),
+        )
+        .expect("channel");
+        sender
+            .emit(StreamEvent::text_delta(1, "turn-1", 1, "a").expect("delta"))
+            .expect("first");
+        let token = CancellationToken::new();
+        token.cancel("stop");
+        sender
+            .emit_with_cancellation(
+                StreamEvent::turn_done(2, "turn-1", 1, None).expect("done"),
+                &token,
+            )
+            .expect("terminal event");
+        assert!(matches!(
+            receiver.try_recv().expect("event"),
+            StreamEvent::TurnDone { .. }
+        ));
     }
 
     #[test]

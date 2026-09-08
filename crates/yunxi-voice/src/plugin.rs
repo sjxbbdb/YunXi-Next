@@ -1,8 +1,9 @@
-//! Isolated JSONL loopback fixture for the voice capability contracts.
+//! Isolated JSONL plugin for the voice capability contracts.
 //!
-//! This module is deliberately a test double. It has no device, codec, SDK,
-//! network, or async runtime integration. The only network operation is the
-//! existing local loopback protocol connection used by plugin processes.
+//! The process selects a configured bounded sidecar when one is available and
+//! otherwise preserves a deterministic loopback path. The only network
+//! operation is the existing local loopback protocol connection used by plugin
+//! processes.
 
 use std::error::Error;
 use std::fmt;
@@ -11,24 +12,181 @@ use std::time::Duration;
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use yunxi_protocol::{
-    CapabilityDescriptor, CapabilityError, GrantRequirement, HostMessage, InvocationCodecError,
-    InvocationRequest, InvocationResponse, PluginManifest, PluginMessage, PluginRiskLevel,
-    PluginRuntimeMetadata, ProtocolError, capabilities, connect_plugin_with_manifest,
+    CapabilityDescriptor, CapabilityError, GrantKind, GrantRequirement, HostMessage,
+    InvocationCodecError, InvocationRequest, InvocationResponse, PluginManifest, PluginMessage,
+    PluginRiskLevel, PluginRuntimeMetadata, ProtocolError, capabilities,
+    connect_plugin_with_manifest,
 };
 
-use crate::{
-    CancellationState, SynthesisEvent, SynthesisRequest, TranscribeEvent, TranscribeRequest,
-    TranscriptEvent, VoiceContractError,
+use crate::sidecar::{
+    CHAT_OPERATION, ChatRequest, DEVICE_ENUMERATION_OPERATION, DOCTOR_OPERATION, OutputResult,
+    PLAYBACK_OPERATION, SAVE_OPERATION, SPEAK_OPERATION, TALK_OPERATION,
 };
+use crate::{
+    AudioOutputRequest, CancellationState, DeviceEnumerationRequest, DoctorRequest,
+    ExternalSidecarProvider, LoopbackVoiceProvider, MockChatProvider, ProcessSidecarConfig,
+    ProcessSidecarTransport, ProviderDescriptor, ProviderFeatures, ProviderOutcome, SidecarRequest,
+    SynthesisEvent, SynthesisRequest, SynthesizedAudioChunk, TalkRequest, TextFallbackProvider,
+    TranscribeEvent, TranscribeRequest, VecChatSink, VecSynthesizedAudioSink,
+    VecSynthesizedAudioSource, VecTalkSink, VecTranscriptSink, VoiceContractError, VoiceHostConfig,
+    VoiceHostRuntime, VoiceProvider, VoiceProviderError, request_source, transcribe_fixture,
+};
+
+#[cfg(test)]
+use crate::TranscriptEvent;
 
 pub const VOICE_FIXTURE_PLUGIN_ID: &str = "yunxi.voice.fixture";
 pub const TRANSCRIBE_OPERATION: &str = "transcribe";
 pub const SYNTHESIZE_OPERATION: &str = "synthesize";
 pub const CANCEL_OPERATION: &str = "cancel";
+pub const DEVICES_OPERATION: &str = "devices";
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 const FIXTURE_PARTIAL_TEXT: &str = "fixture partial";
 const FIXTURE_FINAL_TEXT: &str = "fixture final";
+
+type ProcessVoiceHost = VoiceHostRuntime<TextFallbackProvider, MockChatProvider>;
+
+/// Payload used by the process Host for `playback` and `save`.
+///
+/// The request carries the destination and grant; chunks are deliberately
+/// explicit so the Host can validate and bound the complete output before it
+/// reaches a device or a sidecar.
+#[derive(Clone, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioOutputPayload {
+    pub request: AudioOutputRequest,
+    pub chunks: Vec<SynthesizedAudioChunk>,
+}
+
+impl fmt::Debug for AudioOutputPayload {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("AudioOutputPayload")
+            .field("request", &self.request)
+            .field("chunk_count", &self.chunks.len())
+            .field(
+                "byte_count",
+                &self
+                    .chunks
+                    .iter()
+                    .map(|chunk| chunk.data.len())
+                    .sum::<usize>(),
+            )
+            .finish()
+    }
+}
+
+impl AudioOutputPayload {
+    pub fn validate(&self) -> Result<(), VoiceProviderError> {
+        self.request.validate()?;
+        if self.chunks.len() > crate::MAX_STREAM_CHUNKS {
+            return Err(VoiceProviderError::provider_failure(
+                "too_many_chunks",
+                false,
+            ));
+        }
+        let mut bytes = 0usize;
+        for chunk in &self.chunks {
+            chunk.validate()?;
+            bytes = bytes.saturating_add(chunk.data.len());
+            if bytes > crate::MAX_SIDECAR_PAYLOAD_BYTES {
+                return Err(VoiceProviderError::provider_failure(
+                    "payload_too_large",
+                    false,
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<'de> Deserialize<'de> for AudioOutputPayload {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct WireAudioOutputPayload {
+            request: AudioOutputRequest,
+            chunks: Vec<SynthesizedAudioChunk>,
+        }
+
+        let wire = WireAudioOutputPayload::deserialize(deserializer)?;
+        let payload = Self {
+            request: wire.request,
+            chunks: wire.chunks,
+        };
+        payload.validate().map_err(D::Error::custom)?;
+        Ok(payload)
+    }
+}
+
+/// Starts the production-selecting voice plugin entry point.
+///
+/// An explicit `YUNXI_VOICE_SIDECAR_PROGRAM` selects the bounded sidecar
+/// provider. With no sidecar configuration this deliberately keeps the
+/// deterministic fixture, so a machine without audio hardware remains usable.
+pub fn run_voice_plugin_from_env() -> Result<(), VoiceFixtureError> {
+    let config = match ProcessSidecarConfig::from_environment() {
+        Ok(Some(config)) => config,
+        Ok(None) | Err(_) => return run_voice_fixture(),
+    };
+    let timeout = config.timeout_value();
+    let provider = match config.into_provider(
+        ProviderDescriptor::new(
+            "process.voice",
+            "Configured voice sidecar",
+            true,
+            true,
+            true,
+        )?,
+        ProviderFeatures::audio_and_text(),
+    ) {
+        Ok(provider) => provider,
+        Err(_) => return run_voice_fixture_with_device_declaration(),
+    };
+    run_provider_plugin(provider, timeout)
+}
+
+fn run_voice_fixture_with_device_declaration() -> Result<(), VoiceFixtureError> {
+    run_voice_fixture_with_manifest(
+        vec![GrantRequirement::required(GrantKind::Device)],
+        "voice-sidecar-fallback",
+        PluginRiskLevel::External,
+    )
+}
+
+pub fn run_voice_fixture() -> Result<(), VoiceFixtureError> {
+    run_voice_fixture_with_manifest(Vec::new(), "voice-fixture", PluginRiskLevel::Safe)
+}
+
+fn run_voice_fixture_with_manifest(
+    grants: Vec<GrantRequirement>,
+    adapter: &str,
+    risk: PluginRiskLevel,
+) -> Result<(), VoiceFixtureError> {
+    let transcribe = CapabilityDescriptor::new(
+        capabilities::VOICE_TRANSCRIBE,
+        crate::VOICE_CAPABILITY_VERSION as u32,
+    )?;
+    let synthesize = CapabilityDescriptor::new(
+        capabilities::VOICE_SYNTHESIZE,
+        crate::VOICE_CAPABILITY_VERSION as u32,
+    )?;
+    let manifest = PluginManifest::new(
+        VOICE_FIXTURE_PLUGIN_ID,
+        "YunXi voice contract fixture",
+        env!("CARGO_PKG_VERSION"),
+        vec![transcribe, synthesize],
+    )
+    .with_grants(grants)
+    .with_runtime_metadata(PluginRuntimeMetadata::new(adapter, risk));
+    let mut session = connect_plugin_with_manifest(manifest, CONNECT_TIMEOUT)?;
+    let mut runtime = loopback_runtime(Duration::from_secs(30))?;
+    run_runtime_plugin(&mut session, &mut runtime)
+}
 
 /// A cancellation request accepted by either voice capability.
 ///
@@ -95,7 +253,10 @@ pub struct CancelResult {
     pub status: crate::StreamStatus,
 }
 
-pub fn run_voice_fixture() -> Result<(), VoiceFixtureError> {
+fn run_provider_plugin(
+    provider: ExternalSidecarProvider<ProcessSidecarTransport>,
+    timeout: Duration,
+) -> Result<(), VoiceFixtureError> {
     let transcribe = CapabilityDescriptor::new(
         capabilities::VOICE_TRANSCRIBE,
         crate::VOICE_CAPABILITY_VERSION as u32,
@@ -106,20 +267,49 @@ pub fn run_voice_fixture() -> Result<(), VoiceFixtureError> {
     )?;
     let manifest = PluginManifest::new(
         VOICE_FIXTURE_PLUGIN_ID,
-        "YunXi voice contract fixture",
+        "YunXi configured voice provider",
         env!("CARGO_PKG_VERSION"),
         vec![transcribe, synthesize],
     )
-    .with_grants(Vec::<GrantRequirement>::new())
+    .with_grants(vec![GrantRequirement::required(GrantKind::Device)])
     .with_runtime_metadata(PluginRuntimeMetadata::new(
-        "voice-fixture",
-        PluginRiskLevel::Safe,
+        "voice-sidecar",
+        PluginRiskLevel::External,
     ));
     let mut session = connect_plugin_with_manifest(manifest, CONNECT_TIMEOUT)?;
+    let mut runtime = host_runtime(provider, timeout)?;
+    run_runtime_plugin(&mut session, &mut runtime)
+}
 
+fn host_runtime<P>(provider: P, timeout: Duration) -> Result<ProcessVoiceHost, VoiceFixtureError>
+where
+    P: VoiceProvider + 'static,
+{
+    let fallback = TextFallbackProvider::new(FIXTURE_FINAL_TEXT)?;
+    let chat = MockChatProvider::new("fixture chat")?;
+    let config = VoiceHostConfig::new(timeout)?;
+    Ok(VoiceHostRuntime::new(provider, fallback, chat, config))
+}
+
+fn loopback_runtime(timeout: Duration) -> Result<ProcessVoiceHost, VoiceFixtureError> {
+    let fixture = transcribe_fixture()?;
+    let provider = LoopbackVoiceProvider::new(
+        fixture.request.chunks,
+        FIXTURE_PARTIAL_TEXT,
+        FIXTURE_FINAL_TEXT,
+        "fixture chat",
+    )?;
+    host_runtime(provider, timeout)
+}
+
+fn run_runtime_plugin(
+    session: &mut yunxi_protocol::PluginSession,
+    runtime: &mut ProcessVoiceHost,
+) -> Result<(), VoiceFixtureError> {
     loop {
         match session.receive()? {
-            HostMessage::Invoke { request } => handle_request(&mut session, &request)?,
+            HostMessage::Invoke { request } => handle_runtime_request(session, &request, runtime)?,
+            HostMessage::Cancel { .. } => runtime.restart(),
             HostMessage::Shutdown => return Ok(()),
             HostMessage::Welcome { .. } => {
                 return Err(VoiceFixtureError::UnexpectedHostMessage(
@@ -130,9 +320,10 @@ pub fn run_voice_fixture() -> Result<(), VoiceFixtureError> {
     }
 }
 
-fn handle_request(
+fn handle_runtime_request(
     session: &mut yunxi_protocol::PluginSession,
     request: &InvocationRequest,
+    runtime: &mut ProcessVoiceHost,
 ) -> Result<(), VoiceFixtureError> {
     let request_id = request.request_id();
     if !supports(request) {
@@ -140,50 +331,159 @@ fn handle_request(
             session,
             request_id,
             "unsupported_operation",
-            "voice fixture does not support the requested capability or operation".to_string(),
+            "voice provider does not support the requested capability or operation".to_string(),
         )?;
         return Ok(());
     }
 
-    match request.operation() {
+    let operation = request.operation();
+    match operation {
+        DOCTOR_OPERATION => {
+            let payload = match request.decode_payload::<DoctorRequest>() {
+                Ok(payload) => payload,
+                Err(error) => return invalid_request(session, request_id, error),
+            };
+            let _ = payload;
+            let context = runtime.operation_context();
+            send_result(session, request_id, runtime.doctor(&context))?;
+        }
+        DEVICE_ENUMERATION_OPERATION | DEVICES_OPERATION => {
+            let payload = match request.decode_payload::<DeviceEnumerationRequest>() {
+                Ok(payload) => payload,
+                Err(error) => return invalid_request(session, request_id, error),
+            };
+            let _ = payload;
+            let context = runtime.operation_context();
+            match runtime.enumerate_devices(&context) {
+                Ok(result) => send_result(session, request_id, result)?,
+                Err(error) => send_provider_failure(session, request_id, &error)?,
+            }
+        }
         TRANSCRIBE_OPERATION => {
             let payload = match request.decode_payload::<TranscribeRequest>() {
                 Ok(payload) => payload,
-                Err(error) => {
-                    send_failure(session, request_id, "invalid_request", error.to_string())?;
-                    return Ok(());
-                }
+                Err(error) => return invalid_request(session, request_id, error),
             };
-            let events = transcribe(&payload).map_err(VoiceFixtureError::Contract);
-            send_result(session, request_id, events?)?;
+            let context = runtime.operation_context();
+            let mut source = request_source(&payload)?;
+            let mut sink = VecTranscriptSink::new();
+            match runtime.transcribe(&payload, &mut source, &mut sink, &context) {
+                Ok(_) => {
+                    let mut events = vec![TranscribeEvent::Status(payload.status.clone())];
+                    events.extend(
+                        sink.into_events()
+                            .into_iter()
+                            .map(TranscribeEvent::Transcript),
+                    );
+                    send_result(session, request_id, events)?;
+                }
+                Err(error) => send_provider_failure(session, request_id, &error)?,
+            }
         }
-        SYNTHESIZE_OPERATION => {
+        SYNTHESIZE_OPERATION | SPEAK_OPERATION => {
             let payload = match request.decode_payload::<SynthesisRequest>() {
                 Ok(payload) => payload,
-                Err(error) => {
-                    send_failure(session, request_id, "invalid_request", error.to_string())?;
-                    return Ok(());
+                Err(error) => return invalid_request(session, request_id, error),
+            };
+            let context = runtime.operation_context();
+            let mut sink = VecSynthesizedAudioSink::new();
+            match runtime.speak(&payload, &mut sink, &context) {
+                Ok(_) => {
+                    let mut events = vec![SynthesisEvent::Status(payload.status.clone())];
+                    events.extend(sink.into_chunks().into_iter().map(SynthesisEvent::Audio));
+                    send_result(session, request_id, events)?;
+                }
+                Err(error) => send_provider_failure(session, request_id, &error)?,
+            }
+        }
+        CHAT_OPERATION => {
+            let payload = match request.decode_payload::<ChatRequest>() {
+                Ok(payload) => payload,
+                Err(error) => return invalid_request(session, request_id, error),
+            };
+            let context = runtime.operation_context();
+            let mut sink = VecChatSink::new();
+            match runtime.chat(&payload, &mut sink, &context) {
+                Ok(_) => send_result(session, request_id, sink.events())?,
+                Err(error) => send_provider_failure(session, request_id, &error)?,
+            }
+        }
+        TALK_OPERATION => {
+            let payload = match request.decode_payload::<TalkRequest>() {
+                Ok(payload) => payload,
+                Err(error) => return invalid_request(session, request_id, error),
+            };
+            let context = runtime.operation_context();
+            let mut sink = VecTalkSink::new();
+            match runtime.talk(&payload, &mut sink, &context) {
+                Ok(_) => send_result(session, request_id, sink.events())?,
+                Err(error) => send_provider_failure(session, request_id, &error)?,
+            }
+        }
+        PLAYBACK_OPERATION | SAVE_OPERATION => {
+            let payload = match request.decode_payload::<AudioOutputPayload>() {
+                Ok(payload) => payload,
+                Err(error) => return invalid_request(session, request_id, error),
+            };
+            let sidecar_request = if operation == PLAYBACK_OPERATION {
+                SidecarRequest::Playback {
+                    request: payload.request.clone(),
+                    chunks: payload.chunks.clone(),
+                }
+            } else {
+                SidecarRequest::Save {
+                    request: payload.request.clone(),
+                    chunks: payload.chunks.clone(),
                 }
             };
-            let events = synthesize(&payload).map_err(VoiceFixtureError::Contract);
-            send_result(session, request_id, events?)?;
+            if let Err(error) = sidecar_request.validate() {
+                return invalid_request(session, request_id, error);
+            }
+            let summary = OutputResult {
+                chunks: payload.chunks.len(),
+                bytes: payload.chunks.iter().map(|chunk| chunk.data.len()).sum(),
+            };
+            let mut source = VecSynthesizedAudioSource::new(payload.chunks);
+            let context = runtime.operation_context();
+            if operation == PLAYBACK_OPERATION {
+                match runtime.playback(&payload.request, &mut source, &context) {
+                    Ok(ProviderOutcome::Completed) => send_result(session, request_id, summary)?,
+                    Ok(ProviderOutcome::TextFallback) => send_failure(
+                        session,
+                        request_id,
+                        "audio_output_unavailable",
+                        "audio playback was not performed".to_owned(),
+                    )?,
+                    Err(error) => send_provider_failure(session, request_id, &error)?,
+                }
+            } else {
+                match runtime.save(&payload.request, &mut source, &context) {
+                    Ok(result) => send_result(session, request_id, result)?,
+                    Err(error) => send_provider_failure(session, request_id, &error)?,
+                }
+            }
         }
         CANCEL_OPERATION => {
             let payload = match request.decode_payload::<CancelRequest>() {
                 Ok(payload) => payload,
-                Err(error) => {
-                    send_failure(session, request_id, "invalid_request", error.to_string())?;
-                    return Ok(());
-                }
+                Err(error) => return invalid_request(session, request_id, error),
             };
-            send_result(
-                session,
-                request_id,
-                cancel(&payload).map_err(VoiceFixtureError::Contract)?,
-            )?;
+            match runtime.cancel(&payload) {
+                Ok(result) => send_result(session, request_id, result)?,
+                Err(error) => send_provider_failure(session, request_id, &error)?,
+            }
         }
         _ => unreachable!("operation was checked by supports"),
     }
+    Ok(())
+}
+
+fn invalid_request<E: fmt::Display>(
+    session: &mut yunxi_protocol::PluginSession,
+    request_id: u64,
+    error: E,
+) -> Result<(), VoiceFixtureError> {
+    send_failure(session, request_id, "invalid_request", error.to_string())?;
     Ok(())
 }
 
@@ -194,8 +494,15 @@ fn supports(request: &InvocationRequest) -> bool {
     let version_ok = version == crate::VOICE_CAPABILITY_VERSION as u32;
     version_ok
         && match request.operation() {
-            TRANSCRIBE_OPERATION => id == capabilities::VOICE_TRANSCRIBE,
-            SYNTHESIZE_OPERATION => id == capabilities::VOICE_SYNTHESIZE,
+            TRANSCRIBE_OPERATION
+            | DOCTOR_OPERATION
+            | DEVICE_ENUMERATION_OPERATION
+            | DEVICES_OPERATION
+            | CHAT_OPERATION
+            | TALK_OPERATION => id == capabilities::VOICE_TRANSCRIBE,
+            SYNTHESIZE_OPERATION | SPEAK_OPERATION | PLAYBACK_OPERATION | SAVE_OPERATION => {
+                id == capabilities::VOICE_SYNTHESIZE
+            }
             CANCEL_OPERATION => {
                 id == capabilities::VOICE_TRANSCRIBE || id == capabilities::VOICE_SYNTHESIZE
             }
@@ -203,6 +510,7 @@ fn supports(request: &InvocationRequest) -> bool {
         }
 }
 
+#[cfg(test)]
 fn transcribe(request: &TranscribeRequest) -> Result<Vec<TranscribeEvent>, VoiceContractError> {
     if request.status.cancellation != CancellationState::Active {
         let mut status = request.status.clone();
@@ -228,6 +536,7 @@ fn transcribe(request: &TranscribeRequest) -> Result<Vec<TranscribeEvent>, Voice
     Ok(events)
 }
 
+#[cfg(test)]
 fn synthesize(request: &SynthesisRequest) -> Result<Vec<SynthesisEvent>, VoiceContractError> {
     if request.status.cancellation != CancellationState::Active {
         let mut status = request.status.clone();
@@ -258,6 +567,7 @@ fn synthesize(request: &SynthesisRequest) -> Result<Vec<SynthesisEvent>, VoiceCo
     ])
 }
 
+#[cfg(test)]
 fn cancel(request: &CancelRequest) -> Result<CancelResult, VoiceContractError> {
     request.validate()?;
     let mut status = request.status.clone();
@@ -294,11 +604,25 @@ fn send_failure(
     })
 }
 
+fn send_provider_failure(
+    session: &mut yunxi_protocol::PluginSession,
+    request_id: u64,
+    error: &VoiceProviderError,
+) -> Result<(), ProtocolError> {
+    session.send(&PluginMessage::InvocationFailed {
+        request_id,
+        code: "voice_provider_error".to_string(),
+        message: error.to_string(),
+        retryable: error.is_retryable(),
+    })
+}
+
 #[derive(Debug)]
 pub enum VoiceFixtureError {
     Capability(CapabilityError),
     Contract(VoiceContractError),
     Invocation(InvocationCodecError),
+    Provider(VoiceProviderError),
     Protocol(ProtocolError),
     UnexpectedHostMessage(String),
 }
@@ -309,6 +633,7 @@ impl fmt::Display for VoiceFixtureError {
             Self::Capability(error) => write!(formatter, "invalid capability: {error}"),
             Self::Contract(error) => error.fmt(formatter),
             Self::Invocation(error) => error.fmt(formatter),
+            Self::Provider(error) => error.fmt(formatter),
             Self::Protocol(error) => error.fmt(formatter),
             Self::UnexpectedHostMessage(message) => formatter.write_str(message),
         }
@@ -321,6 +646,7 @@ impl Error for VoiceFixtureError {
             Self::Capability(error) => Some(error),
             Self::Contract(error) => Some(error),
             Self::Invocation(error) => Some(error),
+            Self::Provider(error) => Some(error),
             Self::Protocol(error) => Some(error),
             Self::UnexpectedHostMessage(_) => None,
         }
@@ -342,6 +668,12 @@ impl From<VoiceContractError> for VoiceFixtureError {
 impl From<InvocationCodecError> for VoiceFixtureError {
     fn from(error: InvocationCodecError) -> Self {
         Self::Invocation(error)
+    }
+}
+
+impl From<VoiceProviderError> for VoiceFixtureError {
+    fn from(error: VoiceProviderError) -> Self {
+        Self::Provider(error)
     }
 }
 

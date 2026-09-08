@@ -2,13 +2,15 @@
 
 `process_runtime.rs` launches real test subprocesses through the kernel and
 verifies manifest grant acceptance, rejection before route registration,
-malformed-frame, crash, timeout isolation, generation-aware automatic
-restarts, retry exhaustion, manual enable/restart, and sibling survival.
+malformed-frame, crash, timeout isolation, callback-panic containment,
+generation-aware automatic restarts, retry exhaustion, manual enable/restart,
+Secret revocation, duplicate-launch isolation, and sibling survival.
 
 `discovery.rs` exercises the public `PluginDirectory` facade. It verifies
 deterministic dependency ordering, exact dependency-version rejection,
 duplicate-id isolation, traversal/path rejection, sibling preservation, and
-manifest-size bounding without starting any discovered executable.
+manifest-size bounding and executable replacement detection without starting
+any discovered executable.
 
 `manager_runtime.rs` launches a discovered package through
 `PluginDiscoveryManager` and verifies enable/disable reconciliation,

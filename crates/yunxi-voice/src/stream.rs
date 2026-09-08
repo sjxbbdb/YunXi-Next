@@ -62,6 +62,27 @@ impl VoiceProviderError {
             | Self::InvalidProvider { .. } => false,
         }
     }
+
+    /// Returns true when an audio provider can be bypassed without affecting
+    /// a text-only interaction.
+    pub fn is_unavailable(&self) -> bool {
+        match self {
+            Self::Disabled | Self::TimedOut => true,
+            Self::ProviderFailure { code, retryable } => {
+                *retryable
+                    || matches!(
+                        code.as_str(),
+                        "unavailable"
+                            | "device_unavailable"
+                            | "runtime_unavailable"
+                            | "sidecar_unavailable"
+                            | "permission_denied"
+                            | "provider_panicked"
+                    )
+            }
+            _ => false,
+        }
+    }
 }
 
 impl fmt::Display for VoiceProviderError {
@@ -161,6 +182,19 @@ impl OperationContext {
         Self {
             cancellation: CancellationToken::new(),
             deadline: Some(deadline),
+        }
+    }
+
+    /// Returns a child context that shares this context's cancellation signal
+    /// and cannot outlive the supplied duration. This lets a Host apply its
+    /// own per-operation budget without breaking a caller-owned cancel handle.
+    pub fn bounded_by(&self, timeout: Duration) -> Self {
+        let deadline = Instant::now() + timeout;
+        Self {
+            cancellation: self.cancellation.clone(),
+            deadline: self
+                .deadline
+                .map_or(Some(deadline), |current| Some(current.min(deadline))),
         }
     }
 

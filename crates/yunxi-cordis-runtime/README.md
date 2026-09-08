@@ -13,6 +13,7 @@
 - Apply the coarse user `enable`/`disable` switch.
 - Keep optional mount failures local to the failed plugin.
 - Expose deterministic snapshots for UI, CLI, and diagnostics.
+- Retain a bounded, metadata-only lifecycle journal for cursor-based replay.
 
 There is intentionally no `register` method. A plugin is added by placing a
 definition in a static slice and rebuilding the binary:
@@ -86,6 +87,17 @@ Disabling a plugin unmounts its Fiber first and then removes it from the live
 Fiber index. A snapshot may retain `fiber_state = Unmounted` as historical
 diagnostic information while `fiber()` is `None`. Fiber queries return
 read-only snapshots so callers cannot bypass the Core/AgentSpine switch.
+
+## Lifecycle events
+
+`CordisRuntime::events_since(after, limit)` returns a bounded
+`RuntimeEventPage`. Events have monotonic sequence numbers and describe only
+startup, mount, skip, failure, disable, unmount, and shutdown transitions.
+Diagnostic messages are truncated at `MAX_RUNTIME_EVENT_MESSAGE_BYTES`, and
+the journal retains at most `MAX_RUNTIME_EVENTS` entries. If a caller's cursor
+falls behind that window, `page.gap()` is true; the caller should fetch a fresh
+snapshot before continuing. The journal never stores service values, callback
+addresses, credentials, or arbitrary plugin payloads.
 
 ## Explicit boundary
 

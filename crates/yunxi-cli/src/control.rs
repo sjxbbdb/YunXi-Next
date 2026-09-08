@@ -3,6 +3,7 @@
 use std::env;
 use std::error::Error;
 use std::fmt;
+use std::path::Path;
 
 use serde_json::{Value, json};
 use yunxi_composition::{PluginFiberPhase, PluginInventoryEntry, PluginInventorySnapshot};
@@ -16,31 +17,35 @@ const MAX_WARNINGS: usize = 32;
 const MAX_KNOWN_IDS: usize = 64;
 
 pub(crate) fn run(options: ControlOptions) -> Result<(), ControlError> {
-    let value = execute(&options.command)?;
-    if options.json {
-        println!(
-            "{}",
+    let value = execute(&options.command, options.cwd.as_deref())?;
+    if options.json || options.jsonl {
+        let encoded = if options.jsonl {
+            serde_json::to_string(&value)
+        } else {
             serde_json::to_string_pretty(&value)
-                .map_err(|error| ControlError::internal(error.to_string()))?
-        );
+        }
+        .map_err(|error| ControlError::internal(error.to_string()))?;
+        println!("{encoded}");
     } else {
         render_human(&value);
     }
     Ok(())
 }
 
-fn execute(command: &ControlCommand) -> Result<Value, ControlError> {
+fn execute(command: &ControlCommand, cwd: Option<&Path>) -> Result<Value, ControlError> {
     let mut settings = CapabilitySettingsStore::from_environment();
-    execute_with_settings(command, &mut settings)
+    execute_with_settings(command, &mut settings, cwd)
 }
 
 fn execute_with_settings(
     command: &ControlCommand,
     settings: &mut CapabilitySettingsStore,
+    cwd: Option<&Path>,
 ) -> Result<Value, ControlError> {
     match command {
-        ControlCommand::Status => status(settings, false),
-        ControlCommand::Diagnostics => status(settings, true),
+        ControlCommand::Status => status(settings, false, "status", cwd),
+        ControlCommand::Doctor => status(settings, true, "doctor", cwd),
+        ControlCommand::Diagnostics => status(settings, true, "diagnostics", cwd),
         ControlCommand::Enable(id) => set_enabled(settings, id, true),
         ControlCommand::Disable(id) => set_enabled(settings, id, false),
         ControlCommand::Reload(id) => reload(settings, id.as_deref()),
@@ -89,6 +94,8 @@ impl Error for ControlError {}
 fn status(
     settings: &mut CapabilitySettingsStore,
     diagnostics: bool,
+    command_name: &str,
+    cwd: Option<&Path>,
 ) -> Result<Value, ControlError> {
     let inventory = ChatSession::plugin_inventory_for_settings(settings).map_err(session_error)?;
     let plugins = inventory
@@ -111,7 +118,8 @@ fn status(
     let mut value = json!({
         "schemaVersion": SCHEMA_VERSION,
         "ok": true,
-        "command": if diagnostics { "diagnostics" } else { "status" },
+        "command": command_name,
+        "cwd": cwd.map(|path| path.to_string_lossy().into_owned()),
         "runtime": detached_runtime(),
         "settings": {
             "path": settings.path().to_string_lossy(),
@@ -119,6 +127,7 @@ fn status(
             "pluginOverrides": settings.plugin_overrides(),
         },
         "plugins": plugins,
+        "warnings": warnings.clone(),
     });
     if diagnostics {
         let dynamic_root = configured_dynamic_plugin_root();
@@ -145,6 +154,14 @@ fn status(
                 "modelConfigured": env_configured("YUNXI_AGENT_MODEL"),
                 "apiKeyConfigured": api_key_configured,
             },
+            "cwdCheck": cwd.map(|path| {
+                let canonical = std::fs::canonicalize(path);
+                json!({
+                    "path": path,
+                    "exists": canonical.is_ok(),
+                    "directory": canonical.as_ref().is_ok_and(|value| value.is_dir()),
+                })
+            }),
         });
     }
     Ok(value)

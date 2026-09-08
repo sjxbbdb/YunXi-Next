@@ -14,6 +14,7 @@ $distRoot = [System.IO.Path]::GetFullPath((Join-Path $webRoot "dist"))
 $stageRoot = [System.IO.Path]::GetFullPath((Join-Path $webRoot "dist.stage"))
 $sourceRoot = (Resolve-Path -LiteralPath $Source).Path
 $adapter = Join-Path $webRoot "adapter\web-api-client.ts"
+$adapterTest = Join-Path $webRoot "adapter\web-api-client.spec.ts"
 $inventoryAdapterRoot = Join-Path $webRoot "adapter\plugin-inventory"
 $temporaryRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("yunxi-next-dsh-{0}" -f [guid]::NewGuid().ToString("N"))
 
@@ -50,12 +51,12 @@ function Set-ExactText {
     )
 
     $content = [System.IO.File]::ReadAllText($Path)
-    if (-not $content.Contains($OldValue, [System.StringComparison]::Ordinal)) {
+    if ($content.IndexOf($OldValue, [System.StringComparison]::Ordinal) -lt 0) {
         throw "expected branding text was not found in $Path"
     }
     [System.IO.File]::WriteAllText(
         $Path,
-        $content.Replace($OldValue, $NewValue, [System.StringComparison]::Ordinal),
+        $content.Replace($OldValue, $NewValue),
         [System.Text.UTF8Encoding]::new($false)
     )
 }
@@ -76,6 +77,12 @@ try {
 
     $adapterTarget = Join-Path $temporaryRoot "packages\client\connection\src\client\web-api-client.ts"
     Copy-Item -LiteralPath $adapter -Destination $adapterTarget -Force
+    $adapterTestTarget = Join-Path $temporaryRoot "packages\client\connection\tests\web-api-client.yunxi.spec.ts"
+    Copy-Item -LiteralPath $adapterTest -Destination $adapterTestTarget -Force
+    Set-ExactText `
+        -Path $adapterTestTarget `
+        -OldValue "'./web-api-client.ts'" `
+        -NewValue "'../src/client/web-api-client.ts'"
     $inventoryTargetRoot = Join-Path $temporaryRoot "packages\client\ui-settings-plugin-inventory\src\client"
     foreach ($file in @(
         "index.ts",
@@ -98,6 +105,10 @@ try {
         -NewValue ">YunXi Next</span>"
 
     Invoke-Checked -FilePath "pnpm" -Arguments @("install", "--frozen-lockfile") -WorkingDirectory $temporaryRoot
+    Invoke-Checked -FilePath "pnpm" -Arguments @(
+        "exec", "vitest", "run", "packages/client/connection/tests/web-api-client.yunxi.spec.ts"
+    ) -WorkingDirectory $temporaryRoot
+    Remove-Item -LiteralPath $adapterTestTarget -Force
     Invoke-Checked -FilePath "pnpm" -Arguments @("run", "build") -WorkingDirectory $temporaryRoot
 
     $probe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
@@ -115,14 +126,8 @@ try {
     $isolatedDshHome = Join-Path $temporaryRoot ".dsh-home"
     New-Item -ItemType Directory -Path $isolatedDshHome | Out-Null
     $processInfo.Environment["DSH_HOME"] = $isolatedDshHome
-    $processInfo.ArgumentList.Add((Join-Path $temporaryRoot "apps\cli\lib\bin.js"))
-    $processInfo.ArgumentList.Add("--profile")
-    $processInfo.ArgumentList.Add("web")
-    $processInfo.ArgumentList.Add("--no-open")
-    $processInfo.ArgumentList.Add("--host")
-    $processInfo.ArgumentList.Add("127.0.0.1")
-    $processInfo.ArgumentList.Add("--port")
-    $processInfo.ArgumentList.Add([string]$port)
+    $cliEntry = Join-Path $temporaryRoot "apps\cli\lib\bin.js"
+    $processInfo.Arguments = '"{0}" --profile web --no-open --host 127.0.0.1 --port {1}' -f $cliEntry, $port
     $server = [System.Diagnostics.Process]::Start($processInfo)
     if ($null -eq $server) {
         throw "failed to start the temporary dsh Web host"
@@ -210,7 +215,7 @@ try {
 }
 finally {
     if ($null -ne $server -and -not $server.HasExited) {
-        $server.Kill($true)
+        $server.Kill()
         $server.WaitForExit()
     }
     if (-not $KeepWorktree -and (Test-Path -LiteralPath $temporaryRoot)) {
@@ -219,6 +224,18 @@ finally {
         if (-not $resolvedTemporary.StartsWith($tempBase, [System.StringComparison]::OrdinalIgnoreCase)) {
             throw "refusing to remove a worktree outside the temporary directory"
         }
-        Remove-Item -LiteralPath $resolvedTemporary -Recurse -Force
+        for ($attempt = 0; $attempt -lt 5; $attempt++) {
+            try {
+                Remove-Item -LiteralPath $resolvedTemporary -Recurse -Force -ErrorAction Stop
+                break
+            }
+            catch {
+                if ($attempt -eq 4) {
+                    Write-Warning "temporary checkout cleanup was incomplete: $resolvedTemporary"
+                    break
+                }
+                Start-Sleep -Milliseconds 200
+            }
+        }
     }
 }

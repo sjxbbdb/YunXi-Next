@@ -100,6 +100,7 @@ pub fn run_mailbox_plugin() -> Result<(), MailboxPluginError> {
                     }
                 }
             }
+            HostMessage::Cancel { .. } => {}
             HostMessage::Shutdown => return Ok(()),
             HostMessage::Welcome { .. } => {
                 return Err(MailboxPluginError::UnexpectedHostMessage(

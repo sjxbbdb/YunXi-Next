@@ -27,9 +27,15 @@ pub fn recall(request: &MemoryRecallRequest) -> Result<MemoryRecallResult, Memor
             maximum: MAX_QUERY_CHARS,
         });
     }
-    let store = MemoryStore::for_workspace(request.cwd())?;
+    let store = MemoryStore::from_grant(request.grant())?;
+    let mut load = store.load();
+    if !store.enabled(&mut load.warnings) {
+        load.records.clear();
+        load.warnings
+            .push("memory is disabled by the user; no records were recalled".to_string());
+    }
     Ok(recall_loaded(
-        store.load(),
+        load,
         store.workspace_fingerprint(),
         request.query(),
         request.include_boot_context(),

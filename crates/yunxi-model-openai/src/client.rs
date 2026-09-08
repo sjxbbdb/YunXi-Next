@@ -61,12 +61,16 @@ impl OpenAiChatClient {
         parse_response(response, self.config.api_key())
     }
 
-    /// Stream an OpenAI-compatible response and return its bounded aggregate.
+    /// Consume an OpenAI-compatible response and return its bounded aggregate.
     ///
-    /// The observer is called synchronously for every text/tool delta. A
-    /// caller can apply backpressure by doing bounded work in the callback or
-    /// return an error to stop the request. The default limits are deliberately
-    /// finite; use the cancelable form when a Host cancellation token exists.
+    /// Providers that honor `stream=true` produce incremental SSE deltas and
+    /// invoke the observer as they arrive. A provider that returns ordinary
+    /// JSON is handled by a bounded compatibility path; its observer calls
+    /// happen only after the complete JSON response has been read, so that
+    /// path is not token streaming. The observer can apply backpressure by
+    /// doing bounded work in the callback or returning an error to stop the
+    /// request. The default limits are deliberately finite; use the cancelable
+    /// form when a Host cancellation token exists.
     pub fn stream_with_tools<F>(
         &self,
         messages: &[ChatMessage],
@@ -102,6 +106,9 @@ impl OpenAiChatClient {
                 "chat request must contain at least one message".to_string(),
             ));
         }
+        if is_cancelled() {
+            return Err(ApiError::Cancelled);
+        }
         let request = ChatCompletionRequest {
             model: self.config.model().to_string(),
             messages: messages
@@ -118,6 +125,9 @@ impl OpenAiChatClient {
             .json(&request)
             .send()
             .map_err(ApiError::Transport)?;
+        if is_cancelled() {
+            return Err(ApiError::Cancelled);
+        }
         consume_response(
             response,
             self.config.api_key(),
@@ -440,7 +450,7 @@ fn parse_response(mut response: Response, secret: &str) -> Result<ChatCompletion
                 },
                 secret,
             ),
-            retryable: status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error(),
+            retryable: retryable_http_status(status),
         });
     }
 
@@ -462,7 +472,7 @@ fn parse_response(mut response: Response, secret: &str) -> Result<ChatCompletion
     let tool_calls = tool_calls
         .unwrap_or_default()
         .into_iter()
-        .map(parse_tool_call)
+        .map(|call| parse_tool_call(call, secret))
         .collect::<Result<Vec<_>, _>>()?;
     if content.is_empty() && tool_calls.is_empty() {
         return Err(ApiError::InvalidResponse(
@@ -476,21 +486,28 @@ fn parse_response(mut response: Response, secret: &str) -> Result<ChatCompletion
     })
 }
 
-fn parse_tool_call(call: ApiResponseToolCall) -> Result<ToolCall, ApiError> {
+fn parse_tool_call(call: ApiResponseToolCall, secret: &str) -> Result<ToolCall, ApiError> {
     if call.kind != "function" {
-        return Err(ApiError::InvalidResponse(format!(
-            "tool call `{}` has unsupported type `{}`",
-            call.id, call.kind
+        return Err(ApiError::InvalidResponse(redact_provider_message(
+            format!(
+                "tool call `{}` has unsupported type `{}`",
+                call.id, call.kind
+            ),
+            secret,
         )));
     }
     let arguments = serde_json::from_str(&call.function.arguments).map_err(|error| {
-        ApiError::InvalidResponse(format!(
-            "tool call `{}` arguments are invalid JSON: {error}",
-            call.id
+        ApiError::InvalidResponse(redact_provider_message(
+            format!(
+                "tool call `{}` arguments are invalid JSON: {error}",
+                call.id
+            ),
+            secret,
         ))
     })?;
-    ToolCall::new(call.id, call.function.name, arguments)
-        .map_err(|error| ApiError::InvalidResponse(error.to_string()))
+    ToolCall::new(call.id, call.function.name, arguments).map_err(|error| {
+        ApiError::InvalidResponse(redact_provider_message(error.to_string(), secret))
+    })
 }
 
 fn read_bounded(response: &mut Response) -> Result<Vec<u8>, ApiError> {
@@ -505,6 +522,13 @@ fn read_bounded(response: &mut Response) -> Result<Vec<u8>, ApiError> {
         });
     }
     Ok(body)
+}
+
+pub(crate) fn retryable_http_status(status: StatusCode) -> bool {
+    status == StatusCode::REQUEST_TIMEOUT
+        || status == StatusCode::TOO_EARLY
+        || status == StatusCode::TOO_MANY_REQUESTS
+        || status.is_server_error()
 }
 
 #[cfg(test)]
@@ -697,5 +721,15 @@ mod tests {
         assert!(!error.to_string().contains("test-key"));
         assert!(error.to_string().contains("[redacted]"));
         server.join().expect("join mock API");
+    }
+
+    #[test]
+    fn transient_http_statuses_are_marked_retryable() {
+        assert!(retryable_http_status(StatusCode::REQUEST_TIMEOUT));
+        assert!(retryable_http_status(StatusCode::TOO_EARLY));
+        assert!(retryable_http_status(StatusCode::TOO_MANY_REQUESTS));
+        assert!(retryable_http_status(StatusCode::BAD_GATEWAY));
+        assert!(!retryable_http_status(StatusCode::UNAUTHORIZED));
+        assert!(!retryable_http_status(StatusCode::BAD_REQUEST));
     }
 }

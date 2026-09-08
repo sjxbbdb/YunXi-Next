@@ -59,7 +59,13 @@ them to this repository.
 
 The settings domain defines fifteen built-in capability keys. Web Settings >
 Plugins connects all fifteen to the CLI Host launch path. `voice` and `weixin`
-are launch-wired fixture routes and remain disabled by default. Choices are
+remain disabled by default. Voice selects deterministic loopback unless an
+explicit sidecar is configured; Weixin selects deterministic loopback unless
+the explicit production iLink configuration is complete.
+In the table below, `Default` means the effective Host default when no
+persisted setting, plugin override, or environment override is present;
+environment variables are explicit operator overrides.
+Choices are
 written to `YUNXI_NEXT_HOME\settings.json` (or the normal
 `~/.yunxi-next/settings.json` state root), and take effect on the next Host
 start. The following environment variables have higher precedence than the
@@ -69,9 +75,9 @@ stored document, so they remain the operator, CI, and recovery override.
 | --- | --- | --- |
 | `YUNXI_NEXT_CONTEXT_ENABLED` | `true` | Launch `context.compose@1` for `AGENTS.md` context |
 | `YUNXI_NEXT_PERSONA_ENABLED` | `true` | Enable persona expression context |
-| `YUNXI_NEXT_MEMORY_ENABLED` | `false` | Launch `memory.recall@1` and `memory.write@1` |
+| `YUNXI_NEXT_MEMORY_ENABLED` | `true` | Launch `memory.recall@1` and `memory.write@1` |
 | `YUNXI_NEXT_STORAGE_ENABLED` | `true` | Launch persistent `storage.sessions@1` |
-| `YUNXI_NEXT_COMPANION_ENABLED` | `false` | Launch deterministic `companion.decide@1` |
+| `YUNXI_NEXT_COMPANION_ENABLED` | `true` | Launch deterministic `companion.decide@1` |
 | `YUNXI_NEXT_MAILBOX_ENABLED` | companion value | Launch encrypted `companion.mailbox@1` |
 | `YUNXI_NEXT_SCHEDULER_ENABLED` | companion value | Launch `scheduler.proactive@1` |
 | `YUNXI_NEXT_SHELL_ENABLED` | `false` | Launch Host-approved `tool.shell@1` |
@@ -80,8 +86,8 @@ stored document, so they remain the operator, CI, and recovery override.
 | `YUNXI_NEXT_MCP_ENABLED` | `false` | Launch the configured Host-approved `tool.mcp@1` bridge |
 | `YUNXI_NEXT_SKILLS_ENABLED` | `false` | Launch read-only `tool.skills@1` discovery and context |
 | `YUNXI_NEXT_MULTI_AGENT_ENABLED` | `false` | Launch isolated `tool.multi-agent@1` coordination and child-model turns |
-| `YUNXI_NEXT_VOICE_ENABLED` | `false` | Launch the bounded Voice fixture routes |
-| `YUNXI_NEXT_WEIXIN_ENABLED` | `false` | Launch the bounded Weixin channel fixture route |
+| `YUNXI_NEXT_VOICE_ENABLED` | `false` | Launch the bounded Voice loopback/sidecar routes |
+| `YUNXI_NEXT_WEIXIN_ENABLED` | `false` | Launch the bounded Weixin loopback or explicit iLink route |
 | `YUNXI_NEXT_COMPANION_TOOL_REQUESTS` | `false` | Permit scheduler plans that ask the user to approve a tool; never executes it |
 
 The Next persona, memory, and companion variables take precedence over legacy
@@ -96,9 +102,18 @@ bounded plugin override map, is capped at 64 KiB, and uses revision-fenced
 same-directory replacement. It does not
 store provider credentials, executable paths, MCP secrets, or arbitrary plugin
 configuration. The Model capability is required and is not part of this
-writable namespace. The Voice and Weixin values start their isolated fixture
-routes when enabled; they do not provide real device, login, or network
-backends yet.
+writable namespace. Voice starts an isolated loopback route or the explicitly
+configured sidecar; the latter must declare `Device`. Weixin starts its
+isolated loopback route or the explicit production iLink route when its
+configuration is complete. Neither setting by itself proves real device/account
+readiness.
+
+The Voice Host passes only these explicit sidecar launch values into its
+otherwise cleared plugin environment: `YUNXI_VOICE_SIDECAR_PROGRAM`,
+`YUNXI_VOICE_SIDECAR_ARGS`, `YUNXI_VOICE_SIDECAR_MAX_FRAME_BYTES`, and
+`YUNXI_VOICE_SIDECAR_TIMEOUT_MS`. No provider credential is copied. Enabling
+Voice is the user authorization that permits the configured sidecar process;
+disabling it removes the route and stops that process.
 
 Each optional built-in executable also has a development-only path override:
 `YUNXI_NEXT_CONTEXT_PLUGIN`, `YUNXI_NEXT_PERSONA_PLUGIN`,
@@ -164,17 +179,20 @@ are not forwarded.
 | `YUNXI_NEXT_SKILLS_DISABLED` | `review,release` | Comma-separated lowercase Skill ids to omit |
 
 Each immediate child directory may contain `SKILL.md` and an optional
-`tools.json`. Tool entries are validated declarations only. They are exposed to
-the model as `skill.<id>.<tool>`, but execution is disabled and does not request
-approval in this phase.
+`tools.json`. Metadata declarations are exposed to the model as
+`skill.<id>.<tool>` and remain non-executable. An explicit `actions.json` action
+declaration can instead be invoked through the isolated Skill action host; it
+is bounded by the granted workspace and process policy and does not turn
+arbitrary metadata into a command.
 
 When Multi-agent is enabled, `agent.spawn` and `agent.message` require Host
 approval. The coordinator stores bounded graph, transcript, budget, and event
-state under the active workspace's `.yunxi-next/multi-agent` directory. Each
-child turn uses a separate Model plugin process and receives no parent tool
-catalog. The current baseline executes child turns synchronously; stored
-interrupts take effect between turns and do not yet cancel an in-flight HTTP
-request.
+state under the active workspace's `.yunxi-next/multi-agent` directory. CLI child
+turns use a separate Model plugin process and are bounded one-shot operations.
+Web workers can continue a child session, run independent children in parallel,
+select a model, recover persisted Running workers after root reattach, and
+cancel an in-flight child provider stream; parent-child grants remain subsets
+and siblings remain isolated.
 
 `YUNXI_NEXT_HOME` selects the global YunXi Next state root for settings and
 memory. The

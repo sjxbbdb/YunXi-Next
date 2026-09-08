@@ -12,6 +12,7 @@ use std::fmt;
 use std::fs::{self, File, Metadata};
 use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
+use std::time::SystemTime;
 
 use serde::Deserialize;
 use yunxi_kernel::{PluginCommand, PluginId, PluginIdError};
@@ -238,6 +239,40 @@ impl PluginDependency {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct ExecutableFingerprint {
+    length: u64,
+    modified: SystemTime,
+}
+
+impl ExecutableFingerprint {
+    fn from_metadata(path: &Path, metadata: &Metadata) -> Result<Self, DiscoveryError> {
+        let modified = metadata.modified().map_err(|error| DiscoveryError::Io {
+            path: bounded_path(path),
+            message: bounded_text(&error.to_string()),
+        })?;
+        Ok(Self {
+            length: metadata.len(),
+            modified,
+        })
+    }
+
+    pub(crate) fn verify(&self, path: &Path) -> Result<(), String> {
+        let metadata = fs::symlink_metadata(path)
+            .map_err(|_| "plugin executable is no longer available".to_string())?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err("plugin executable is no longer a regular file".to_string());
+        }
+        let modified = metadata
+            .modified()
+            .map_err(|_| "plugin executable metadata is unavailable".to_string())?;
+        if metadata.len() != self.length || modified != self.modified {
+            return Err("plugin executable changed since discovery".to_string());
+        }
+        Ok(())
+    }
+}
+
 /// Versioned executable data resolved from one package directory.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExecutableDefinition {
@@ -245,6 +280,7 @@ pub struct ExecutableDefinition {
     args: Vec<String>,
     plugin_version: PluginVersion,
     protocol_version: u32,
+    fingerprint: Option<ExecutableFingerprint>,
 }
 
 impl ExecutableDefinition {
@@ -272,6 +308,7 @@ impl ExecutableDefinition {
             args: Vec::new(),
             plugin_version,
             protocol_version,
+            fingerprint: None,
         })
     }
 
@@ -800,6 +837,13 @@ impl PluginDirectory {
             })?;
         ensure_within(root, &canonical_executable, &executable_path)?;
         ensure_within(package_dir, &canonical_executable, &executable_path)?;
+        let executable_fingerprint = ExecutableFingerprint::from_metadata(
+            &canonical_executable,
+            &fs::metadata(&canonical_executable).map_err(|error| DiscoveryError::Io {
+                path: bounded_path(&canonical_executable),
+                message: bounded_text(&error.to_string()),
+            })?,
+        )?;
 
         let capabilities = file.capabilities;
         let grants = file.grants;
@@ -836,6 +880,7 @@ impl PluginDirectory {
             args: executable.args,
             plugin_version: version,
             protocol_version: executable.protocol_version,
+            fingerprint: Some(executable_fingerprint.clone()),
         };
         let mut command = PluginCommand::new(canonical_executable)
             .args(executable.args.iter())
@@ -855,7 +900,8 @@ impl PluginDirectory {
             .with_display_name(manifest.display_name().to_string())
             .with_expected_capabilities(capabilities)
             .with_required_grants(required_grants)
-            .with_expected_plugin_version(manifest.version().as_str().to_string());
+            .with_expected_plugin_version(manifest.version().as_str().to_string())
+            .with_executable_fingerprint(executable_fingerprint);
 
         Ok(DiscoveredPlugin {
             manifest,

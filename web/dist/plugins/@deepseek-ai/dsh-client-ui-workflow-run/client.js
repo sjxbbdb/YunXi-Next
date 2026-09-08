@@ -8,8 +8,8 @@ window.__ModuleLoader__.load({
 		let react = require("react");
 		let _deepseek_ai_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
 		let _deepseek_ai_dsh_client_runtime_client = require("@deepseek-ai/dsh-client-runtime/client");
-		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-9c80724d56484e56a43c2b8dbb125407\packages\client\ui-workflow-run\src\client\WorkflowRunPanel.module.css.mjs
-		const css = ".bqF-oG_root{width:100%;min-width:0}.bqF-oG_runHeader{box-sizing:border-box;background:var(--dsw-alias-bg-module-platform);border-radius:8px;align-items:center;gap:6px;width:100%;min-width:0;height:32px;padding:0 8px;display:flex}.bqF-oG_runHeader:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-2px}.bqF-oG_runLeading{width:16px;height:16px;color:var(--dsw-alias-label-tertiary);flex:none;justify-content:center;align-items:center;margin-right:0;display:inline-flex}.bqF-oG_runTitle{max-width:42%;color:var(--dsw-alias-label-secondary);text-overflow:ellipsis;white-space:nowrap;flex:none;font-size:14px;font-weight:510;line-height:24px;overflow:hidden}.bqF-oG_runSummary{min-width:0;color:var(--dsw-alias-label-tertiary);text-overflow:ellipsis;white-space:nowrap;flex:1;font-size:12px;line-height:18px;overflow:hidden}.bqF-oG_statusTail{height:20px;color:var(--dsw-alias-label-secondary);white-space:nowrap;flex:none;align-items:center;gap:4px;font-size:11px;font-weight:510;line-height:16px;display:inline-flex;overflow:hidden}.bqF-oG_phaseHeader{box-sizing:border-box;align-items:center;gap:6px;width:100%;min-width:0;height:32px;display:flex}.bqF-oG_phaseHeader:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-2px;border-radius:4px}.bqF-oG_phaseLeading{width:16px;height:16px;color:var(--dsw-alias-label-tertiary);flex:none;justify-content:center;align-items:center;margin-right:0;display:inline-flex}.bqF-oG_phaseTitle{min-width:0;max-width:42%;color:var(--dsw-alias-label-secondary);text-overflow:ellipsis;white-space:nowrap;flex:0 auto;font-size:14px;line-height:24px;overflow:hidden}.bqF-oG_phaseCount{min-width:0;color:var(--dsw-alias-label-tertiary);text-overflow:ellipsis;white-space:nowrap;flex:1;font-size:13px;line-height:20px;overflow:hidden}.bqF-oG_phaseStatus{width:132px;color:var(--dsw-alias-label-secondary);text-align:right;text-overflow:ellipsis;white-space:nowrap;flex:none;font-size:13px;line-height:20px;overflow:hidden}.bqF-oG_separator{background:var(--dsw-alias-label-tertiary);border-radius:50%;flex:none;width:2px;height:2px}.bqF-oG_phaseList{flex-direction:column;gap:4px;min-width:0;padding:4px 0 0 16px;display:flex}.bqF-oG_phase{min-width:0}.bqF-oG_members{flex-direction:column;gap:2px;min-width:0;padding:0 0 0 16px;display:flex}.bqF-oG_memberRow,.bqF-oG_memberButton{width:100%;min-width:0;min-height:24px;color:var(--dsw-alias-label-secondary);font:inherit;text-align:left;background:0 0;border:0;border-radius:4px;align-items:center;gap:12px;padding:0;display:flex}.bqF-oG_memberButton{cursor:pointer}.bqF-oG_memberButton .bqF-oG_memberLabel{color:var(--dsw-alias-state-business-primary);text-underline-position:from-font;text-decoration:underline}.bqF-oG_dotSlot{flex:none;justify-content:center;align-items:center;width:16px;height:24px;display:inline-flex;overflow:hidden}.bqF-oG_memberButton:focus-visible{outline:none}.bqF-oG_memberButton:focus-visible .bqF-oG_memberLabelWrap{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-1px}.bqF-oG_memberLabelWrap{border-radius:4px;flex:1;align-items:center;min-width:0;height:24px;padding:0 2px;display:flex;overflow:hidden}.bqF-oG_memberLabel{min-width:0;color:var(--dsw-alias-label-secondary);text-overflow:ellipsis;white-space:nowrap;flex:1;font-size:14px;line-height:24px;overflow:hidden}.bqF-oG_memberStatus{width:64px;color:var(--dsw-alias-label-secondary);text-align:right;text-overflow:ellipsis;white-space:nowrap;flex:none;font-size:13px;line-height:20px;overflow:hidden}.bqF-oG_empty{color:var(--dsw-alias-label-tertiary);padding:0;font-size:13px;line-height:20px}@media (width<=560px){.bqF-oG_phaseList,.bqF-oG_members{padding-left:12px}}";
+		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-fc075cf71c884b4081d88130d74886d7\packages\client\ui-workflow-run\src\client\WorkflowRunPanel.module.css.mjs
+		const css = ".IpUM_W_root{width:100%;min-width:0}.IpUM_W_runHeader{box-sizing:border-box;background:var(--dsw-alias-bg-module-platform);border-radius:8px;align-items:center;gap:6px;width:100%;min-width:0;height:32px;padding:0 8px;display:flex}.IpUM_W_runHeader:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-2px}.IpUM_W_runLeading{width:16px;height:16px;color:var(--dsw-alias-label-tertiary);flex:none;justify-content:center;align-items:center;margin-right:0;display:inline-flex}.IpUM_W_runTitle{max-width:42%;color:var(--dsw-alias-label-secondary);text-overflow:ellipsis;white-space:nowrap;flex:none;font-size:14px;font-weight:510;line-height:24px;overflow:hidden}.IpUM_W_runSummary{min-width:0;color:var(--dsw-alias-label-tertiary);text-overflow:ellipsis;white-space:nowrap;flex:1;font-size:12px;line-height:18px;overflow:hidden}.IpUM_W_statusTail{height:20px;color:var(--dsw-alias-label-secondary);white-space:nowrap;flex:none;align-items:center;gap:4px;font-size:11px;font-weight:510;line-height:16px;display:inline-flex;overflow:hidden}.IpUM_W_phaseHeader{box-sizing:border-box;align-items:center;gap:6px;width:100%;min-width:0;height:32px;display:flex}.IpUM_W_phaseHeader:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-2px;border-radius:4px}.IpUM_W_phaseLeading{width:16px;height:16px;color:var(--dsw-alias-label-tertiary);flex:none;justify-content:center;align-items:center;margin-right:0;display:inline-flex}.IpUM_W_phaseTitle{min-width:0;max-width:42%;color:var(--dsw-alias-label-secondary);text-overflow:ellipsis;white-space:nowrap;flex:0 auto;font-size:14px;line-height:24px;overflow:hidden}.IpUM_W_phaseCount{min-width:0;color:var(--dsw-alias-label-tertiary);text-overflow:ellipsis;white-space:nowrap;flex:1;font-size:13px;line-height:20px;overflow:hidden}.IpUM_W_phaseStatus{width:132px;color:var(--dsw-alias-label-secondary);text-align:right;text-overflow:ellipsis;white-space:nowrap;flex:none;font-size:13px;line-height:20px;overflow:hidden}.IpUM_W_separator{background:var(--dsw-alias-label-tertiary);border-radius:50%;flex:none;width:2px;height:2px}.IpUM_W_phaseList{flex-direction:column;gap:4px;min-width:0;padding:4px 0 0 16px;display:flex}.IpUM_W_phase{min-width:0}.IpUM_W_members{flex-direction:column;gap:2px;min-width:0;padding:0 0 0 16px;display:flex}.IpUM_W_memberRow,.IpUM_W_memberButton{width:100%;min-width:0;min-height:24px;color:var(--dsw-alias-label-secondary);font:inherit;text-align:left;background:0 0;border:0;border-radius:4px;align-items:center;gap:12px;padding:0;display:flex}.IpUM_W_memberButton{cursor:pointer}.IpUM_W_memberButton .IpUM_W_memberLabel{color:var(--dsw-alias-state-business-primary);text-underline-position:from-font;text-decoration:underline}.IpUM_W_dotSlot{flex:none;justify-content:center;align-items:center;width:16px;height:24px;display:inline-flex;overflow:hidden}.IpUM_W_memberButton:focus-visible{outline:none}.IpUM_W_memberButton:focus-visible .IpUM_W_memberLabelWrap{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:-1px}.IpUM_W_memberLabelWrap{border-radius:4px;flex:1;align-items:center;min-width:0;height:24px;padding:0 2px;display:flex;overflow:hidden}.IpUM_W_memberLabel{min-width:0;color:var(--dsw-alias-label-secondary);text-overflow:ellipsis;white-space:nowrap;flex:1;font-size:14px;line-height:24px;overflow:hidden}.IpUM_W_memberStatus{width:64px;color:var(--dsw-alias-label-secondary);text-align:right;text-overflow:ellipsis;white-space:nowrap;flex:none;font-size:13px;line-height:20px;overflow:hidden}.IpUM_W_empty{color:var(--dsw-alias-label-tertiary);padding:0;font-size:13px;line-height:20px}@media (width<=560px){.IpUM_W_phaseList,.IpUM_W_members{padding-left:12px}}";
 		const tagId = "@deepseek-ai/dsh-client-ui-workflow-run/WorkflowRunPanel.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -19,28 +19,28 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var WorkflowRunPanel_module_css_default = {
-			"dotSlot": "bqF-oG_dotSlot",
-			"empty": "bqF-oG_empty",
-			"memberButton": "bqF-oG_memberButton",
-			"memberLabel": "bqF-oG_memberLabel",
-			"memberLabelWrap": "bqF-oG_memberLabelWrap",
-			"memberRow": "bqF-oG_memberRow",
-			"memberStatus": "bqF-oG_memberStatus",
-			"members": "bqF-oG_members",
-			"phase": "bqF-oG_phase",
-			"phaseCount": "bqF-oG_phaseCount",
-			"phaseHeader": "bqF-oG_phaseHeader",
-			"phaseLeading": "bqF-oG_phaseLeading",
-			"phaseList": "bqF-oG_phaseList",
-			"phaseStatus": "bqF-oG_phaseStatus",
-			"phaseTitle": "bqF-oG_phaseTitle",
-			"root": "bqF-oG_root",
-			"runHeader": "bqF-oG_runHeader",
-			"runLeading": "bqF-oG_runLeading",
-			"runSummary": "bqF-oG_runSummary",
-			"runTitle": "bqF-oG_runTitle",
-			"separator": "bqF-oG_separator",
-			"statusTail": "bqF-oG_statusTail"
+			"dotSlot": "IpUM_W_dotSlot",
+			"empty": "IpUM_W_empty",
+			"memberButton": "IpUM_W_memberButton",
+			"memberLabel": "IpUM_W_memberLabel",
+			"memberLabelWrap": "IpUM_W_memberLabelWrap",
+			"memberRow": "IpUM_W_memberRow",
+			"memberStatus": "IpUM_W_memberStatus",
+			"members": "IpUM_W_members",
+			"phase": "IpUM_W_phase",
+			"phaseCount": "IpUM_W_phaseCount",
+			"phaseHeader": "IpUM_W_phaseHeader",
+			"phaseLeading": "IpUM_W_phaseLeading",
+			"phaseList": "IpUM_W_phaseList",
+			"phaseStatus": "IpUM_W_phaseStatus",
+			"phaseTitle": "IpUM_W_phaseTitle",
+			"root": "IpUM_W_root",
+			"runHeader": "IpUM_W_runHeader",
+			"runLeading": "IpUM_W_runLeading",
+			"runSummary": "IpUM_W_runSummary",
+			"runTitle": "IpUM_W_runTitle",
+			"separator": "IpUM_W_separator",
+			"statusTail": "IpUM_W_statusTail"
 		};
 		//#endregion
 		//#region lib/types/client/WorkflowRunPanel.js

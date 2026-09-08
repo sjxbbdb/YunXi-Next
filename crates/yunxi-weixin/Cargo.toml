@@ -7,6 +7,10 @@ publish = false
 description = "Bounded Rust contracts and fixtures for YunXi Weixin plugins"
 
 [dependencies]
+base64.workspace = true
+chacha20poly1305.workspace = true
+getrandom.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 yunxi-protocol = { path = "../yunxi-protocol" }
@@ -21,3 +25,7 @@ workspace = true
 [[bin]]
 name = "yunxi-weixin-plugin-fixture"
 path = "src/bin/yunxi-weixin-plugin-fixture.rs"
+
+[[bin]]
+name = "yunxi-weixin-plugin"
+path = "src/bin/yunxi-weixin-plugin.rs"

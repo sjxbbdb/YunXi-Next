@@ -53,6 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let response = InvocationResponse::encode(request.request_id(), &payload)?;
                 session.send(&PluginMessage::InvocationCompleted { response })?;
             }
+            HostMessage::Cancel { .. } => {}
             HostMessage::Shutdown => return Ok(()),
             HostMessage::Welcome { .. } => return Err("unexpected second welcome".into()),
         }

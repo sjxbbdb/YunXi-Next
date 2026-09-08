@@ -13,5 +13,7 @@ Configuration contains credentials but never serializes or logs them. HTTP
 types remain private to the client module and do not leak into the wire
 protocol. Tool definitions and calls cross the boundary only through the
 versioned `yunxi-protocol` types; provider credentials remain child-process
-configuration. Provider error messages are bounded and redact the configured
-credential before they leave the client.
+configuration at the final child boundary. The current Host uses an in-memory
+broker before that injection; the provider process still receives the value it
+needs to call the API. Provider error messages are bounded and redact the
+configured credential before they leave the client.

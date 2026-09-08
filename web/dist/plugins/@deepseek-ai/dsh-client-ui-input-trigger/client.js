@@ -713,8 +713,8 @@ window.__ModuleLoader__.load({
 			return n;
 		}
 		//#endregion
-		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-9c80724d56484e56a43c2b8dbb125407\packages\client\ui-input-trigger\src\client\MenuView.module.css.mjs
-		const css = ".DCh0sG_menu{z-index:100;--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);border:1px solid var(--dsw-alias-border-inverted);background:var(--dsw-specific-menu);min-width:min(260px,100%);max-width:min(537px,100%);max-height:320px;box-shadow:var(--dsw-shadow-lv3);border-radius:12px;flex-direction:column;padding:4px;display:flex;position:absolute;bottom:calc(100% + 4px);left:0;overflow:hidden}.DCh0sG_viewport{flex-direction:column;min-height:0;display:flex;overflow-y:auto}.DCh0sG_item{cursor:pointer;width:100%;min-height:40px;color:var(--dsw-alias-label-primary);text-align:left;background:0 0;border:none;border-radius:10px;align-items:center;gap:8px;padding:8px 10px;font-size:14px;line-height:22px;display:flex}.DCh0sG_item:hover,.DCh0sG_item.DCh0sG_active{background:var(--dsw-alias-interactive-bg-hover)}.DCh0sG_sectionTitle{min-height:26px;color:var(--dsw-alias-label-tertiary);flex:none;padding:6px 10px 2px;font-size:12px;font-weight:500;line-height:18px}.DCh0sG_sectionTitle:not(:first-child){margin-top:4px}.DCh0sG_itemIcon{width:16px;height:16px;color:var(--dsw-alias-label-tertiary);flex:none;justify-content:center;align-items:center;display:inline-flex}.DCh0sG_itemName{text-overflow:ellipsis;white-space:nowrap;flex:none;max-width:40%;overflow:hidden}.DCh0sG_itemDescription{text-overflow:ellipsis;white-space:nowrap;min-width:0;color:var(--dsw-alias-label-tertiary);flex:1;overflow:hidden}.DCh0sG_groupTitle{color:var(--dsw-alias-label-tertiary);padding:8px 10px;font-size:12px;line-height:16px}.DCh0sG_loading{min-height:40px;color:var(--dsw-alias-label-dimmed);align-items:center;padding:8px 10px;font-size:14px;line-height:22px;display:flex}";
+		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-fc075cf71c884b4081d88130d74886d7\packages\client\ui-input-trigger\src\client\MenuView.module.css.mjs
+		const css = "._2dRs_W_menu{z-index:100;--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);border:1px solid var(--dsw-alias-border-inverted);background:var(--dsw-specific-menu);min-width:min(260px,100%);max-width:min(537px,100%);max-height:320px;box-shadow:var(--dsw-shadow-lv3);border-radius:12px;flex-direction:column;padding:4px;display:flex;position:absolute;bottom:calc(100% + 4px);left:0;overflow:hidden}._2dRs_W_viewport{flex-direction:column;min-height:0;display:flex;overflow-y:auto}._2dRs_W_item{cursor:pointer;width:100%;min-height:40px;color:var(--dsw-alias-label-primary);text-align:left;background:0 0;border:none;border-radius:10px;align-items:center;gap:8px;padding:8px 10px;font-size:14px;line-height:22px;display:flex}._2dRs_W_item:hover,._2dRs_W_item._2dRs_W_active{background:var(--dsw-alias-interactive-bg-hover)}._2dRs_W_sectionTitle{min-height:26px;color:var(--dsw-alias-label-tertiary);flex:none;padding:6px 10px 2px;font-size:12px;font-weight:500;line-height:18px}._2dRs_W_sectionTitle:not(:first-child){margin-top:4px}._2dRs_W_itemIcon{width:16px;height:16px;color:var(--dsw-alias-label-tertiary);flex:none;justify-content:center;align-items:center;display:inline-flex}._2dRs_W_itemName{text-overflow:ellipsis;white-space:nowrap;flex:none;max-width:40%;overflow:hidden}._2dRs_W_itemDescription{text-overflow:ellipsis;white-space:nowrap;min-width:0;color:var(--dsw-alias-label-tertiary);flex:1;overflow:hidden}._2dRs_W_groupTitle{color:var(--dsw-alias-label-tertiary);padding:8px 10px;font-size:12px;line-height:16px}._2dRs_W_loading{min-height:40px;color:var(--dsw-alias-label-dimmed);align-items:center;padding:8px 10px;font-size:14px;line-height:22px;display:flex}";
 		const tagId = "@deepseek-ai/dsh-client-ui-input-trigger/MenuView.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -724,16 +724,16 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var MenuView_module_css_default = {
-			"active": "DCh0sG_active",
-			"groupTitle": "DCh0sG_groupTitle",
-			"item": "DCh0sG_item",
-			"itemDescription": "DCh0sG_itemDescription",
-			"itemIcon": "DCh0sG_itemIcon",
-			"itemName": "DCh0sG_itemName",
-			"loading": "DCh0sG_loading",
-			"menu": "DCh0sG_menu",
-			"sectionTitle": "DCh0sG_sectionTitle",
-			"viewport": "DCh0sG_viewport"
+			"active": "_2dRs_W_active",
+			"groupTitle": "_2dRs_W_groupTitle",
+			"item": "_2dRs_W_item",
+			"itemDescription": "_2dRs_W_itemDescription",
+			"itemIcon": "_2dRs_W_itemIcon",
+			"itemName": "_2dRs_W_itemName",
+			"loading": "_2dRs_W_loading",
+			"menu": "_2dRs_W_menu",
+			"sectionTitle": "_2dRs_W_sectionTitle",
+			"viewport": "_2dRs_W_viewport"
 		};
 		//#endregion
 		//#region lib/types/client/MenuView.js

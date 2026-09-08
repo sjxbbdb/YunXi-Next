@@ -499,7 +499,7 @@ where
             None,
             None,
         );
-        self.finish_turn_outcome(outcome, tracker, user_message)
+        self.finish_turn_outcome(outcome, tracker, user_message, turn_cancellation)
     }
 
     pub fn run_text_turn_with_approval(
@@ -508,6 +508,71 @@ where
         cancellation: &CancellationToken,
     ) -> Result<AgentTurnOutcome, AgentError> {
         self.run_turn_with_approval(ChatMessage::user(content), cancellation)
+    }
+
+    /// Starts an approval-aware turn and publishes bounded model, tool, and
+    /// lifecycle events. Unlike [`Self::run_turn_streaming`], this path never
+    /// executes an approval-gated tool until a matching decision is supplied.
+    pub fn run_text_turn_with_approval_streaming<S: EventSink>(
+        &mut self,
+        content: impl Into<String>,
+        cancellation: &CancellationToken,
+        sink: &mut S,
+    ) -> Result<AgentTurnOutcome, AgentError> {
+        self.run_turn_with_approval_streaming(ChatMessage::user(content), cancellation, sink)
+    }
+
+    pub fn run_turn_with_approval_streaming<S: EventSink>(
+        &mut self,
+        user_message: ChatMessage,
+        cancellation: &CancellationToken,
+        sink: &mut S,
+    ) -> Result<AgentTurnOutcome, AgentError> {
+        if self.state != AgentState::Ready {
+            return Err(AgentError::InvalidState {
+                operation: "start an approval-aware streaming turn".to_string(),
+                state: self.state,
+            });
+        }
+        if user_message.role() != ChatRole::User {
+            return Err(AgentError::invalid_input(
+                "invalid_user_message",
+                "agent turns must start with a user message",
+            ));
+        }
+        cancellation.check()?;
+        let turn_cancellation = self.turn_cancellation(cancellation);
+        let turn_number = self.next_turn_id;
+        self.next_turn_id = self.next_turn_id.checked_add(1).ok_or_else(|| {
+            AgentError::protocol("turn_id_exhausted", "turn id sequence exhausted")
+        })?;
+        let turn_id = format!("turn-{turn_number}");
+        let mut tracker = TurnTracker::new(turn_id.clone());
+        self.state = AgentState::Running;
+        self.turns_started = self.turns_started.saturating_add(1);
+
+        let mut emitter = StreamEmitter::new(sink, &turn_cancellation, turn_id.clone());
+        let outcome = match emitter.state(0, StreamTurnState::Created) {
+            Ok(()) => self.run_turn_inner(
+                &mut tracker,
+                &turn_id,
+                &user_message,
+                &turn_cancellation,
+                1,
+                true,
+                ExecutionMode::ApprovalAware,
+                None,
+                Some(&mut emitter),
+            ),
+            Err(error) => Err(stream_sink_error(error)),
+        };
+        self.finish_streaming_approval_outcome(
+            outcome,
+            tracker,
+            user_message,
+            turn_cancellation.clone(),
+            &mut emitter,
+        )
     }
 
     /// Returns the request currently blocking an approval-aware turn.
@@ -534,12 +599,27 @@ where
             });
         }
         validate_pending_decision(&pending.request, &decision)?;
-        cancellation.check()?;
+        let continuation_cancellation =
+            CancellationToken::linked(&pending.turn_cancellation, cancellation);
+        if let Err(error) = continuation_cancellation.check() {
+            let pending = self
+                .pending_turn
+                .take()
+                .expect("pending turn checked immediately above");
+            let pending_turn_cancellation = pending.turn_cancellation.clone();
+            return self.finish_turn_outcome(
+                Err(error.into()),
+                pending.tracker,
+                pending.user_message,
+                pending_turn_cancellation,
+            );
+        }
 
         let pending = self
             .pending_turn
             .take()
             .expect("pending turn checked immediately above");
+        let pending_turn_cancellation = pending.turn_cancellation.clone();
         let turn_id = pending.tracker.snapshot.id.clone();
         let mut tracker = pending.tracker;
         self.state = AgentState::Running;
@@ -550,9 +630,92 @@ where
             &pending.batch,
             pending.next_call,
             &decision,
-            cancellation,
+            &continuation_cancellation,
         );
-        self.finish_turn_outcome(outcome, tracker, pending.user_message)
+        self.finish_turn_outcome(
+            outcome,
+            tracker,
+            pending.user_message,
+            pending_turn_cancellation,
+        )
+    }
+
+    /// Resolves and continues an approval-aware turn on the same logical
+    /// stream sequence used before it paused.
+    pub fn approve_pending_tool_streaming<S: EventSink>(
+        &mut self,
+        decision: ToolApprovalDecision,
+        cancellation: &CancellationToken,
+        sink: &mut S,
+    ) -> Result<AgentTurnOutcome, AgentError> {
+        let Some(pending) = self.pending_turn.as_ref() else {
+            return Err(AgentError::InvalidState {
+                operation: "approve a pending streaming tool".to_string(),
+                state: self.state,
+            });
+        };
+        if self.state != AgentState::AwaitingApproval {
+            return Err(AgentError::InvalidState {
+                operation: "approve a pending streaming tool".to_string(),
+                state: self.state,
+            });
+        }
+        validate_pending_decision(&pending.request, &decision)?;
+        let continuation_cancellation =
+            CancellationToken::linked(&pending.turn_cancellation, cancellation);
+        if let Err(error) = continuation_cancellation.check() {
+            let pending = self
+                .pending_turn
+                .take()
+                .expect("pending turn checked immediately above");
+            let pending_turn_cancellation = pending.turn_cancellation.clone();
+            self.state = AgentState::Running;
+            let mut emitter = StreamEmitter::with_sequence(
+                sink,
+                &continuation_cancellation,
+                pending.tracker.snapshot.id.clone(),
+                pending.next_stream_sequence,
+            );
+            return self.finish_streaming_approval_outcome(
+                Err(error.into()),
+                pending.tracker,
+                pending.user_message,
+                pending_turn_cancellation,
+                &mut emitter,
+            );
+        }
+
+        let pending = self
+            .pending_turn
+            .take()
+            .expect("pending turn checked immediately above");
+        let pending_turn_cancellation = pending.turn_cancellation.clone();
+        let turn_id = pending.tracker.snapshot.id.clone();
+        let mut tracker = pending.tracker;
+        self.state = AgentState::Running;
+        let mut emitter = StreamEmitter::with_sequence(
+            sink,
+            &continuation_cancellation,
+            turn_id.clone(),
+            pending.next_stream_sequence,
+        );
+        let outcome = self.continue_pending_turn_streaming(
+            &mut tracker,
+            &turn_id,
+            &pending.user_message,
+            &pending.batch,
+            pending.next_call,
+            &decision,
+            &continuation_cancellation,
+            &mut emitter,
+        );
+        self.finish_streaming_approval_outcome(
+            outcome,
+            tracker,
+            pending.user_message,
+            pending_turn_cancellation,
+            &mut emitter,
+        )
     }
 
     /// Discards a turn that is waiting for user approval.
@@ -574,14 +737,61 @@ where
             });
         };
         let reason = reason.into();
+        pending.turn_cancellation.cancel(reason.clone());
         let turn_id = pending.tracker.snapshot.id.clone();
         let mut tracker = pending.tracker;
         tracker.cancel(&reason);
-        self.session
-            .append(SessionEvent::TurnCancelled { turn_id, reason })?;
         self.last_turn = Some(tracker.snapshot);
         self.state = AgentState::Ready;
+        self.session
+            .append(SessionEvent::TurnCancelled { turn_id, reason })?;
         Ok(())
+    }
+
+    /// Discards a streaming turn that is waiting for user approval and emits
+    /// its terminal cancellation events on the existing sequence.
+    pub fn cancel_pending_turn_streaming<S: EventSink>(
+        &mut self,
+        reason: impl Into<String>,
+        sink: &mut S,
+    ) -> Result<(), AgentError> {
+        if self.state != AgentState::AwaitingApproval {
+            return Err(AgentError::InvalidState {
+                operation: "cancel a pending streaming tool".to_string(),
+                state: self.state,
+            });
+        }
+        let Some(pending) = self.pending_turn.take() else {
+            return Err(AgentError::InvalidState {
+                operation: "cancel a pending streaming tool".to_string(),
+                state: self.state,
+            });
+        };
+        let reason = reason.into();
+        pending.turn_cancellation.cancel(reason.clone());
+        let turn_id = pending.tracker.snapshot.id.clone();
+        let mut tracker = pending.tracker;
+        tracker.cancel(&reason);
+        let round = tracker.round;
+        let session_result = self.session.append(SessionEvent::TurnCancelled {
+            turn_id: turn_id.clone(),
+            reason,
+        });
+        self.state = AgentState::Ready;
+        self.last_turn = Some(tracker.snapshot.clone());
+
+        let mut emitter = StreamEmitter::with_sequence(
+            sink,
+            &pending.turn_cancellation,
+            turn_id,
+            pending.next_stream_sequence,
+        );
+        emitter
+            .error(round, StreamError::redacted("cancelled", false))
+            .and_then(|_| emitter.state(round, StreamTurnState::Cancelled))
+            .and_then(|_| emitter.done(round, None))
+            .map_err(stream_sink_error)?;
+        session_result.map(|_| ()).map_err(AgentError::from)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -620,7 +830,7 @@ where
             if let Some(emitter) = stream.as_deref_mut() {
                 emitter
                     .state(round, StreamTurnState::ContextBuilding)
-                    .map_err(stream_sink_error)?;
+                    .map_err(|error| stream_sink_error_with_cancellation(error, cancellation))?;
             }
             let chat = self
                 .context
@@ -649,7 +859,7 @@ where
             if let Some(emitter) = stream.as_deref_mut() {
                 emitter
                     .state(round, StreamTurnState::ModelCalling)
-                    .map_err(stream_sink_error)?;
+                    .map_err(|error| stream_sink_error_with_cancellation(error, cancellation))?;
             }
             self.record(SessionEvent::ModelRequested {
                 turn_id: turn_id.to_string(),
@@ -721,7 +931,7 @@ where
             if let Some(emitter) = stream.as_deref_mut() {
                 emitter
                     .state(round, StreamTurnState::ToolCalling)
-                    .map_err(stream_sink_error)?;
+                    .map_err(|error| stream_sink_error_with_cancellation(error, cancellation))?;
             }
             if let Some(pending) = self.process_tool_batch(
                 tracker,
@@ -791,6 +1001,55 @@ where
     }
 
     #[allow(clippy::too_many_arguments)]
+    fn continue_pending_turn_streaming(
+        &mut self,
+        tracker: &mut TurnTracker,
+        turn_id: &str,
+        user_message: &ChatMessage,
+        batch: &ToolCallBatch,
+        next_call: usize,
+        approval: &ToolApprovalDecision,
+        cancellation: &CancellationToken,
+        emitter: &mut StreamEmitter<'_>,
+    ) -> Result<InnerTurnOutcome, AgentError> {
+        emitter
+            .state(batch.round(), StreamTurnState::ToolCalling)
+            .map_err(|error| stream_sink_error_with_cancellation(error, cancellation))?;
+        if let Some(pending) = self.process_tool_batch(
+            tracker,
+            turn_id,
+            batch,
+            next_call,
+            Some(approval),
+            cancellation,
+            ExecutionMode::ApprovalAware,
+            Some(emitter),
+        )? {
+            return Ok(InnerTurnOutcome::AwaitingApproval(pending));
+        }
+        let next_round =
+            batch
+                .round()
+                .checked_add(1)
+                .ok_or_else(|| AgentError::BudgetExceeded {
+                    kind: BudgetKind::Rounds,
+                    limit: u64::from(self.config.budget.max_rounds()),
+                    used: u64::from(u16::MAX),
+                })?;
+        self.run_turn_inner(
+            tracker,
+            turn_id,
+            user_message,
+            cancellation,
+            next_round,
+            false,
+            ExecutionMode::ApprovalAware,
+            None,
+            Some(emitter),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn process_tool_batch(
         &mut self,
         tracker: &mut TurnTracker,
@@ -816,7 +1075,7 @@ where
             if let Some(emitter) = stream.as_deref_mut() {
                 emitter
                     .tool_start(batch.round(), call)
-                    .map_err(stream_sink_error)?;
+                    .map_err(|error| stream_sink_error_with_cancellation(error, cancellation))?;
             }
             let request = ToolRequest::new(turn_id, batch.round(), call);
             let execution = if let Some(emitter) = stream.as_deref_mut() {
@@ -851,6 +1110,7 @@ where
                     ),
                 }
             };
+            cancellation.check()?;
             let outcome = match execution {
                 Ok(ToolExecutionOutcome::AwaitingApproval(request)) => {
                     self.record(SessionEvent::ToolApprovalRequested {
@@ -891,7 +1151,7 @@ where
             if let Some(emitter) = stream.as_deref_mut() {
                 emitter
                     .tool_result(batch.round(), result)
-                    .map_err(stream_sink_error)?;
+                    .map_err(|error| stream_sink_error_with_cancellation(error, cancellation))?;
             }
         }
         Ok(None)
@@ -902,6 +1162,7 @@ where
         outcome: Result<InnerTurnOutcome, AgentError>,
         mut tracker: TurnTracker,
         user_message: ChatMessage,
+        turn_cancellation: CancellationToken,
     ) -> Result<AgentTurnOutcome, AgentError> {
         match outcome {
             Ok(InnerTurnOutcome::Completed(response)) => {
@@ -925,6 +1186,8 @@ where
                     request: pending.request,
                     batch: pending.batch,
                     next_call: pending.next_call,
+                    next_stream_sequence: 1,
+                    turn_cancellation,
                 });
                 Ok(AgentTurnOutcome::AwaitingApproval(request))
             }
@@ -949,6 +1212,112 @@ where
                         retryable: error.retryable(),
                     });
                 }
+                self.last_turn = Some(tracker.snapshot.clone());
+                Err(error)
+            }
+        }
+    }
+
+    fn finish_streaming_approval_outcome(
+        &mut self,
+        outcome: Result<InnerTurnOutcome, AgentError>,
+        mut tracker: TurnTracker,
+        user_message: ChatMessage,
+        turn_cancellation: CancellationToken,
+        emitter: &mut StreamEmitter<'_>,
+    ) -> Result<AgentTurnOutcome, AgentError> {
+        match outcome {
+            Ok(InnerTurnOutcome::Completed(response)) => {
+                self.state = AgentState::Ready;
+                tracker.state = TurnState::Completed;
+                let final_events = emitter
+                    .state(tracker.round, StreamTurnState::Completed)
+                    .and_then(|_| emitter.done(tracker.round, Some(response.clone())));
+                if let Err(error) = final_events {
+                    let error = stream_sink_error(error);
+                    tracker.fail(&error);
+                    let _ = self.session.append(SessionEvent::TurnFailed {
+                        turn_id: tracker.snapshot.id.clone(),
+                        code: error.code().to_string(),
+                        message: error.message(),
+                        retryable: error.retryable(),
+                    });
+                    self.last_turn = Some(tracker.snapshot.clone());
+                    return Err(error);
+                }
+                let snapshot = tracker.into_snapshot();
+                self.last_turn = Some(snapshot.clone());
+                Ok(AgentTurnOutcome::Completed(TurnResult {
+                    response,
+                    snapshot,
+                }))
+            }
+            Ok(InnerTurnOutcome::AwaitingApproval(pending)) => {
+                tracker.state = TurnState::AwaitingApproval;
+                tracker.sync();
+                if let Err(sink_error) =
+                    emitter.state(tracker.round, StreamTurnState::AwaitingApproval)
+                {
+                    let error = stream_sink_error(sink_error);
+                    self.state = AgentState::Ready;
+                    tracker.fail(&error);
+                    let _ = self.session.append(SessionEvent::TurnFailed {
+                        turn_id: tracker.snapshot.id.clone(),
+                        code: error.code().to_string(),
+                        message: error.message(),
+                        retryable: error.retryable(),
+                    });
+                    self.last_turn = Some(tracker.snapshot.clone());
+                    return Err(error);
+                }
+                self.state = AgentState::AwaitingApproval;
+                self.last_turn = Some(tracker.snapshot.clone());
+                let request = pending.request.clone();
+                self.pending_turn = Some(PendingTurn {
+                    tracker,
+                    user_message,
+                    request: pending.request,
+                    batch: pending.batch,
+                    next_call: pending.next_call,
+                    next_stream_sequence: emitter.next_sequence(),
+                    turn_cancellation,
+                });
+                Ok(AgentTurnOutcome::AwaitingApproval(request))
+            }
+            Err(error) => {
+                self.state = AgentState::Ready;
+                self.pending_turn = None;
+                if error.is_cancelled() {
+                    tracker.cancel(error.cancellation_reason().unwrap_or("cancelled"));
+                    let _ = self.session.append(SessionEvent::TurnCancelled {
+                        turn_id: tracker.snapshot.id.clone(),
+                        reason: error
+                            .cancellation_reason()
+                            .unwrap_or("cancelled")
+                            .to_string(),
+                    });
+                } else {
+                    tracker.fail(&error);
+                    let _ = self.session.append(SessionEvent::TurnFailed {
+                        turn_id: tracker.snapshot.id.clone(),
+                        code: error.code().to_string(),
+                        message: error.message(),
+                        retryable: error.retryable(),
+                    });
+                }
+                let state = if error.is_timeout() {
+                    StreamTurnState::TimedOut
+                } else if error.is_cancelled() {
+                    StreamTurnState::Cancelled
+                } else {
+                    StreamTurnState::Failed
+                };
+                let _ = emitter.error(
+                    tracker.round,
+                    StreamError::redacted(error.code(), error.retryable()),
+                );
+                let _ = emitter.state(tracker.round, state);
+                let _ = emitter.done(tracker.round, None);
                 self.last_turn = Some(tracker.snapshot.clone());
                 Err(error)
             }
@@ -1043,6 +1412,8 @@ struct PendingTurn {
     request: ToolApprovalRequest,
     batch: ToolCallBatch,
     next_call: usize,
+    next_stream_sequence: u64,
+    turn_cancellation: CancellationToken,
 }
 
 type PendingTool = InnerPendingTool;
@@ -1152,4 +1523,14 @@ fn stream_sink_error(_error: EventSinkError) -> AgentError {
     // Never place event payloads or component diagnostics in the error sent
     // back to a host.  The sink error itself is intentionally coarse.
     AgentError::protocol("event_sink_failed", "stream event sink is unavailable")
+}
+
+fn stream_sink_error_with_cancellation(
+    error: EventSinkError,
+    cancellation: &CancellationToken,
+) -> AgentError {
+    cancellation
+        .check()
+        .err()
+        .map_or_else(|| stream_sink_error(error), AgentError::from)
 }

@@ -250,6 +250,116 @@ fn dynamic_reload_isolates_failure_and_supports_disable_enable_and_replace() {
 }
 
 #[test]
+fn failed_replacement_isolated_and_later_replacement_recovers() {
+    let root = temporary_root("replacement-recovery");
+    fs::create_dir_all(&root).expect("create plugin root");
+    let replaceable_id = "fixture.dynamic.replaceable";
+    let replaceable_capability = "fixture.dynamic.replaceable-capability";
+    let sibling_id = "fixture.dynamic.replacement-sibling";
+    let sibling_capability = "fixture.dynamic.replacement-sibling-capability";
+    install_package(
+        &root,
+        "replaceable",
+        replaceable_id,
+        replaceable_capability,
+        "echo",
+        "1.0.0",
+        true,
+    );
+    install_package(
+        &root,
+        "sibling",
+        sibling_id,
+        sibling_capability,
+        "echo",
+        "1.0.0",
+        true,
+    );
+
+    let mut manager = PluginDiscoveryManager::new(PluginDirectory::new(&root));
+    let mut host = ProcessPluginHost::new();
+    manager
+        .reload(&mut host, &BTreeMap::new())
+        .expect("initial reload");
+
+    install_package(
+        &root,
+        "replaceable",
+        replaceable_id,
+        replaceable_capability,
+        "malformed",
+        "1.0.1",
+        true,
+    );
+    let failed = manager
+        .reload(&mut host, &BTreeMap::new())
+        .expect("failed replacement remains a reportable reload");
+    assert!(
+        failed
+            .replaced()
+            .iter()
+            .any(|value| value.as_str() == replaceable_id)
+    );
+    assert!(failed.failures().iter().any(|failure| {
+        failure
+            .id()
+            .is_some_and(|value| value.as_str() == replaceable_id)
+    }));
+    assert!(
+        host.catalog()
+            .providers(replaceable_capability, 1)
+            .is_empty()
+    );
+    assert_eq!(
+        host.invoke::<_, String>(
+            &capability(sibling_capability),
+            "echo",
+            &"sibling-survives-failed-replacement".to_string(),
+        )
+        .expect("healthy sibling remains available"),
+        "sibling-survives-failed-replacement"
+    );
+
+    install_package(
+        &root,
+        "replaceable",
+        replaceable_id,
+        replaceable_capability,
+        "echo",
+        "1.0.2",
+        true,
+    );
+    let recovered = manager
+        .reload(&mut host, &BTreeMap::new())
+        .expect("healthy replacement reload");
+    assert!(
+        recovered
+            .launched()
+            .iter()
+            .any(|value| value.as_str() == replaceable_id)
+    );
+    assert_eq!(
+        host.catalog()
+            .plugin(&id(replaceable_id))
+            .expect("recovered replacement catalog record")
+            .version(),
+        "1.0.2"
+    );
+    assert_eq!(
+        host.invoke::<_, String>(
+            &capability(replaceable_capability),
+            "echo",
+            &"replacement-recovered".to_string(),
+        )
+        .expect("recovered replacement serves"),
+        "replacement-recovered"
+    );
+
+    host.shutdown();
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn unload_does_not_remove_a_same_id_registration_owned_elsewhere() {
     let root = temporary_root("ownership");
     fs::create_dir_all(&root).expect("create plugin root");

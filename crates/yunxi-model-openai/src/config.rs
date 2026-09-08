@@ -125,6 +125,15 @@ impl ProviderConfig {
         self.timeout
     }
 
+    /// Borrows the provider credential only for the duration of `callback`.
+    ///
+    /// The model client uses the private `api_key` accessor below. Host
+    /// integrations should prefer this scoped method when they need to hand
+    /// the credential to a final process-launch or secret-broker boundary.
+    pub fn with_api_key<T>(&self, callback: impl FnOnce(&str) -> T) -> T {
+        callback(&self.api_key)
+    }
+
     pub(crate) fn api_key(&self) -> &str {
         &self.api_key
     }

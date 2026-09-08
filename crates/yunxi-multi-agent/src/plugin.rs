@@ -141,6 +141,7 @@ pub fn run_multi_agent_plugin() -> Result<(), MultiAgentPluginError> {
                     }
                 }
             }
+            HostMessage::Cancel { .. } => {}
             HostMessage::Shutdown => return Ok(()),
             HostMessage::Welcome { .. } => {
                 return Err(MultiAgentPluginError::UnexpectedHostMessage(

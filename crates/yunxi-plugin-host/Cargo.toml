@@ -10,6 +10,7 @@ serde.workspace = true
 serde_json.workspace = true
 yunxi-kernel = { path = "../yunxi-kernel" }
 yunxi-protocol = { path = "../yunxi-protocol" }
+yunxi-secret-broker = { path = "../yunxi-secret-broker" }
 
 [lints]
 workspace = true

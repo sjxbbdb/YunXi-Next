@@ -60,10 +60,10 @@ fn main() -> ExitCode {
             return plugin_exit("skills", yunxi_tool_skills::run_skills_plugin());
         }
         Some(argument) if argument == OsStr::new(INTERNAL_VOICE_PLUGIN_ARGUMENT) => {
-            return plugin_exit("voice", yunxi_voice::run_voice_fixture());
+            return plugin_exit("voice", yunxi_voice::run_voice_plugin_from_env());
         }
         Some(argument) if argument == OsStr::new(INTERNAL_WEIXIN_PLUGIN_ARGUMENT) => {
-            return plugin_exit("weixin", yunxi_weixin::run_weixin_plugin());
+            return plugin_exit("weixin", yunxi_weixin::run_weixin_plugin_from_env());
         }
         Some(argument) if argument == OsStr::new(INTERNAL_MCP_FIXTURE_ARGUMENT) => {
             yunxi_tool_mcp::run_fixture();

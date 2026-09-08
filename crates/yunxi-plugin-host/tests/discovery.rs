@@ -132,3 +132,30 @@ fn public_discovery_applies_manifest_size_limit_before_json_parsing() {
     ));
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn executable_replacement_changes_the_discovered_package_identity() {
+    let root = temp_root("executable-replacement");
+    fs::create_dir_all(&root).expect("create root");
+    package(
+        &root,
+        "replaceable",
+        &manifest("replaceable.plugin", "1.0.0", "run", ""),
+        "run",
+    );
+
+    let first = PluginDirectory::new(&root)
+        .discover()
+        .expect("first discovery");
+    fs::write(
+        root.join("replaceable").join("run"),
+        b"replacement-with-a-different-size",
+    )
+    .expect("replace executable");
+    let second = PluginDirectory::new(&root)
+        .discover()
+        .expect("second discovery");
+
+    assert_ne!(first.plugins()[0], second.plugins()[0]);
+    let _ = fs::remove_dir_all(root);
+}

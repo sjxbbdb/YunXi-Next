@@ -10,10 +10,12 @@ mod handshake;
 mod identity;
 mod invocation;
 mod mailbox;
+mod management;
 mod manifest;
 mod mcp;
 mod memory_write;
 mod message;
+mod model_stream;
 mod multi_agent;
 mod scheduler;
 mod sessions;
@@ -57,6 +59,26 @@ pub use mailbox::{
     MailboxEntry, MailboxGetRequest, MailboxGetResult, MailboxItemKind, MailboxListRequest,
     MailboxListResult, MailboxMarkReadRequest, MailboxMutationResult, MailboxSummary,
 };
+pub use management::{
+    COMPANION_MANAGEMENT_CHECK_OPERATION, COMPANION_MANAGEMENT_CLEAR_OPERATION,
+    COMPANION_MANAGEMENT_HISTORY_OPERATION, COMPANION_MANAGEMENT_SET_ENABLED_OPERATION,
+    COMPANION_MANAGEMENT_STATUS_OPERATION, CompanionCheckRequest, CompanionClearRequest,
+    CompanionHistoryRequest, CompanionSetEnabledRequest, CompanionStatusRequest,
+    MAX_COMPANION_HISTORY_RECORDS, MAX_MANAGEMENT_ID_CHARS, MAX_MANAGEMENT_QUERY_CHARS,
+    MAX_MANAGEMENT_RECORDS, MAX_PERSONA_PROFILE_BYTES, MAX_PERSONA_PROFILE_ID_BYTES,
+    MEMORY_MANAGEMENT_CLEAR_OPERATION, MEMORY_MANAGEMENT_LIST_OPERATION,
+    MEMORY_MANAGEMENT_MUTATE_OPERATION, MEMORY_MANAGEMENT_QUERY_OPERATION,
+    MEMORY_MANAGEMENT_SET_ENABLED_OPERATION, MEMORY_MANAGEMENT_SHOW_OPERATION,
+    MEMORY_MANAGEMENT_STATUS_OPERATION, ManagementRequestError, MemoryClearRequest,
+    MemoryClearScope, MemoryListRequest, MemoryManagementScope, MemoryMutationAction,
+    MemoryMutationRequest, MemoryQueryRequest, MemorySetEnabledRequest, MemoryShowRequest,
+    MemoryStatusRequest, PERSONA_MANAGEMENT_IMPORT_OPERATION, PERSONA_MANAGEMENT_LIST_OPERATION,
+    PERSONA_MANAGEMENT_PROFILE_OPERATION, PERSONA_MANAGEMENT_RESET_OPERATION,
+    PERSONA_MANAGEMENT_SET_ACTIVE_OPERATION, PERSONA_MANAGEMENT_SET_ENABLED_OPERATION,
+    PERSONA_MANAGEMENT_STATUS_OPERATION, PersonaImportRequest, PersonaListRequest,
+    PersonaProfileRequest, PersonaResetRequest, PersonaSetActiveRequest, PersonaSetEnabledRequest,
+    PersonaStatusRequest,
+};
 pub use manifest::{
     DEFAULT_HOST_GROUP, GrantKind, GrantRequirement, MANIFEST_SCHEMA_VERSION, MAX_HOST_GROUP_BYTES,
     ManifestError, PluginManifest, PluginRiskLevel, PluginRuntimeMetadata,
@@ -75,6 +97,10 @@ pub use memory_write::{
 pub use message::{
     ChatMessage, ChatRequest, ChatResult, ChatRole, HostMessage, MODEL_CHAT_COMPLETE_OPERATION,
     PROTOCOL_VERSION, PluginMessage,
+};
+pub use model_stream::{
+    MAX_MODEL_STREAM_FINISH_REASON_BYTES, MAX_MODEL_STREAM_ID_BYTES, MAX_MODEL_STREAM_NAME_BYTES,
+    MAX_MODEL_STREAM_TEXT_BYTES, MAX_MODEL_STREAM_TOOL_CALL_INDEX, ModelStreamEvent,
 };
 pub use multi_agent::{
     AgentBudget, AgentDelegationGrant, AgentEvent, AgentEventKind, AgentInspectRequest,
@@ -102,12 +128,17 @@ pub use sessions::{
     SessionSnapshot, SessionSummary,
 };
 pub use skills::{
+    MAX_SKILL_ACTION_ARGUMENT_BYTES, MAX_SKILL_ACTION_ARGUMENTS, MAX_SKILL_ACTION_FRAME_BYTES,
+    MAX_SKILL_ACTION_INPUT_BYTES, MAX_SKILL_ACTION_OUTPUT_BYTES, MAX_SKILL_ACTION_PROGRAM_BYTES,
+    MAX_SKILL_ACTION_TIMEOUT_MILLIS, MAX_SKILL_ACTION_TOOL_NAME_BYTES, MAX_SKILL_ACTIONS,
     MAX_SKILL_CONTEXT_BYTES, MAX_SKILL_DESCRIPTION_BYTES, MAX_SKILL_ID_BYTES,
     MAX_SKILL_INSTRUCTION_BYTES, MAX_SKILL_METADATA, MAX_SKILL_NAME_BYTES, MAX_SKILL_PATH_BYTES,
     MAX_SKILL_TOOL_DECLARATIONS, MAX_SKILL_TOOL_DESCRIPTION_BYTES, MAX_SKILL_TOOL_NAME_BYTES,
-    MAX_SKILL_TOOL_SCHEMA_BYTES, SkillContextBlock, SkillContextRequest, SkillContextResult,
-    SkillListRequest, SkillListResult, SkillMetadata, SkillProtocolError, SkillRuntimeState,
-    SkillStatusRequest, SkillStatusResult, SkillToolDescriptor, TOOL_SKILLS_CONTEXT_OPERATION,
+    MAX_SKILL_TOOL_SCHEMA_BYTES, SKILL_ACTION_PROTOCOL_VERSION, SkillActionOutcome,
+    SkillActionRequest, SkillActionResponse, SkillActionSpec, SkillContextBlock,
+    SkillContextRequest, SkillContextResult, SkillListRequest, SkillListResult, SkillMetadata,
+    SkillProtocolError, SkillRuntimeState, SkillStatusRequest, SkillStatusResult,
+    SkillToolDescriptor, TOOL_SKILLS_ACTION_OPERATION, TOOL_SKILLS_CONTEXT_OPERATION,
     TOOL_SKILLS_LIST_OPERATION, TOOL_SKILLS_STATUS_OPERATION,
 };
 pub use stream::{

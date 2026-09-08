@@ -5,12 +5,13 @@ use std::fmt;
 use std::time::Duration;
 
 use yunxi_protocol::{
-    CapabilityDescriptor, CapabilityError, HostMessage, InvocationCodecError, InvocationResponse,
-    PluginMessage, ProtocolError, STORAGE_SESSIONS_APPEND_OPERATION,
-    STORAGE_SESSIONS_CREATE_OPERATION, STORAGE_SESSIONS_LIST_OPERATION,
-    STORAGE_SESSIONS_LOAD_OPERATION, STORAGE_SESSIONS_MUTATE_OPERATION, SessionAppendRequest,
-    SessionCreateRequest, SessionListRequest, SessionLoadRequest, SessionMutationRequest,
-    capabilities, connect_plugin,
+    CapabilityDescriptor, CapabilityError, GrantKind, GrantRequirement, HostMessage,
+    InvocationCodecError, InvocationResponse, PluginMessage, ProtocolError,
+    STORAGE_SESSIONS_APPEND_OPERATION, STORAGE_SESSIONS_CREATE_OPERATION,
+    STORAGE_SESSIONS_LIST_OPERATION, STORAGE_SESSIONS_LOAD_OPERATION,
+    STORAGE_SESSIONS_MUTATE_OPERATION, SessionAppendRequest, SessionCreateRequest,
+    SessionListRequest, SessionLoadRequest, SessionMutationRequest, capabilities,
+    connect_plugin_with_grants,
 };
 
 use crate::{SessionStore, StorageError};
@@ -23,11 +24,15 @@ pub fn run_storage_plugin() -> Result<(), StoragePluginError> {
         capabilities::STORAGE_SESSIONS,
         capabilities::STORAGE_SESSIONS_VERSION,
     )?;
-    let mut session = connect_plugin(
+    let mut session = connect_plugin_with_grants(
         STORAGE_PLUGIN_ID,
         "Persistent conversation sessions",
         env!("CARGO_PKG_VERSION"),
         vec![capability],
+        vec![
+            GrantRequirement::required(GrantKind::WorkspaceRead),
+            GrantRequirement::required(GrantKind::WorkspaceWrite),
+        ],
         CONNECT_TIMEOUT,
     )?;
 
@@ -126,6 +131,7 @@ pub fn run_storage_plugin() -> Result<(), StoragePluginError> {
                     }
                 }
             }
+            HostMessage::Cancel { .. } => {}
             HostMessage::Shutdown => return Ok(()),
             HostMessage::Welcome { .. } => {
                 return Err(StoragePluginError::UnexpectedHostMessage(

@@ -1,7 +1,8 @@
 //! Black-box tests that launch real child processes to verify isolation.
 
 use std::env;
-use std::process;
+use std::fs;
+use std::process::{self, Command};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -10,6 +11,7 @@ use yunxi_kernel::{
 };
 
 const TEST_PLUGIN_MODE: &str = "YUNXI_TEST_PLUGIN_MODE";
+const TEST_PLUGIN_MARKER: &str = "YUNXI_TEST_PLUGIN_MARKER";
 
 #[test]
 fn plugin_subprocess_entrypoint() {
@@ -21,6 +23,28 @@ fn plugin_subprocess_entrypoint() {
         "healthy" => loop {
             thread::sleep(Duration::from_millis(100));
         },
+        "spawn-descendant" => {
+            let marker = env::var_os(TEST_PLUGIN_MARKER).expect("descendant marker path");
+            let mut descendant = Command::new(env::current_exe().expect("test executable"))
+                .args(["--exact", "plugin_subprocess_entrypoint", "--nocapture"])
+                .env(TEST_PLUGIN_MODE, "descendant")
+                .env(TEST_PLUGIN_MARKER, marker)
+                .spawn()
+                .expect("spawn plugin descendant");
+            let _ = descendant.wait();
+            loop {
+                thread::sleep(Duration::from_millis(100));
+            }
+        }
+        "descendant" => {
+            let marker = std::path::PathBuf::from(
+                env::var_os(TEST_PLUGIN_MARKER).expect("descendant marker path"),
+            );
+            fs::write(marker.with_extension("started"), b"started")
+                .expect("write descendant start marker");
+            thread::sleep(Duration::from_secs(3));
+            fs::write(marker, b"survived").expect("write descendant survival marker");
+        }
         "crash" => process::exit(42),
         _ => process::exit(64),
     }
@@ -135,6 +159,52 @@ fn a_failed_plugin_restarts_only_when_explicitly_requested() {
         2
     );
     assert!(kernel.is_healthy());
+}
+
+#[test]
+fn stopping_a_plugin_terminates_its_descendant_process_tree() {
+    let marker = env::temp_dir().join(format!(
+        "yunxi-kernel-descendant-{}-{}",
+        process::id(),
+        std::thread::current().name().unwrap_or("test")
+    ));
+    let _ignored = fs::remove_file(&marker);
+    let _ignored = fs::remove_file(marker.with_extension("started"));
+
+    let mut kernel = YunxiKernel::new();
+    let id = plugin_id("yunxi.test.descendant");
+    let executable = env::current_exe().expect("resolve integration test executable");
+    let command = PluginCommand::new(executable)
+        .args(["--exact", "plugin_subprocess_entrypoint", "--nocapture"])
+        .env(TEST_PLUGIN_MODE, "spawn-descendant")
+        .env(TEST_PLUGIN_MARKER, marker.as_os_str());
+    kernel
+        .register(PluginSpec::new(id.clone(), command))
+        .expect("register descendant plugin");
+    kernel.start(&id).expect("start descendant plugin");
+    wait_for_state(&mut kernel, &id, |state| {
+        matches!(state, PluginState::Running { .. })
+    });
+
+    let started = marker.with_extension("started");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !started.exists() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(started.exists(), "plugin descendant never started");
+
+    kernel.stop(&id).expect("stop descendant plugin");
+    wait_for_state(&mut kernel, &id, |state| {
+        matches!(state, PluginState::Stopped)
+    });
+    thread::sleep(Duration::from_millis(3_500));
+    assert!(
+        !marker.exists(),
+        "plugin descendant survived the supervisor stop"
+    );
+
+    let _ignored = fs::remove_file(started);
+    let _ignored = fs::remove_file(marker);
 }
 
 fn fixture_spec(id: PluginId, mode: &str) -> PluginSpec {

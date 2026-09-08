@@ -325,8 +325,8 @@ window.__ModuleLoader__.load({
 			}
 		};
 		//#endregion
-		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-9c80724d56484e56a43c2b8dbb125407\packages\client\ui-message-feedback\src\client\MessageFeedbackActions.module.css.mjs
-		const css = ".WTNMEG_action{width:28px;height:28px;color:var(--dsw-alias-label-tertiary);cursor:pointer;background:0 0;border:none;border-radius:28px;justify-content:center;align-items:center;padding:6px;display:inline-flex}.WTNMEG_action:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}.WTNMEG_action:disabled{cursor:default;opacity:.4}.WTNMEG_action[data-active]{color:var(--dsw-alias-label-primary)}.WTNMEG_noteOpen{max-width:220px;color:var(--dsw-alias-label-tertiary);white-space:nowrap;text-overflow:ellipsis;cursor:pointer;background:0 0;border:none;border-radius:14px;padding:0 8px;font-size:13px;line-height:28px;overflow:hidden}.WTNMEG_noteOpen:hover,.WTNMEG_noteOpen[aria-expanded=true]{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}.WTNMEG_notePanel{z-index:1100;box-sizing:border-box;border:1px solid var(--dsw-alias-border-inverted);background:var(--dsw-specific-menu);width:320px;max-width:min(360px,100vw - 24px);max-height:calc(100vh - 24px);box-shadow:var(--dsw-shadow-lv3);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);border-radius:12px;flex-direction:column;gap:8px;padding:8px;display:flex;position:fixed;overflow-y:auto}.WTNMEG_noteInput{box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);width:100%;color:var(--dsw-alias-label-primary);font:inherit;resize:vertical;border-radius:8px;padding:6px 8px;font-size:13px}.WTNMEG_noteActions{justify-content:flex-end;gap:6px;display:flex}.WTNMEG_noteSave,.WTNMEG_noteCancel{cursor:pointer;border:none;border-radius:14px;height:28px;padding:0 10px;font-size:13px}.WTNMEG_noteSave{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground)}.WTNMEG_noteSave:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}.WTNMEG_noteSave:disabled{cursor:default;opacity:.4}.WTNMEG_noteCancel{color:var(--dsw-alias-label-tertiary);background:0 0}.WTNMEG_noteCancel:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}.WTNMEG_failure{color:var(--dsw-alias-label-tertiary);padding-left:4px;font-size:13px;line-height:20px}";
+		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-fc075cf71c884b4081d88130d74886d7\packages\client\ui-message-feedback\src\client\MessageFeedbackActions.module.css.mjs
+		const css = ".-\\39 HIka_action{width:28px;height:28px;color:var(--dsw-alias-label-tertiary);cursor:pointer;background:0 0;border:none;border-radius:28px;justify-content:center;align-items:center;padding:6px;display:inline-flex}.-\\39 HIka_action:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}.-\\39 HIka_action:disabled{cursor:default;opacity:.4}.-\\39 HIka_action[data-active]{color:var(--dsw-alias-label-primary)}.-\\39 HIka_noteOpen{max-width:220px;color:var(--dsw-alias-label-tertiary);white-space:nowrap;text-overflow:ellipsis;cursor:pointer;background:0 0;border:none;border-radius:14px;padding:0 8px;font-size:13px;line-height:28px;overflow:hidden}.-\\39 HIka_noteOpen:hover,.-\\39 HIka_noteOpen[aria-expanded=true]{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}.-\\39 HIka_notePanel{z-index:1100;box-sizing:border-box;border:1px solid var(--dsw-alias-border-inverted);background:var(--dsw-specific-menu);width:320px;max-width:min(360px,100vw - 24px);max-height:calc(100vh - 24px);box-shadow:var(--dsw-shadow-lv3);--dsh-scrollbar-thumb:var(--dsw-alias-scrollbar-bg-l2);--dsh-scrollbar-thumb-hover:var(--dsw-alias-scrollbar-hover-l2);border-radius:12px;flex-direction:column;gap:8px;padding:8px;display:flex;position:fixed;overflow-y:auto}.-\\39 HIka_noteInput{box-sizing:border-box;border:1px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);width:100%;color:var(--dsw-alias-label-primary);font:inherit;resize:vertical;border-radius:8px;padding:6px 8px;font-size:13px}.-\\39 HIka_noteActions{justify-content:flex-end;gap:6px;display:flex}.-\\39 HIka_noteSave,.-\\39 HIka_noteCancel{cursor:pointer;border:none;border-radius:14px;height:28px;padding:0 10px;font-size:13px}.-\\39 HIka_noteSave{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground)}.-\\39 HIka_noteSave:hover:not(:disabled){background:var(--dsw-alias-button-primary-hover)}.-\\39 HIka_noteSave:disabled{cursor:default;opacity:.4}.-\\39 HIka_noteCancel{color:var(--dsw-alias-label-tertiary);background:0 0}.-\\39 HIka_noteCancel:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-secondary)}.-\\39 HIka_failure{color:var(--dsw-alias-label-tertiary);padding-left:4px;font-size:13px;line-height:20px}";
 		const tagId = "@deepseek-ai/dsh-client-ui-message-feedback/MessageFeedbackActions.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -336,14 +336,14 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var MessageFeedbackActions_module_css_default = {
-			"action": "WTNMEG_action",
-			"failure": "WTNMEG_failure",
-			"noteActions": "WTNMEG_noteActions",
-			"noteCancel": "WTNMEG_noteCancel",
-			"noteInput": "WTNMEG_noteInput",
-			"noteOpen": "WTNMEG_noteOpen",
-			"notePanel": "WTNMEG_notePanel",
-			"noteSave": "WTNMEG_noteSave"
+			"action": "-9HIka_action",
+			"failure": "-9HIka_failure",
+			"noteActions": "-9HIka_noteActions",
+			"noteCancel": "-9HIka_noteCancel",
+			"noteInput": "-9HIka_noteInput",
+			"noteOpen": "-9HIka_noteOpen",
+			"notePanel": "-9HIka_notePanel",
+			"noteSave": "-9HIka_noteSave"
 		};
 		//#endregion
 		//#region lib/types/client/MessageFeedbackActions.js

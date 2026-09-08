@@ -1,19 +1,76 @@
 //! Host-owned child model isolation and multi-agent tool execution.
 
 use serde::Serialize;
-use yunxi_kernel::PluginId;
-use yunxi_model_openai::MODEL_PLUGIN_ID;
-use yunxi_plugin_host::{PluginCallError, PluginLaunch, ProcessPluginHost};
+use yunxi_multi_agent::{CancellationToken, ChildTurn, ChildWorkerError};
+use yunxi_plugin_host::PluginCallError;
 use yunxi_protocol::{
-    CapabilityDescriptor, ChatMessage, ChatRequest, ChatResult, MODEL_CHAT_COMPLETE_OPERATION,
+    AgentDelegationGrant, AgentTurnStartRequest, CapabilityDescriptor, GrantKind, ModelStreamEvent,
     ToolResultOutcome,
 };
 
-use super::{ChatSession, HANDSHAKE_TIMEOUT, WRITE_TIMEOUT, call_lost_route, tool_loop};
+use super::child_agent::{ChildAgentFailure, ChildAgentRuntime};
+use super::{ChatSession, call_lost_route, tool_loop};
+
+/// The immutable portion of a Web child turn.  It deliberately contains no
+/// mutable parent session, so a child can continue while WebHost services
+/// another session or an interrupt request.
+#[derive(Clone)]
+pub(crate) struct WebAgentTask {
+    runtime: ChildAgentRuntime,
+}
+
+impl WebAgentTask {
+    /// Runs one child turn without owning coordinator state.  The runtime
+    /// persists the turn lifecycle; this adapter only owns the isolated model
+    /// process and forwards bounded stream events.
+    pub(crate) fn run<OnEvent>(
+        self,
+        turn: ChildTurn,
+        cancellation: &CancellationToken,
+        on_event: OnEvent,
+    ) -> Result<String, ChildWorkerError>
+    where
+        OnEvent: FnMut(ModelStreamEvent) -> Result<(), String>,
+    {
+        if cancellation.is_cancelled() {
+            return Err(child_worker_error(
+                "cancelled",
+                "child agent turn was cancelled",
+            ));
+        }
+
+        let cancellation = cancellation.clone();
+        self.runtime
+            .run(
+                &turn.transcript,
+                &turn.message,
+                &turn.model,
+                &turn.tool_grants,
+                move || cancellation.is_cancelled(),
+                on_event,
+            )
+            .map_err(|error| child_worker_error(error.code(), error.message()))
+    }
+}
 
 impl ChatSession {
     pub(crate) fn multi_agent_web_available(&self) -> bool {
         self.multi_agent_capability.is_some()
+    }
+
+    pub(crate) fn web_agent_model(&self) -> &str {
+        &self.model
+    }
+
+    /// Creates the immutable execution adapter used when a persisted Web
+    /// child turn is reattached after a host restart.  The adapter carries
+    /// the same host, workspace, sandbox, and plugin capabilities as the
+    /// parent session; the coordinator remains responsible for restoring the
+    /// child transcript and grant policy.
+    pub(crate) fn web_agent_task(&self) -> WebAgentTask {
+        WebAgentTask {
+            runtime: self.child_agent_runtime(),
+        }
     }
 
     pub(super) fn prepare_agent_session(&mut self) {
@@ -39,6 +96,7 @@ impl ChatSession {
         task: &str,
         name: Option<&str>,
         parent_id: Option<&str>,
+        requested_grants: &[GrantKind],
         ticket: &str,
     ) -> ToolResultOutcome {
         let Some(capability) = self.multi_agent_capability.clone() else {
@@ -52,6 +110,10 @@ impl ChatSession {
             Err(error) => return failed_tool_outcome("invalid_agent_grant", error.to_string()),
         };
         let mut request = match yunxi_protocol::AgentSpawnRequest::new(grant.clone(), task) {
+            Ok(request) => request,
+            Err(error) => return failed_tool_outcome("invalid_agent_request", error.to_string()),
+        };
+        request = match request.with_requested_child_grants(requested_grants.iter().copied()) {
             Ok(request) => request,
             Err(error) => return failed_tool_outcome("invalid_agent_request", error.to_string()),
         };
@@ -165,6 +227,54 @@ impl ChatSession {
         }
     }
 
+    pub(crate) fn prepare_web_agent_runtime_with_model(
+        &self,
+        root_session_id: &str,
+        agent_id: &str,
+        message: &str,
+        model: Option<&str>,
+    ) -> Result<(AgentDelegationGrant, WebAgentTask), String> {
+        if let Some(model) = model {
+            yunxi_multi_agent::ChildWorkerSpec::new(model, [])
+                .map_err(|error| error.to_string())?;
+        }
+        let grant = self
+            .web_agent_write_grant(root_session_id)
+            .map_err(|error| error.to_string())?;
+        AgentTurnStartRequest::new(grant.clone(), agent_id, message)
+            .map_err(|error| error.to_string())?;
+        Ok((
+            grant,
+            WebAgentTask {
+                runtime: self.child_agent_runtime(),
+            },
+        ))
+    }
+
+    pub(crate) fn web_agent_interrupt(
+        &mut self,
+        root_session_id: &str,
+        agent_id: &str,
+    ) -> Result<(), String> {
+        let capability = self
+            .multi_agent_capability
+            .clone()
+            .ok_or_else(|| "multi-agent capability is disabled or unavailable".to_string())?;
+        let grant = self
+            .web_agent_write_grant(root_session_id)
+            .map_err(|error| error.to_string())?;
+        let request = yunxi_protocol::AgentInterruptRequest::new(grant, agent_id, false)
+            .map_err(|error| error.to_string())?;
+        self.host
+            .invoke::<_, yunxi_protocol::AgentMutationResult>(
+                &capability,
+                yunxi_protocol::TOOL_MULTI_AGENT_INTERRUPT_OPERATION,
+                &request,
+            )
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
     pub(crate) fn web_agent_inspect(
         &mut self,
         root_session_id: &str,
@@ -252,20 +362,30 @@ impl ChatSession {
             Err(error) => return self.multi_agent_tool_error_outcome(tool_name, error),
         };
 
-        let reply = match self.run_isolated_child_model(started.transcript()) {
+        let child_grants = started.agent().child_grants().to_vec();
+        let runtime = self.child_agent_runtime();
+        let model = self.model.clone();
+        let reply = match runtime.run(
+            started.transcript(),
+            message,
+            &model,
+            &child_grants,
+            || false,
+            |_| Ok(()),
+        ) {
             Ok(reply) => reply,
             Err(error) => {
                 self.report_child_agent_failure(capability, grant, agent_id, &error);
-                return failed_tool_outcome(error.code, error.message);
+                return failed_tool_outcome(error.code(), error.message());
             }
         };
         let complete =
             match yunxi_protocol::AgentTurnCompleteRequest::new(grant.clone(), agent_id, &reply) {
                 Ok(request) => request,
                 Err(error) => {
-                    let failure = ChildTurnError::new("child_reply_invalid", error.to_string());
+                    let failure = ChildAgentFailure::new("child_reply_invalid", error.to_string());
                     self.report_child_agent_failure(capability, grant, agent_id, &failure);
-                    return failed_tool_outcome(failure.code, failure.message);
+                    return failed_tool_outcome(failure.code(), failure.message());
                 }
             };
         match self.host.invoke::<_, yunxi_protocol::AgentMutationResult>(
@@ -285,71 +405,18 @@ impl ChatSession {
         }
     }
 
-    fn run_isolated_child_model(
-        &self,
-        transcript: &[yunxi_protocol::AgentTranscriptEntry],
-    ) -> Result<String, ChildTurnError> {
-        let mut messages = vec![ChatMessage::system(
-            "You are an isolated YunXi child agent. Complete only the delegated task. You have no inherited tools, workspace access, or channel authority. Return a concrete result and do not claim actions you could not perform.",
-        )];
-        messages.extend(transcript.iter().map(|entry| match entry.role() {
-            yunxi_protocol::AgentTranscriptRole::User => ChatMessage::user(entry.content()),
-            yunxi_protocol::AgentTranscriptRole::Assistant => {
-                ChatMessage::assistant(entry.content())
-            }
-        }));
-
-        let id = PluginId::new(MODEL_PLUGIN_ID)
-            .map_err(|error| ChildTurnError::new("child_model_unavailable", error.to_string()))?;
-        let mut child_host = ProcessPluginHost::new();
-        let launch = PluginLaunch::new(id, self.child_model_command.clone())
-            .with_display_name("Isolated child chat model")
-            .with_handshake_timeout(HANDSHAKE_TIMEOUT)
-            .with_io_timeouts(Some(self.child_model_response_timeout), Some(WRITE_TIMEOUT))
-            .with_required_grants(self.child_model_required_grants.iter().copied())
-            .with_expected_capabilities([self.model_capability.clone()]);
-        if let Err(error) = child_host.launch(launch) {
-            child_host.shutdown();
-            return Err(ChildTurnError::new(
-                "child_model_unavailable",
-                error.to_string(),
-            ));
-        }
-        let result = child_host.invoke::<_, ChatResult>(
-            &self.model_capability,
-            MODEL_CHAT_COMPLETE_OPERATION,
-            &ChatRequest::new(messages),
-        );
-        child_host.shutdown();
-        let result =
-            result.map_err(|error| ChildTurnError::new("child_model_failed", error.to_string()))?;
-        if !result.tool_calls().is_empty() {
-            return Err(ChildTurnError::new(
-                "child_tools_not_allowed",
-                "isolated child model returned tool calls without receiving a tool catalog",
-            ));
-        }
-        if result.content().trim().is_empty() {
-            return Err(ChildTurnError::new(
-                "child_empty_response",
-                "isolated child model returned an empty response",
-            ));
-        }
-        Ok(result.content().to_string())
-    }
-
     fn report_child_agent_failure(
         &mut self,
         capability: &CapabilityDescriptor,
         grant: &yunxi_protocol::AgentDelegationGrant,
         agent_id: &str,
-        failure: &ChildTurnError,
+        failure: &ChildAgentFailure,
     ) {
         let request = match yunxi_protocol::AgentTurnFailRequest::new(
             grant.clone(),
             agent_id,
-            failure.code,
-            &failure.message,
+            failure.code(),
+            failure.message(),
         ) {
             Ok(request) => request,
             Err(error) => {
@@ -382,6 +449,35 @@ impl ChatSession {
             &self.agent_session_id,
             ticket,
             self.agent_budget,
+        )?
+        .with_allowed_child_grants(self.available_child_grants())
+    }
+
+    fn available_child_grants(&self) -> Vec<GrantKind> {
+        let patch_available =
+            self.patch_capability.is_some() && self.sandbox != crate::args::SandboxMode::ReadOnly;
+        let read_available = self.files_capability.is_some() || patch_available;
+        let mut grants = Vec::new();
+        if read_available {
+            grants.push(GrantKind::WorkspaceRead);
+        }
+        if patch_available {
+            grants.push(GrantKind::WorkspaceWrite);
+        }
+        grants
+    }
+
+    fn child_agent_runtime(&self) -> ChildAgentRuntime {
+        ChildAgentRuntime::new(
+            self.host.clone(),
+            self.cwd.clone(),
+            self.files_capability.clone(),
+            self.patch_capability.clone(),
+            self.sandbox,
+            self.child_model_command.clone(),
+            self.child_model_required_grants.clone(),
+            self.child_model_response_timeout,
+            self.model_capability.clone(),
         )
     }
 
@@ -394,7 +490,40 @@ impl ChatSession {
             root_session_id,
             format!("web-read-{}", std::process::id()),
             self.agent_budget,
+        )?
+        .with_allowed_child_grants(
+            self.available_child_grants()
+                .into_iter()
+                .filter(|grant| *grant == GrantKind::WorkspaceRead)
+                .collect::<Vec<_>>(),
         )
+    }
+
+    pub(crate) fn web_agent_read_grant(
+        &self,
+        root_session_id: &str,
+    ) -> Result<yunxi_protocol::AgentDelegationGrant, yunxi_protocol::AgentProtocolError> {
+        self.web_agent_grant(root_session_id)
+    }
+
+    pub(crate) fn web_agent_recovery_grant(
+        &self,
+        root_session_id: &str,
+    ) -> Result<yunxi_protocol::AgentDelegationGrant, yunxi_protocol::AgentProtocolError> {
+        self.web_agent_write_grant(root_session_id)
+    }
+
+    fn web_agent_write_grant(
+        &self,
+        root_session_id: &str,
+    ) -> Result<yunxi_protocol::AgentDelegationGrant, yunxi_protocol::AgentProtocolError> {
+        yunxi_protocol::AgentDelegationGrant::new(
+            yunxi_protocol::WorkspaceGrant::read_write(&self.cwd),
+            root_session_id,
+            format!("web-write-{}", std::process::id()),
+            self.agent_budget,
+        )?
+        .with_allowed_child_grants(self.available_child_grants())
     }
 
     fn multi_agent_tool_error_outcome(
@@ -428,28 +557,11 @@ impl ChatSession {
     }
 }
 
-struct ChildTurnError {
-    code: &'static str,
-    message: String,
-}
-
-impl ChildTurnError {
-    fn new(code: &'static str, message: impl AsRef<str>) -> Self {
-        let mut bounded = String::new();
-        for character in message.as_ref().replace('\0', " ").chars() {
-            if bounded.len() + character.len_utf8() > 3000 {
-                break;
-            }
-            bounded.push(character);
-        }
-        if bounded.trim().is_empty() {
-            bounded = "isolated child model turn failed".to_string();
-        }
-        Self {
-            code,
-            message: bounded,
-        }
-    }
+fn child_worker_error(code: impl Into<String>, message: impl Into<String>) -> ChildWorkerError {
+    ChildWorkerError::new(code, message).unwrap_or_else(|_| {
+        ChildWorkerError::new("child_worker_failed", "child worker failed")
+            .expect("bounded fallback")
+    })
 }
 
 fn failed_tool_outcome(code: impl Into<String>, message: impl Into<String>) -> ToolResultOutcome {

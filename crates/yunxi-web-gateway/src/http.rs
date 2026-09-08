@@ -4,10 +4,11 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
-use std::sync::Arc;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use yunxi_web_contract::{
@@ -16,15 +17,27 @@ use yunxi_web_contract::{
 };
 
 use crate::assets::{EmbeddedWebAsset, embedded_web_asset};
-use crate::sse::{MAX_SSE_EVENTS, MAX_SSE_RESPONSE_BYTES, encode_events, error_event};
+use crate::events::{EventJournal, EventJournalError};
+use crate::sse::{MAX_SSE_EVENTS, MAX_SSE_RESPONSE_BYTES, encode_page, error_event};
 use crate::{
     AGENT_PRESET_LIST_METHOD, COMMANDS_LIST_METHOD, CREDENTIALS_DESCRIBE_METHOD,
     DYNAMIC_CORDIS_INVENTORY_METHOD, DYNAMIC_CORDIS_SYNC_INSPECT_METHOD, GatewayBackend,
-    HEALTH_STATUS_METHOD, HOST_DESCRIBE_METHOD, LLM_PROVIDERS_METHOD, PLUGIN_INVENTORY_LIST_METHOD,
-    SESSION_CREATE_METHOD, SESSION_HISTORY_METHOD, SESSION_LIST_METHOD, SESSION_MODELS_METHOD,
-    SESSION_PROMPT_METHOD, SETTINGS_DESCRIBE_METHOD, SETTINGS_MUTATE_METHOD,
+    HEALTH_STATUS_METHOD, HOST_DESCRIBE_METHOD, LLM_PROVIDERS_METHOD, MAILBOX_GET_METHOD,
+    MAILBOX_LIST_METHOD, MAILBOX_MARK_READ_METHOD, MEMORY_LIST_METHOD, MEMORY_SHOW_METHOD,
+    MEMORY_STATUS_METHOD, PERSONA_LIST_METHOD, PERSONA_PROFILE_METHOD, PERSONA_STATUS_METHOD,
+    PLUGIN_INVENTORY_LIST_METHOD, RELATIONSHIP_LIST_METHOD, RELATIONSHIP_STATUS_METHOD,
+    SESSION_ATTACHMENT_METHOD, SESSION_CANCEL_METHOD, SESSION_CREATE_METHOD, SESSION_FORK_METHOD,
+    SESSION_HISTORY_METHOD, SESSION_LIST_METHOD, SESSION_MODELS_METHOD, SESSION_PROMPT_METHOD,
+    SESSION_RENAME_METHOD, SESSION_SEARCH_METHOD, SESSION_SELECT_MODEL_METHOD,
+    SESSION_UPDATE_QUEUE_METHOD, SETTINGS_DESCRIBE_METHOD, SETTINGS_MUTATE_METHOD,
     SETTINGS_REPLACE_METHOD, SETTINGS_UPDATE_METHOD, SKILL_LIST_METHOD, SUBAGENT_HISTORY_METHOD,
-    SUBAGENT_LIST_METHOD, WORKSPACE_LIST_METHOD,
+    SUBAGENT_INTERRUPT_METHOD, SUBAGENT_LIST_METHOD, SUBAGENT_PROMPT_METHOD, VOICE_CANCEL_METHOD,
+    VOICE_CHAT_METHOD, VOICE_DEVICES_METHOD, VOICE_DOCTOR_METHOD, VOICE_PLAYBACK_METHOD,
+    VOICE_SAVE_METHOD, VOICE_SPEAK_METHOD, VOICE_TALK_METHOD, VOICE_TRANSCRIBE_METHOD,
+    WEIXIN_CONTROL_METHOD, WEIXIN_DOCTOR_METHOD, WEIXIN_LOGIN_METHOD, WEIXIN_LOGOUT_METHOD,
+    WEIXIN_PAIR_METHOD, WEIXIN_POLL_LOGIN_METHOD, WEIXIN_QUEUED_METHOD, WEIXIN_REPLY_METHOD,
+    WEIXIN_SEND_METHOD, WEIXIN_SERVE_METHOD, WEIXIN_SERVE_START_METHOD, WEIXIN_SERVE_STATUS_METHOD,
+    WEIXIN_SERVE_STOP_METHOD, WEIXIN_SESSION_METHOD, WEIXIN_STATUS_METHOD, WORKSPACE_LIST_METHOD,
 };
 
 pub const MAX_HTTP_HEADER_BYTES: usize = 16 * 1024;
@@ -32,8 +45,13 @@ pub const MAX_HTTP_BODY_BYTES: usize = MAX_FRAME_BYTES;
 pub const MAX_HTTP_RESPONSE_BYTES: usize = MAX_SSE_RESPONSE_BYTES;
 pub use crate::assets::MAX_WEB_ASSET_BYTES;
 pub const DEFAULT_HTTP_READ_TIMEOUT: Duration = Duration::from_secs(10);
+pub const MAX_HTTP_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
+pub const MAX_HTTP_CONNECTION_WORKERS: usize = 32;
+pub const MAX_SSE_LONG_POLL: Duration = Duration::from_millis(40);
+const SHUTDOWN_POLL_INTERVAL: Duration = Duration::from_millis(25);
 
 const SSE_STATIC_OVERHEAD_BYTES: usize = 32;
+const SSE_GAP_RESERVE_BYTES: usize = 1024;
 const HTTP_VERSION: &str = "HTTP/1.1";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -214,6 +232,7 @@ impl fmt::Debug for ShutdownToken {
 
 pub struct HttpCarrier<B> {
     backend: B,
+    event_journal: EventJournal,
     read_timeout: Duration,
 }
 
@@ -225,8 +244,30 @@ where
     pub fn new(backend: B) -> Self {
         Self {
             backend,
+            event_journal: EventJournal::new(),
             read_timeout: DEFAULT_HTTP_READ_TIMEOUT,
         }
+    }
+
+    /// Attach an optional durable JSONL replay journal to this carrier.
+    pub fn with_event_journal_path(
+        mut self,
+        path: impl AsRef<Path>,
+    ) -> Result<Self, EventJournalError> {
+        self.attach_event_journal_path(path)?;
+        Ok(self)
+    }
+
+    /// Load and attach a durable journal, replacing this carrier's in-memory window.
+    pub fn attach_event_journal_path(
+        &mut self,
+        path: impl AsRef<Path>,
+    ) -> Result<(), EventJournalError> {
+        self.event_journal.attach_path(path)
+    }
+
+    pub fn event_journal_path(&self) -> Option<&Path> {
+        self.event_journal.path()
     }
 
     pub fn with_read_timeout(mut self, read_timeout: Duration) -> Self {
@@ -263,10 +304,10 @@ where
             "GET" if embedded_web_asset(path).is_some() => web_asset_response(path),
             "GET" if path == "/plugins/events" => static_plugin_events_response(),
             "GET" if api_path_matches(path, EVENTS_MUX_METHOD) => {
-                self.handle_events(EventChannel::Mux)
+                self.handle_events(EventChannel::Mux, &request)
             }
             "GET" if api_path_matches(path, EVENTS_HOST_METHOD) => {
-                self.handle_events(EventChannel::Host)
+                self.handle_events(EventChannel::Host, &request)
             }
             "POST" => {
                 if api_path_matches(path, "respond") {
@@ -284,8 +325,10 @@ where
     pub fn serve_connection(&mut self, mut stream: TcpStream) -> io::Result<()> {
         stream.set_nonblocking(false)?;
         stream.set_read_timeout(Some(self.read_timeout))?;
+        stream.set_write_timeout(Some(MAX_HTTP_WRITE_TIMEOUT))?;
         let response = match read_request(&mut stream) {
             Ok(request) => self.handle_request(request),
+            Err(ReadRequestError::Cancelled) => return Ok(()),
             Err(ReadRequestError::Parse(error)) => parse_error_response(error),
             Err(ReadRequestError::Io(error)) => return Err(error),
         };
@@ -309,6 +352,52 @@ where
                 }
                 Err(error) => return Err(error),
             }
+        }
+        Ok(())
+    }
+
+    /// Serve independent HTTP connections concurrently while keeping backend
+    /// dispatch serialized. Long-running work must be detached by the backend
+    /// before returning from `dispatch`; this lets event and cancellation
+    /// requests proceed without making the backend itself concurrent.
+    pub fn serve_until_concurrent(
+        self,
+        listener: TcpListener,
+        shutdown: &ShutdownToken,
+    ) -> io::Result<()>
+    where
+        B: Send + 'static,
+    {
+        listener.set_nonblocking(true)?;
+        let carrier = Arc::new(SharedHttpCarrier {
+            backend: Mutex::new(self.backend),
+            event_journal: Mutex::new(self.event_journal),
+            read_timeout: self.read_timeout,
+            shutdown: shutdown.clone(),
+        });
+        let mut workers = Vec::<thread::JoinHandle<io::Result<()>>>::new();
+        while !shutdown.is_shutdown() {
+            reap_finished_workers(&mut workers);
+            match listener.accept() {
+                Ok((mut stream, _peer)) if workers.len() >= MAX_HTTP_CONNECTION_WORKERS => {
+                    let response = text_response(503, "too many active HTTP connections");
+                    let _ = stream.write_all(&response.to_bytes());
+                    let _ = stream.shutdown(Shutdown::Both);
+                }
+                Ok((stream, _peer)) => {
+                    let carrier = Arc::clone(&carrier);
+                    workers.push(thread::spawn(move || {
+                        serve_shared_connection(&carrier, stream)
+                    }));
+                }
+                Err(error) if is_would_block(&error) => {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        for worker in workers {
+            let _ = worker.join();
         }
         Ok(())
     }
@@ -374,32 +463,286 @@ where
         }
     }
 
-    fn handle_events(&mut self, channel: EventChannel) -> HttpResponse {
-        self.backend.refresh();
+    fn handle_events(&mut self, channel: EventChannel, request: &HttpRequest) -> HttpResponse {
+        let after_sequence = match event_cursor(request) {
+            Ok(cursor) => cursor,
+            Err(message) => return text_response(400, &message),
+        };
+        if let Some(cursor) = after_sequence
+            && cursor > self.event_journal.latest_sequence(channel)
+        {
+            return text_response(400, "event cursor is ahead of the latest retained event");
+        }
         let raw_budget = MAX_SSE_RESPONSE_BYTES
             .saturating_sub(SSE_STATIC_OVERHEAD_BYTES)
-            .saturating_sub(MAX_SSE_EVENTS * 8);
-        let body = match self
-            .backend
-            .take_events(channel, MAX_SSE_EVENTS, raw_budget)
+            .saturating_sub(MAX_SSE_EVENTS * 32)
+            .saturating_sub(SSE_GAP_RESERVE_BYTES);
+        let wait = match query_u64(request.path(), "waitMs") {
+            Ok(Some(value)) => Duration::from_millis(value).min(MAX_SSE_LONG_POLL),
+            Ok(None) => Duration::ZERO,
+            Err(message) => return text_response(400, &message),
+        };
+        let deadline = Instant::now() + wait;
+        let page = loop {
+            let previous_latest = self.event_journal.latest_sequence(channel);
+            self.backend.refresh();
+            let events = match self
+                .backend
+                .take_events(channel, MAX_SSE_EVENTS, raw_budget)
+            {
+                Ok(events) => events,
+                Err(error) => return sse_response(error_event(channel, error.to_string()), None),
+            };
+            if let Err(error) = self.event_journal.ingest(channel, events) {
+                return text_response(500, &format!("SSE event journal failure: {error}"));
+            }
+            let cursor = after_sequence.unwrap_or(previous_latest);
+            let page = self
+                .event_journal
+                .page_after(channel, cursor, MAX_SSE_EVENTS, raw_budget);
+            if !page.events.is_empty()
+                || page.replay_gap.is_some()
+                || wait.is_zero()
+                || Instant::now() >= deadline
+            {
+                break page;
+            }
+            thread::sleep(Duration::from_millis(2));
+        };
+        sse_response(encode_page(channel, &page), Some(&page))
+    }
+}
+
+fn serve_shared_connection<B>(
+    carrier: &Arc<SharedHttpCarrier<B>>,
+    mut stream: TcpStream,
+) -> io::Result<()>
+where
+    B: GatewayBackend,
+    B::Error: fmt::Display,
+{
+    stream.set_nonblocking(false)?;
+    stream.set_read_timeout(Some(carrier.read_timeout.min(SHUTDOWN_POLL_INTERVAL)))?;
+    stream.set_write_timeout(Some(MAX_HTTP_WRITE_TIMEOUT))?;
+    let response =
+        match read_request_until(&mut stream, Some(&carrier.shutdown), carrier.read_timeout) {
+            Ok(request) => carrier.handle_request(request),
+            Err(ReadRequestError::Cancelled) => return Ok(()),
+            Err(ReadRequestError::Parse(error)) => parse_error_response(error),
+            Err(ReadRequestError::Io(error)) => return Err(error),
+        };
+    stream.write_all(&response.to_bytes())?;
+    stream.flush()?;
+    let _ = stream.shutdown(Shutdown::Both);
+    Ok(())
+}
+
+struct SharedHttpCarrier<B> {
+    backend: Mutex<B>,
+    event_journal: Mutex<EventJournal>,
+    read_timeout: Duration,
+    shutdown: ShutdownToken,
+}
+
+impl<B> SharedHttpCarrier<B>
+where
+    B: GatewayBackend,
+    B::Error: fmt::Display,
+{
+    fn handle_request(&self, request: HttpRequest) -> HttpResponse {
+        let path = request
+            .path()
+            .split_once('?')
+            .map_or(request.path(), |(path, _)| path);
+        match request.method() {
+            "GET" if path == "/" => web_asset_response("/index.html"),
+            "GET" if embedded_web_asset(path).is_some() => web_asset_response(path),
+            "GET" if path == "/plugins/events" => static_plugin_events_response(),
+            "GET" if api_path_matches(path, EVENTS_MUX_METHOD) => {
+                self.handle_events(EventChannel::Mux, &request)
+            }
+            "GET" if api_path_matches(path, EVENTS_HOST_METHOD) => {
+                self.handle_events(EventChannel::Host, &request)
+            }
+            "POST" => {
+                if api_path_matches(path, "respond") {
+                    return self.handle_response(request);
+                }
+                let Some(method) = unary_method(path) else {
+                    return text_response(404, "not found");
+                };
+                self.handle_unary(request, method)
+            }
+            _ => text_response(404, "not found"),
+        }
+    }
+
+    fn handle_response(&self, request: HttpRequest) -> HttpResponse {
+        if !has_json_content_type(&request) {
+            return text_response(415, "content type must be application/json");
+        }
+        let value = match serde_json::from_slice::<Value>(request.body()) {
+            Ok(value) => value,
+            Err(_) => return text_response(400, "body is not JSON"),
+        };
+        let response = match serde_json::from_value::<ClientResponse>(value) {
+            Ok(response) => response,
+            Err(_) => {
+                return response_from_value(json!({
+                    "accepted": false,
+                    "reason": "bad-response",
+                }));
+            }
+        };
+        let mut backend = lock_unpoisoned(&self.backend);
+        backend.refresh();
+        match backend.respond(&response) {
+            Ok(receipt) => response_from_value(receipt),
+            Err(error) => text_response(500, &format!("gateway response failure: {error}")),
+        }
+    }
+
+    fn handle_unary(&self, request: HttpRequest, method: &str) -> HttpResponse {
+        if !has_json_content_type(&request) {
+            return text_response(415, "content type must be application/json");
+        }
+        let value = match serde_json::from_slice::<Value>(request.body()) {
+            Ok(value) => value,
+            Err(_) => return text_response(400, "body is not JSON"),
+        };
+        let client_request = match serde_json::from_value::<ClientRequest>(value.clone()) {
+            Ok(request) => request,
+            Err(error) => {
+                return response_from_message(bad_request_response(
+                    salvaged_rpc_id(&value),
+                    error.to_string(),
+                ));
+            }
+        };
+        if client_request.method() != method {
+            return response_from_message(bad_request_response(
+                client_request.rpc_id().clone(),
+                format!(
+                    "method `{}` does not match path `{method}`",
+                    client_request.method()
+                ),
+            ));
+        }
+        let mut backend = lock_unpoisoned(&self.backend);
+        backend.refresh();
+        match backend.dispatch(&client_request) {
+            Ok(response) => response_from_message(RpcMessage::ServerResponse(response)),
+            Err(error) => text_response(500, &format!("gateway handler failure: {error}")),
+        }
+    }
+
+    fn handle_events(&self, channel: EventChannel, request: &HttpRequest) -> HttpResponse {
+        let after_sequence = match event_cursor(request) {
+            Ok(cursor) => cursor,
+            Err(message) => return text_response(400, &message),
+        };
+        if let Some(cursor) = after_sequence
+            && cursor > lock_unpoisoned(&self.event_journal).latest_sequence(channel)
         {
-            Ok(events) => encode_events(&events),
-            Err(error) => error_event(channel, error.to_string()),
+            return text_response(400, "event cursor is ahead of the latest retained event");
+        }
+        let raw_budget = MAX_SSE_RESPONSE_BYTES
+            .saturating_sub(SSE_STATIC_OVERHEAD_BYTES)
+            .saturating_sub(MAX_SSE_EVENTS * 32)
+            .saturating_sub(SSE_GAP_RESERVE_BYTES);
+        let wait = match query_u64(request.path(), "waitMs") {
+            Ok(Some(value)) => Duration::from_millis(value).min(MAX_SSE_LONG_POLL),
+            Ok(None) => Duration::ZERO,
+            Err(message) => return text_response(400, &message),
         };
-        let body = match body {
-            Ok(body) => body,
-            Err(error) => return text_response(500, &format!("SSE carrier failure: {error}")),
+        let deadline = Instant::now() + wait;
+        let page = loop {
+            // Serialize the cursor snapshot, backend drain, and journal
+            // ingest. Without this, two initial subscribers can both observe
+            // the same previous cursor and replay each other's batch.
+            let mut journal = lock_unpoisoned(&self.event_journal);
+            let previous_latest = journal.latest_sequence(channel);
+            let events = {
+                let mut backend = lock_unpoisoned(&self.backend);
+                backend.refresh();
+                match backend.take_events(channel, MAX_SSE_EVENTS, raw_budget) {
+                    Ok(events) => events,
+                    Err(error) => {
+                        return sse_response(error_event(channel, error.to_string()), None);
+                    }
+                }
+            };
+            if let Err(error) = journal.ingest(channel, events) {
+                return text_response(500, &format!("SSE event journal failure: {error}"));
+            }
+            let cursor = after_sequence.unwrap_or(previous_latest);
+            let page = journal.page_after(channel, cursor, MAX_SSE_EVENTS, raw_budget);
+            if !page.events.is_empty()
+                || page.replay_gap.is_some()
+                || wait.is_zero()
+                || Instant::now() >= deadline
+            {
+                break page;
+            }
+            thread::sleep(Duration::from_millis(2));
         };
-        response(
-            200,
-            "OK",
-            vec![
-                ("Content-Type".to_string(), "text/event-stream".to_string()),
-                ("Cache-Control".to_string(), "no-cache".to_string()),
-                ("X-Content-Type-Options".to_string(), "nosniff".to_string()),
-            ],
-            body,
-        )
+        sse_response(encode_page(channel, &page), Some(&page))
+    }
+}
+
+fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn sse_response(
+    body: Result<Vec<u8>, crate::GatewayError>,
+    page: Option<&crate::events::ReplayPage>,
+) -> HttpResponse {
+    let body = match body {
+        Ok(body) => body,
+        Err(error) => return text_response(500, &format!("SSE carrier failure: {error}")),
+    };
+    let mut headers = vec![
+        ("Content-Type".to_string(), "text/event-stream".to_string()),
+        ("Cache-Control".to_string(), "no-cache".to_string()),
+        ("X-Content-Type-Options".to_string(), "nosniff".to_string()),
+        ("X-Accel-Buffering".to_string(), "no".to_string()),
+    ];
+    if let Some(page) = page {
+        headers.push((
+            "X-Yunxi-Event-After".to_string(),
+            page.after_sequence.to_string(),
+        ));
+        headers.push((
+            "X-Yunxi-Event-Oldest".to_string(),
+            page.oldest_sequence.to_string(),
+        ));
+        headers.push((
+            "X-Yunxi-Event-Latest".to_string(),
+            page.latest_sequence.to_string(),
+        ));
+        if page.replay_gap.is_some() {
+            headers.push(("X-Yunxi-Replay-Gap".to_string(), "true".to_string()));
+        }
+        headers.push((
+            "X-Yunxi-Event-Has-More".to_string(),
+            page.has_more.to_string(),
+        ));
+    }
+    response(200, "OK", headers, body)
+}
+
+fn reap_finished_workers(workers: &mut Vec<thread::JoinHandle<io::Result<()>>>) {
+    let mut index = 0;
+    while index < workers.len() {
+        if workers[index].is_finished() {
+            let worker = workers.swap_remove(index);
+            let _ = worker.join();
+        } else {
+            index += 1;
+        }
     }
 }
 
@@ -448,12 +791,30 @@ fn unary_method(path: &str) -> Option<&'static str> {
         HEALTH_STATUS_METHOD => Some(HEALTH_STATUS_METHOD),
         HOST_DESCRIBE_METHOD => Some(HOST_DESCRIBE_METHOD),
         LLM_PROVIDERS_METHOD => Some(LLM_PROVIDERS_METHOD),
+        MAILBOX_GET_METHOD => Some(MAILBOX_GET_METHOD),
+        MAILBOX_LIST_METHOD => Some(MAILBOX_LIST_METHOD),
+        MAILBOX_MARK_READ_METHOD => Some(MAILBOX_MARK_READ_METHOD),
+        MEMORY_LIST_METHOD => Some(MEMORY_LIST_METHOD),
+        MEMORY_SHOW_METHOD => Some(MEMORY_SHOW_METHOD),
+        MEMORY_STATUS_METHOD => Some(MEMORY_STATUS_METHOD),
+        PERSONA_LIST_METHOD => Some(PERSONA_LIST_METHOD),
+        PERSONA_PROFILE_METHOD => Some(PERSONA_PROFILE_METHOD),
+        PERSONA_STATUS_METHOD => Some(PERSONA_STATUS_METHOD),
         PLUGIN_INVENTORY_LIST_METHOD => Some(PLUGIN_INVENTORY_LIST_METHOD),
+        RELATIONSHIP_LIST_METHOD => Some(RELATIONSHIP_LIST_METHOD),
+        RELATIONSHIP_STATUS_METHOD => Some(RELATIONSHIP_STATUS_METHOD),
         SESSION_CREATE_METHOD => Some(SESSION_CREATE_METHOD),
+        SESSION_CANCEL_METHOD => Some(SESSION_CANCEL_METHOD),
         SESSION_HISTORY_METHOD => Some(SESSION_HISTORY_METHOD),
         SESSION_LIST_METHOD => Some(SESSION_LIST_METHOD),
         SESSION_MODELS_METHOD => Some(SESSION_MODELS_METHOD),
         SESSION_PROMPT_METHOD => Some(SESSION_PROMPT_METHOD),
+        SESSION_SEARCH_METHOD => Some(SESSION_SEARCH_METHOD),
+        SESSION_RENAME_METHOD => Some(SESSION_RENAME_METHOD),
+        SESSION_FORK_METHOD => Some(SESSION_FORK_METHOD),
+        SESSION_SELECT_MODEL_METHOD => Some(SESSION_SELECT_MODEL_METHOD),
+        SESSION_UPDATE_QUEUE_METHOD => Some(SESSION_UPDATE_QUEUE_METHOD),
+        SESSION_ATTACHMENT_METHOD => Some(SESSION_ATTACHMENT_METHOD),
         SETTINGS_DESCRIBE_METHOD => Some(SETTINGS_DESCRIBE_METHOD),
         SETTINGS_MUTATE_METHOD => Some(SETTINGS_MUTATE_METHOD),
         SETTINGS_REPLACE_METHOD => Some(SETTINGS_REPLACE_METHOD),
@@ -461,6 +822,32 @@ fn unary_method(path: &str) -> Option<&'static str> {
         SKILL_LIST_METHOD => Some(SKILL_LIST_METHOD),
         SUBAGENT_HISTORY_METHOD => Some(SUBAGENT_HISTORY_METHOD),
         SUBAGENT_LIST_METHOD => Some(SUBAGENT_LIST_METHOD),
+        SUBAGENT_PROMPT_METHOD => Some(SUBAGENT_PROMPT_METHOD),
+        SUBAGENT_INTERRUPT_METHOD => Some(SUBAGENT_INTERRUPT_METHOD),
+        VOICE_CANCEL_METHOD => Some(VOICE_CANCEL_METHOD),
+        VOICE_CHAT_METHOD => Some(VOICE_CHAT_METHOD),
+        VOICE_DEVICES_METHOD => Some(VOICE_DEVICES_METHOD),
+        VOICE_DOCTOR_METHOD => Some(VOICE_DOCTOR_METHOD),
+        VOICE_PLAYBACK_METHOD => Some(VOICE_PLAYBACK_METHOD),
+        VOICE_SAVE_METHOD => Some(VOICE_SAVE_METHOD),
+        VOICE_SPEAK_METHOD => Some(VOICE_SPEAK_METHOD),
+        VOICE_TALK_METHOD => Some(VOICE_TALK_METHOD),
+        VOICE_TRANSCRIBE_METHOD => Some(VOICE_TRANSCRIBE_METHOD),
+        WEIXIN_CONTROL_METHOD => Some(WEIXIN_CONTROL_METHOD),
+        WEIXIN_DOCTOR_METHOD => Some(WEIXIN_DOCTOR_METHOD),
+        WEIXIN_LOGIN_METHOD => Some(WEIXIN_LOGIN_METHOD),
+        WEIXIN_LOGOUT_METHOD => Some(WEIXIN_LOGOUT_METHOD),
+        WEIXIN_PAIR_METHOD => Some(WEIXIN_PAIR_METHOD),
+        WEIXIN_POLL_LOGIN_METHOD => Some(WEIXIN_POLL_LOGIN_METHOD),
+        WEIXIN_QUEUED_METHOD => Some(WEIXIN_QUEUED_METHOD),
+        WEIXIN_REPLY_METHOD => Some(WEIXIN_REPLY_METHOD),
+        WEIXIN_SEND_METHOD => Some(WEIXIN_SEND_METHOD),
+        WEIXIN_SERVE_METHOD => Some(WEIXIN_SERVE_METHOD),
+        WEIXIN_SERVE_START_METHOD => Some(WEIXIN_SERVE_START_METHOD),
+        WEIXIN_SERVE_STATUS_METHOD => Some(WEIXIN_SERVE_STATUS_METHOD),
+        WEIXIN_SERVE_STOP_METHOD => Some(WEIXIN_SERVE_STOP_METHOD),
+        WEIXIN_SESSION_METHOD => Some(WEIXIN_SESSION_METHOD),
+        WEIXIN_STATUS_METHOD => Some(WEIXIN_STATUS_METHOD),
         WORKSPACE_LIST_METHOD => Some(WORKSPACE_LIST_METHOD),
         _ => None,
     }
@@ -476,6 +863,49 @@ fn has_json_content_type(request: &HttpRequest) -> bool {
 
 fn api_path_matches(path: &str, method: &str) -> bool {
     path.strip_prefix("/api/") == Some(method)
+}
+
+fn event_cursor(request: &HttpRequest) -> Result<Option<u64>, String> {
+    let header_cursor = request
+        .header("last-event-id")
+        .filter(|value| !value.is_empty())
+        .map(parse_event_cursor)
+        .transpose()?;
+    let query_cursor = query_u64(request.path(), "afterSeq")?;
+    match (header_cursor, query_cursor) {
+        (Some(header), Some(query)) if header != query => {
+            Err("Last-Event-ID and afterSeq must identify the same event cursor".to_string())
+        }
+        (Some(header), _) => Ok(Some(header)),
+        (_, Some(query)) => Ok(Some(query)),
+        (None, None) => Ok(None),
+    }
+}
+
+fn query_u64(path: &str, wanted_name: &str) -> Result<Option<u64>, String> {
+    let Some((_, query)) = path.split_once('?') else {
+        return Ok(None);
+    };
+    let mut value = None;
+    for pair in query.split('&').filter(|pair| !pair.is_empty()) {
+        let Some((name, candidate)) = pair.split_once('=') else {
+            return Err("query parameters must use name=value form".to_string());
+        };
+        if name != wanted_name {
+            continue;
+        }
+        if value.is_some() {
+            return Err(format!("{wanted_name} must appear at most once"));
+        }
+        value = Some(parse_event_cursor(candidate)?);
+    }
+    Ok(value)
+}
+
+fn parse_event_cursor(value: &str) -> Result<u64, String> {
+    value
+        .parse::<u64>()
+        .map_err(|_| "event cursor must be a non-negative integer".to_string())
 }
 
 fn parse_request(bytes: &[u8]) -> Result<HttpRequest, HttpParseError> {
@@ -563,15 +993,24 @@ fn parse_request(bytes: &[u8]) -> Result<HttpRequest, HttpParseError> {
     }
     HttpRequest::new(
         parts[0],
-        parts[1].split_once('?').map_or(parts[1], |(path, _)| path),
+        parts[1],
         headers,
         bytes[body_start..body_end].to_vec(),
     )
 }
 
 fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, ReadRequestError> {
+    read_request_until(stream, None, Duration::MAX)
+}
+
+fn read_request_until(
+    stream: &mut TcpStream,
+    shutdown: Option<&ShutdownToken>,
+    read_timeout: Duration,
+) -> Result<HttpRequest, ReadRequestError> {
     let mut bytes = Vec::new();
     let mut buffer = [0u8; 4096];
+    let deadline = (read_timeout != Duration::MAX).then(|| Instant::now() + read_timeout);
     loop {
         match parse_request(&bytes) {
             Ok(request) => return Ok(request),
@@ -584,7 +1023,23 @@ fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, ReadRequestError>
                 maximum: MAX_HTTP_HEADER_BYTES + MAX_HTTP_BODY_BYTES + 4,
             }));
         }
-        let read = stream.read(&mut buffer).map_err(ReadRequestError::Io)?;
+        let read = match stream.read(&mut buffer) {
+            Ok(read) => read,
+            Err(error)
+                if error.kind() == io::ErrorKind::TimedOut
+                    || error.kind() == io::ErrorKind::WouldBlock =>
+            {
+                if shutdown.is_some_and(ShutdownToken::is_shutdown) {
+                    return Err(ReadRequestError::Cancelled);
+                }
+                if shutdown.is_none() || deadline.is_some_and(|deadline| Instant::now() >= deadline)
+                {
+                    return Err(ReadRequestError::Io(error));
+                }
+                continue;
+            }
+            Err(error) => return Err(ReadRequestError::Io(error)),
+        };
         if read == 0 {
             return Err(ReadRequestError::Parse(HttpParseError::Incomplete));
         }
@@ -595,6 +1050,7 @@ fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, ReadRequestError>
 enum ReadRequestError {
     Parse(HttpParseError),
     Io(io::Error),
+    Cancelled,
 }
 
 fn parse_error_response(error: HttpParseError) -> HttpResponse {
@@ -662,7 +1118,11 @@ fn response_from_value(value: Value) -> HttpResponse {
 
 fn text_response(status: u16, text: &str) -> HttpResponse {
     let (status, reason) = status_reason(status);
-    let body = text.as_bytes().to_vec();
+    let body = if text.len() <= MAX_HTTP_RESPONSE_BYTES {
+        text.as_bytes().to_vec()
+    } else {
+        b"response too large".to_vec()
+    };
     response(
         status,
         reason,
@@ -697,6 +1157,7 @@ fn status_reason(status: u16) -> (u16, &'static str) {
         404 => (404, "Not Found"),
         413 => (413, "Payload Too Large"),
         415 => (415, "Unsupported Media Type"),
+        503 => (503, "Service Unavailable"),
         500 => (500, "Internal Server Error"),
         _ => (500, "Internal Server Error"),
     }

@@ -41,7 +41,12 @@ pub fn extract_and_store(
     }
 
     let store = MemoryStore::from_grant(request.grant())?;
-    let load = store.load();
+    let mut load = store.load();
+    if !store.enabled(&mut load.warnings) {
+        load.warnings
+            .push("memory is disabled by the user; no records were written".to_string());
+        return Ok(MemoryWriteResult::new(Vec::new(), load.warnings));
+    }
     let now = now_millis();
     let mut summaries = Vec::new();
     for candidate in deduplicate_candidates(detect_prompt_memories(request.prompt())) {

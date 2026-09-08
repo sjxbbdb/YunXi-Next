@@ -63,6 +63,7 @@ pub fn run_patch_plugin() -> Result<(), PatchPluginError> {
                     }
                 }
             }
+            HostMessage::Cancel { .. } => {}
             HostMessage::Shutdown => return Ok(()),
             HostMessage::Welcome { .. } => {
                 return Err(PatchPluginError::UnexpectedHostMessage(

@@ -66,6 +66,7 @@ pub fn run_context_plugin() -> Result<(), ContextPluginError> {
                     }
                 }
             }
+            HostMessage::Cancel { .. } => {}
             HostMessage::Shutdown => return Ok(()),
             HostMessage::Welcome { .. } => {
                 return Err(ContextPluginError::UnexpectedHostMessage(

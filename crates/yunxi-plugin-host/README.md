@@ -17,9 +17,16 @@ explicit `enable`, `restart`, or `manual_restart` call. Transport failures are
 marked synchronously; their recovery is deliberately performed by the next
 bounded `refresh()` so an invocation cannot enter a hidden restart loop.
 
-`disable` and the legacy `stop` method remove routes and stop the managed
-process. Manual enable/restart resets the retry budget. Sibling slots have
-independent supervisors and retry state.
+`disable` and the legacy `stop` method remove routes, stop the managed process,
+and revoke pending host-secret references. A failed generation is also removed
+from routing and its secret access is revoked before automatic recovery starts.
+Manual enable/restart resets the retry budget and grants access only after a
+new generation passes its handshake. Each process connection allows one
+invocation at a time (`MAX_CONCURRENT_INVOCATIONS_PER_PLUGIN == 1`); stream
+progress is bounded by the protocol event limit, and invocation wall-clock,
+read, write, and cumulative invocation output work is bounded by the resource
+policy. These are host-side
+cooperative limits, not CPU accounting or an OS sandbox.
 
 Host grouping is represented as optional protocol/runtime metadata. A group is
 a placement hint; the current kernel still supervises each plugin failure
@@ -80,7 +87,11 @@ when a configured directory disappears or is replaced, so dropping the manager
 cannot silently leak registrations. A missing root is reported as a bounded
 discovery failure with an empty package set; malformed siblings do not abort
 healthy packages. This remains package-based Rust executable loading, not an
-unsafe in-place `cdylib`/WASM loader or an OS resource sandbox.
+unsafe in-place `cdylib`/WASM loader or an OS resource sandbox. Discovery also
+records a filesystem snapshot of each executable and the host checks it again
+before a discovered launch, so ordinary same-manifest file replacement is not
+silently retained. This is an integrity-change detector, not a cryptographic
+signature or an OS resource sandbox.
 
 | Path | Responsibility |
 | --- | --- |

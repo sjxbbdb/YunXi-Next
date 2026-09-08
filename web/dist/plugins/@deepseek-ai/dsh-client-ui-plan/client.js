@@ -7,8 +7,8 @@ window.__ModuleLoader__.load({
 		let react_jsx_runtime = require("react/jsx-runtime");
 		let react = require("react");
 		let _deepseek_ai_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
-		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-9c80724d56484e56a43c2b8dbb125407\packages\client\ui-plan\src\client\PlanModeControl.module.css.mjs
-		const css = ".glUdja_wrap{align-items:center;gap:6px;display:inline-flex}.glUdja_chip{background:var(--dsw-alias-state-warn-tertiary);min-width:34px;color:var(--dsw-alias-state-warn-label);cursor:pointer;border:none;border-radius:999px;align-items:center;gap:4px;padding:2px 8px;font-size:13px;font-weight:500;line-height:20px;display:inline-flex}.glUdja_chip:hover:not(:disabled){color:var(--dsw-alias-state-warn-primary)}.glUdja_chip:focus-visible{outline:2px solid var(--dsw-alias-state-warn-label);outline-offset:2px}.glUdja_chip:disabled{opacity:.6;cursor:default}.glUdja_close{color:currentColor;align-items:center;display:inline-flex}.glUdja_error{color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:18px}";
+		//#region \0dsh-css:C:\Users\24763\AppData\Local\Temp\yunxi-next-dsh-fc075cf71c884b4081d88130d74886d7\packages\client\ui-plan\src\client\PlanModeControl.module.css.mjs
+		const css = ".Ln5bdq_wrap{align-items:center;gap:6px;display:inline-flex}.Ln5bdq_chip{background:var(--dsw-alias-state-warn-tertiary);min-width:34px;color:var(--dsw-alias-state-warn-label);cursor:pointer;border:none;border-radius:999px;align-items:center;gap:4px;padding:2px 8px;font-size:13px;font-weight:500;line-height:20px;display:inline-flex}.Ln5bdq_chip:hover:not(:disabled){color:var(--dsw-alias-state-warn-primary)}.Ln5bdq_chip:focus-visible{outline:2px solid var(--dsw-alias-state-warn-label);outline-offset:2px}.Ln5bdq_chip:disabled{opacity:.6;cursor:default}.Ln5bdq_close{color:currentColor;align-items:center;display:inline-flex}.Ln5bdq_error{color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:18px}";
 		const tagId = "@deepseek-ai/dsh-client-ui-plan/PlanModeControl.module.css";
 		if (typeof document !== "undefined" && document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]") === null) {
 			const tag = document.createElement("style");
@@ -18,10 +18,10 @@ window.__ModuleLoader__.load({
 			document.head.appendChild(tag);
 		}
 		var PlanModeControl_module_css_default = {
-			"chip": "glUdja_chip",
-			"close": "glUdja_close",
-			"error": "glUdja_error",
-			"wrap": "glUdja_wrap"
+			"chip": "Ln5bdq_chip",
+			"close": "Ln5bdq_close",
+			"error": "Ln5bdq_error",
+			"wrap": "Ln5bdq_wrap"
 		};
 		//#endregion
 		//#region lib/types/client/PlanModeControl.js

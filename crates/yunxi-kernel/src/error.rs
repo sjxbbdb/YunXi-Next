@@ -8,11 +8,33 @@ use crate::{PluginId, PluginState};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum KernelError {
     NotRunning,
-    DuplicatePlugin { id: PluginId },
-    UnknownPlugin { id: PluginId },
-    PluginBusy { id: PluginId, state: PluginState },
-    SupervisorThread { id: PluginId, message: String },
-    SupervisorUnavailable { id: PluginId },
+    DuplicatePlugin {
+        id: PluginId,
+    },
+    PluginLimit {
+        resource: &'static str,
+        limit: usize,
+    },
+    InvalidPluginCommand {
+        id: PluginId,
+        resource: &'static str,
+        limit: usize,
+        actual: usize,
+    },
+    UnknownPlugin {
+        id: PluginId,
+    },
+    PluginBusy {
+        id: PluginId,
+        state: PluginState,
+    },
+    SupervisorThread {
+        id: PluginId,
+        message: String,
+    },
+    SupervisorUnavailable {
+        id: PluginId,
+    },
 }
 
 impl fmt::Display for KernelError {
@@ -22,6 +44,18 @@ impl fmt::Display for KernelError {
             Self::DuplicatePlugin { id } => {
                 write!(formatter, "plugin `{id}` is already registered")
             }
+            Self::PluginLimit { resource, limit } => {
+                write!(formatter, "kernel {resource} limit reached ({limit})")
+            }
+            Self::InvalidPluginCommand {
+                id,
+                resource,
+                limit,
+                actual,
+            } => write!(
+                formatter,
+                "plugin `{id}` exceeds its {resource} limit ({actual} > {limit})"
+            ),
             Self::UnknownPlugin { id } => write!(formatter, "plugin `{id}` is not registered"),
             Self::PluginBusy { id, state } => {
                 write!(formatter, "plugin `{id}` cannot start while it is {state}")

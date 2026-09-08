@@ -5,8 +5,9 @@ use std::fmt;
 
 use serde_json::{Value, json};
 use yunxi_protocol::{
-    ChatMessage, MAX_TOOL_DEFINITIONS, McpToolDescriptor, SkillMetadata, SkillToolDescriptor,
-    ToolCall, ToolCatalog, ToolDefinition, ToolName, ToolProtocolError, ToolResultOutcome,
+    ChatMessage, GrantKind, MAX_TOOL_DEFINITIONS, McpToolDescriptor, SkillMetadata,
+    SkillToolDescriptor, ToolCall, ToolCatalog, ToolDefinition, ToolName, ToolProtocolError,
+    ToolResultOutcome,
 };
 
 pub(crate) const SHELL_TOOL_NAME: &str = "shell.execute";
@@ -45,6 +46,7 @@ pub(crate) enum ToolAction {
         task: String,
         name: Option<String>,
         parent_id: Option<String>,
+        requested_grants: Vec<GrantKind>,
     },
     AgentList,
     AgentMessage {
@@ -85,13 +87,19 @@ impl ToolAction {
                 task,
                 name,
                 parent_id,
+                requested_grants,
             } => format!(
-                "task: {} bytes | name: {} | parent: {}",
+                "task: {} bytes | name: {} | parent: {} | grants: {}",
                 task.len(),
                 name.as_deref().unwrap_or("automatic"),
                 parent_id
                     .as_deref()
-                    .unwrap_or(yunxi_protocol::ROOT_AGENT_ID)
+                    .unwrap_or(yunxi_protocol::ROOT_AGENT_ID),
+                requested_grants
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(","),
             ),
             Self::AgentList => "list delegated agents".to_string(),
             Self::AgentMessage { agent_id, message } => {
@@ -186,12 +194,15 @@ pub(crate) struct SkillToolBinding {
     remote_name: String,
     description: String,
     input_schema: Value,
+    executable: bool,
+    requires_workspace_write: bool,
 }
 
 impl SkillToolBinding {
     pub(crate) fn from_descriptor(
         skill: &SkillMetadata,
         descriptor: &SkillToolDescriptor,
+        action_requires_workspace_write: Option<bool>,
     ) -> Result<Self, ToolCallError> {
         let model_name = ToolName::new(format!("skill.{}.{}", skill.id(), descriptor.name()))
             .map_err(|error| ToolCallError::InvalidSkillToolName {
@@ -199,16 +210,28 @@ impl SkillToolBinding {
                 remote_name: descriptor.name().to_string(),
                 message: error.to_string(),
             })?;
+        let executable = action_requires_workspace_write.is_some();
+        let description = if executable {
+            format!(
+                "Skill `{}` approval-required executable action: {}",
+                skill.name(),
+                descriptor.description()
+            )
+        } else {
+            format!(
+                "Skill `{}` metadata declaration: {}",
+                skill.name(),
+                descriptor.description()
+            )
+        };
         let binding = Self {
             model_name,
             skill_id: skill.id().to_string(),
             remote_name: descriptor.name().to_string(),
-            description: format!(
-                "Skill `{}` metadata declaration: {}",
-                skill.name(),
-                descriptor.description()
-            ),
+            description,
             input_schema: descriptor.input_schema().clone(),
+            executable,
+            requires_workspace_write: action_requires_workspace_write.unwrap_or(false),
         };
         ToolDefinition::new(
             binding.model_name().clone(),
@@ -233,6 +256,14 @@ impl SkillToolBinding {
 
     pub(crate) fn remote_name(&self) -> &str {
         &self.remote_name
+    }
+
+    pub(crate) const fn executable(&self) -> bool {
+        self.executable
+    }
+
+    pub(crate) const fn requires_workspace_write(&self) -> bool {
+        self.requires_workspace_write
     }
 }
 
@@ -324,7 +355,16 @@ pub(crate) fn catalog_with_skills(
                     "properties": {
                         "task": {"type": "string", "maxLength": yunxi_protocol::MAX_AGENT_MESSAGE_BYTES},
                         "name": {"type": "string", "maxLength": 64},
-                        "parent_id": {"type": "string", "maxLength": 128}
+                        "parent_id": {"type": "string", "maxLength": 128},
+                        "grants": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": ["workspace_read", "workspace_write"]
+                            },
+                            "maxItems": 2,
+                            "uniqueItems": true
+                        }
                     },
                     "required": ["task"],
                     "additionalProperties": false
@@ -422,6 +462,7 @@ pub(crate) fn decode_call_with_skills(
             task: required_text(object, "task", yunxi_protocol::MAX_AGENT_MESSAGE_BYTES)?,
             name: optional_text(object, "name", 64)?,
             parent_id: optional_text(object, "parent_id", 128)?,
+            requested_grants: optional_child_grants(object)?,
         }),
         AGENT_LIST_TOOL_NAME if multi_agent_enabled => Ok(ToolAction::AgentList),
         AGENT_MESSAGE_TOOL_NAME if multi_agent_enabled => Ok(ToolAction::AgentMessage {
@@ -491,6 +532,42 @@ fn optional_text(
         .transpose()
 }
 
+fn optional_child_grants(
+    object: &serde_json::Map<String, Value>,
+) -> Result<Vec<GrantKind>, ToolCallError> {
+    const MAX_CHILD_GRANTS: usize = 2;
+    let Some(value) = object.get("grants") else {
+        return Ok(Vec::new());
+    };
+    let values = value
+        .as_array()
+        .ok_or(ToolCallError::ArgumentMustBeArray { field: "grants" })?;
+    if values.len() > MAX_CHILD_GRANTS {
+        return Err(ToolCallError::TooManyChildGrants {
+            count: values.len(),
+            maximum: MAX_CHILD_GRANTS,
+        });
+    }
+    let mut grants = Vec::with_capacity(values.len());
+    for value in values {
+        let value = value
+            .as_str()
+            .ok_or(ToolCallError::ArgumentMustBeText { field: "grants" })?;
+        let grant = match value {
+            "workspace_read" => GrantKind::WorkspaceRead,
+            "workspace_write" => GrantKind::WorkspaceWrite,
+            _ => {
+                return Err(ToolCallError::UnsupportedChildGrant(value.to_string()));
+            }
+        };
+        if grants.contains(&grant) {
+            return Err(ToolCallError::DuplicateChildGrant(value.to_string()));
+        }
+        grants.push(grant);
+    }
+    Ok(grants)
+}
+
 pub(crate) fn tool_result_message(call: &ToolCall, outcome: &ToolResultOutcome) -> ChatMessage {
     let content = serde_json::to_string(outcome)
         .unwrap_or_else(|error| format!("{{\"status\":\"failed\",\"message\":\"{error}\"}}"));
@@ -541,6 +618,15 @@ pub(crate) enum ToolCallError {
         length: usize,
         maximum: usize,
     },
+    ArgumentMustBeArray {
+        field: &'static str,
+    },
+    TooManyChildGrants {
+        count: usize,
+        maximum: usize,
+    },
+    UnsupportedChildGrant(String),
+    DuplicateChildGrant(String),
     InvalidMcpToolName {
         remote_name: String,
         message: String,
@@ -584,6 +670,22 @@ impl fmt::Display for ToolCallError {
                 formatter,
                 "tool argument `{field}` is {length} bytes; maximum is {maximum}"
             ),
+            Self::ArgumentMustBeArray { field } => {
+                write!(formatter, "tool argument `{field}` must be an array")
+            }
+            Self::TooManyChildGrants { count, maximum } => write!(
+                formatter,
+                "child grant list contains {count} entries; maximum is {maximum}"
+            ),
+            Self::UnsupportedChildGrant(value) => {
+                write!(formatter, "unsupported child grant `{value}`")
+            }
+            Self::DuplicateChildGrant(value) => {
+                write!(
+                    formatter,
+                    "child grant `{value}` was requested more than once"
+                )
+            }
             Self::InvalidMcpToolName {
                 remote_name,
                 message,
@@ -720,11 +822,52 @@ mod tests {
                 task: "inspect tests".to_string(),
                 name: Some("tests".to_string()),
                 parent_id: None,
+                requested_grants: Vec::new(),
             }
         );
         assert!(matches!(
             decode_call_with_skills(&call, false, &[], &[]),
             Err(ToolCallError::UnsupportedTool(_))
+        ));
+    }
+
+    #[test]
+    fn agent_spawn_schema_and_parser_keep_child_grants_explicit() {
+        let catalog =
+            catalog_with_skills(false, false, false, true, &[], &[]).expect("agent catalog");
+        let schema = catalog
+            .tools()
+            .iter()
+            .find(|tool| tool.name().as_str() == AGENT_SPAWN_TOOL_NAME)
+            .expect("spawn definition")
+            .input_schema();
+        assert_eq!(schema["properties"]["grants"]["maxItems"], json!(2));
+
+        let call = ToolCall::new(
+            "agent-2",
+            AGENT_SPAWN_TOOL_NAME,
+            json!({"task": "read docs", "grants": ["workspace_read"]}),
+        )
+        .expect("agent call");
+        assert_eq!(
+            decode_call_with_skills(&call, true, &[], &[]).expect("decode grants"),
+            ToolAction::AgentSpawn {
+                task: "read docs".to_string(),
+                name: None,
+                parent_id: None,
+                requested_grants: vec![GrantKind::WorkspaceRead],
+            }
+        );
+
+        let duplicate = ToolCall::new(
+            "agent-3",
+            AGENT_SPAWN_TOOL_NAME,
+            json!({"task": "read docs", "grants": ["workspace_read", "workspace_read"]}),
+        )
+        .expect("wire-valid duplicate");
+        assert!(matches!(
+            decode_call_with_skills(&duplicate, true, &[], &[]),
+            Err(ToolCallError::DuplicateChildGrant(_))
         ));
     }
 
@@ -775,7 +918,7 @@ mod tests {
         )
         .expect("Skill metadata");
         let binding =
-            SkillToolBinding::from_descriptor(&skill, &descriptor).expect("Skill binding");
+            SkillToolBinding::from_descriptor(&skill, &descriptor, None).expect("Skill binding");
 
         let catalog = catalog_with_skills(
             false,
@@ -797,6 +940,32 @@ mod tests {
                 binding,
                 arguments: json!({}),
             }
+        );
+    }
+
+    #[test]
+    fn executable_skill_binding_keeps_its_approval_scope() {
+        let descriptor =
+            SkillToolDescriptor::new("fix", "Apply a bounded fix", json!({"type": "object"}))
+                .expect("Skill tool descriptor");
+        let skill = SkillMetadata::new(
+            "review",
+            "Code Review",
+            "Review source",
+            "review/SKILL.md",
+            32,
+            vec![descriptor.clone()],
+        )
+        .expect("Skill metadata");
+        let binding = SkillToolBinding::from_descriptor(&skill, &descriptor, Some(true))
+            .expect("executable Skill binding");
+
+        assert!(binding.executable());
+        assert!(binding.requires_workspace_write());
+        assert!(
+            binding
+                .description
+                .contains("approval-required executable action")
         );
     }
 }

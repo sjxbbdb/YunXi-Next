@@ -32,6 +32,7 @@ const NONCE_BYTES: usize = 12;
 
 #[derive(Clone, Debug)]
 pub struct MailboxStore {
+    workspace_root: PathBuf,
     root: PathBuf,
     writable: bool,
 }
@@ -107,9 +108,14 @@ impl MailboxStore {
             return Err(MailboxError::NotDirectory(workspace));
         }
         Ok(Self {
+            workspace_root: workspace.clone(),
             root: workspace.join(".yunxi-next").join("mailbox"),
             writable: grant.allows_next_write(),
         })
+    }
+
+    pub fn workspace_root(&self) -> &Path {
+        &self.workspace_root
     }
 
     pub fn enqueue(

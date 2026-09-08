@@ -2,13 +2,14 @@ use std::collections::VecDeque;
 
 use serde_json::json;
 use yunxi_agent_spine::{
-    Agent, AgentConfig, AgentError, AgentTurnOutcome, ApprovalAwareToolBroker, CancellationToken,
-    ConversationContextAssembler, ModelError, ModelProvider, ModelRequest, ToolApprovalPolicy,
-    ToolBroker, ToolDecision, ToolError, ToolRequest, TurnState,
+    Agent, AgentConfig, AgentError, AgentTurnOutcome, ApprovalAwareToolBroker,
+    BackpressureStrategy, CancellationToken, ConversationContextAssembler, EventChannel,
+    EventReceiveError, ModelError, ModelProvider, ModelRequest, SessionLimits, ToolApprovalPolicy,
+    ToolBroker, ToolDecision, ToolError, ToolRequest, TurnBudget, TurnState,
 };
 use yunxi_protocol::{
-    ChatResult, ToolApprovalDecision, ToolApprovalState, ToolCall, ToolCallId, ToolCatalog,
-    ToolDefinition, ToolName, ToolResultOutcome,
+    ChatResult, StreamEvent, ToolApprovalDecision, ToolApprovalState, ToolCall, ToolCallId,
+    ToolCatalog, ToolDefinition, ToolName, ToolResultOutcome,
 };
 
 struct Model {
@@ -151,6 +152,193 @@ fn matching_approval_executes_and_resumes_the_same_turn() {
 }
 
 #[test]
+fn approval_continuation_keeps_the_original_turn_deadline() {
+    let config = AgentConfig::new(TurnBudget::conservative(), SessionLimits::default())
+        .expect("config")
+        .with_turn_timeout(std::time::Duration::from_millis(10))
+        .expect("timeout");
+    let token = CancellationToken::new();
+    let mut agent = Agent::new(
+        "root",
+        Model::new([tool_response(), ChatResult::new("done", None)]),
+        ConversationContextAssembler,
+        Broker::echo(),
+        config,
+    )
+    .expect("agent");
+
+    let pending = agent
+        .run_text_turn_with_approval("run echo", &token)
+        .expect("approval request");
+    let request = pending.approval_request().expect("request").clone();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+
+    let error = agent
+        .approve_pending_tool(approval(&request), &token)
+        .expect_err("original deadline must apply");
+    assert!(error.is_timeout());
+    assert!(agent.pending_approval().is_none());
+    assert_eq!(agent.state(), yunxi_agent_spine::AgentState::Ready);
+    assert_eq!(
+        agent.last_turn().expect("snapshot").state(),
+        TurnState::Cancelled
+    );
+}
+
+#[test]
+fn streaming_approval_continuation_keeps_the_original_turn_deadline() {
+    let config = AgentConfig::new(TurnBudget::conservative(), SessionLimits::default())
+        .expect("config")
+        .with_turn_timeout(std::time::Duration::from_millis(10))
+        .expect("timeout");
+    let token = CancellationToken::new();
+    let mut agent = Agent::new(
+        "root",
+        Model::new([tool_response(), ChatResult::new("done", None)]),
+        ConversationContextAssembler,
+        Broker::echo(),
+        config,
+    )
+    .expect("agent");
+    let (mut sender, receiver) =
+        EventChannel::new(64, BackpressureStrategy::Block).expect("channel");
+
+    let pending = agent
+        .run_text_turn_with_approval_streaming("run echo", &token, &mut sender)
+        .expect("approval request");
+    let request = pending.approval_request().expect("request").clone();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+
+    let error = agent
+        .approve_pending_tool_streaming(approval(&request), &token, &mut sender)
+        .expect_err("original deadline must apply");
+    assert!(error.is_timeout());
+    assert!(agent.pending_approval().is_none());
+    assert_eq!(agent.state(), yunxi_agent_spine::AgentState::Ready);
+    assert!(
+        drain_events(&receiver)
+            .iter()
+            .any(|event| matches!(event, StreamEvent::TurnDone { response: None, .. }))
+    );
+}
+
+#[test]
+fn streaming_pending_approval_can_be_cancelled_with_terminal_events() {
+    let mut agent = Agent::new(
+        "root",
+        Model::new([tool_response(), ChatResult::new("done", None)]),
+        ConversationContextAssembler,
+        Broker::echo(),
+        AgentConfig::default(),
+    )
+    .expect("agent");
+    let token = CancellationToken::new();
+    let (mut sender, receiver) =
+        EventChannel::new(64, BackpressureStrategy::Block).expect("channel");
+    agent
+        .run_text_turn_with_approval_streaming("run echo", &token, &mut sender)
+        .expect("approval request");
+
+    agent
+        .cancel_pending_turn_streaming("user stopped", &mut sender)
+        .expect("cancel pending turn");
+    assert!(agent.pending_approval().is_none());
+    assert_eq!(agent.state(), yunxi_agent_spine::AgentState::Ready);
+    assert!(agent.tools_mut().calls.is_empty());
+    let events = drain_events(&receiver);
+    assert!(events.iter().any(|event| matches!(
+        event,
+        StreamEvent::TurnState {
+            state: yunxi_protocol::StreamTurnState::Cancelled,
+            ..
+        }
+    )));
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, StreamEvent::TurnDone { response: None, .. }))
+    );
+}
+
+#[test]
+fn streaming_approval_pauses_without_execution_and_resumes_with_continuous_sequences() {
+    let mut agent = Agent::new(
+        "root",
+        Model::new([tool_response(), ChatResult::new("done", None)]),
+        ConversationContextAssembler,
+        Broker::echo(),
+        AgentConfig::default(),
+    )
+    .expect("agent");
+    let token = CancellationToken::new();
+    let (mut sender, receiver) =
+        EventChannel::new(64, BackpressureStrategy::Block).expect("bounded event channel");
+
+    let pending = agent
+        .run_text_turn_with_approval_streaming("run echo", &token, &mut sender)
+        .expect("stream pauses for approval");
+    let request = pending
+        .approval_request()
+        .expect("pending approval")
+        .clone();
+    assert_eq!(
+        agent.state(),
+        yunxi_agent_spine::AgentState::AwaitingApproval
+    );
+    assert!(agent.tools_mut().calls.is_empty());
+
+    let before_approval = drain_events(&receiver);
+    assert!(before_approval.iter().any(|event| matches!(
+        event,
+        StreamEvent::TurnState {
+            state: yunxi_protocol::StreamTurnState::AwaitingApproval,
+            ..
+        }
+    )));
+    assert!(
+        !before_approval
+            .iter()
+            .any(|event| matches!(event, StreamEvent::ToolResult { .. }))
+    );
+
+    let completed = agent
+        .approve_pending_tool_streaming(approval(&request), &token, &mut sender)
+        .expect("approved stream completes");
+    assert_eq!(
+        completed.completed().expect("completed result").content(),
+        "done"
+    );
+    assert_eq!(agent.tools_mut().calls, vec!["echo"]);
+
+    let after_approval = drain_events(&receiver);
+    drop(sender);
+    assert!(
+        after_approval
+            .iter()
+            .any(|event| matches!(event, StreamEvent::ToolResult { .. }))
+    );
+    assert!(after_approval.iter().any(|event| matches!(
+        event,
+        StreamEvent::TurnDone {
+            response: Some(_),
+            ..
+        }
+    )));
+
+    let all_events = before_approval
+        .iter()
+        .chain(after_approval.iter())
+        .collect::<Vec<_>>();
+    assert!(
+        all_events
+            .windows(2)
+            .all(|pair| pair[0].sequence() < pair[1].sequence())
+    );
+    assert!(agent.pending_approval().is_none());
+    assert_eq!(agent.state(), yunxi_agent_spine::AgentState::Ready);
+}
+
+#[test]
 fn denial_is_model_visible_and_does_not_execute_the_tool() {
     let mut agent = Agent::new(
         "root",
@@ -264,5 +452,19 @@ struct AllowPolicy;
 impl ToolApprovalPolicy for AllowPolicy {
     fn decide(&mut self, _request: &ToolRequest<'_>) -> Result<ToolDecision, ToolError> {
         Ok(ToolDecision::Execute)
+    }
+}
+
+fn drain_events(
+    receiver: &yunxi_agent_spine::EventReceiver,
+) -> Vec<yunxi_protocol::AgentStreamEvent> {
+    let mut events = Vec::new();
+    loop {
+        match receiver.try_recv() {
+            Ok(event) => events.push(event),
+            Err(EventReceiveError::Empty) => return events,
+            Err(EventReceiveError::Closed) => return events,
+            Err(EventReceiveError::Timeout) => unreachable!("try_recv cannot time out"),
+        }
     }
 }

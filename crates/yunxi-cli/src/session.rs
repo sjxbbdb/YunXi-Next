@@ -1,12 +1,21 @@
 //! Multi-plugin host orchestration and chat request assembly.
 
+mod auxiliary;
+mod child_agent;
 mod cordis;
 mod multi_agent;
 mod plugin_policy;
+mod scheduler;
 mod spine_adapter;
 mod spine_runtime;
 mod stateful;
 mod tool_loop;
+
+pub(crate) use auxiliary::{
+    CompanionPluginHost, MemoryPluginHost, PersonaPluginHost, StoragePluginHost, VoicePluginHost,
+    WeixinPluginHost,
+};
+pub(crate) use multi_agent::WebAgentTask;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
@@ -17,6 +26,8 @@ use std::path::Component;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::voice_runtime;
+use yunxi_agent_spine::{CancellationToken, EventSink, EventSinkError};
 use yunxi_companion::COMPANION_PLUGIN_ID;
 use yunxi_companion_mailbox::MAILBOX_PLUGIN_ID;
 use yunxi_composition::{
@@ -25,14 +36,14 @@ use yunxi_composition::{
     PluginRole, Profile,
 };
 use yunxi_context::CONTEXT_PLUGIN_ID;
-use yunxi_cordis_runtime::RuntimeError;
+use yunxi_cordis_runtime::{RuntimeError, RuntimeEventPage};
 use yunxi_kernel::{PluginCommand, PluginId, PluginIdError};
-use yunxi_memory::MEMORY_PLUGIN_ID;
+use yunxi_memory::{MEMORY_PLUGIN_ID, MemoryListResult, MemoryRecordSummary, MemoryStatusReport};
 use yunxi_model_openai::{MODEL_PLUGIN_ID, ProviderConfig, ProviderConfigError};
 use yunxi_multi_agent::MULTI_AGENT_PLUGIN_ID;
-use yunxi_persona::PERSONA_PLUGIN_ID;
+use yunxi_persona::{PERSONA_PLUGIN_ID, PersonaProfileSummary, PersonaStatus};
 use yunxi_plugin_host::{
-    CatalogError, PluginCallError, PluginDirectory, PluginDiscoveryManager,
+    CatalogError, HostSecretBroker, PluginCallError, PluginDirectory, PluginDiscoveryManager,
     PluginDiscoveryManagerError, PluginHostError, PluginLaunch, PluginReloadReport,
     ProcessPluginHost,
 };
@@ -40,11 +51,17 @@ use yunxi_protocol::{
     ActionGrant, COMPANION_DECIDE_OPERATION, CONTEXT_COMPOSE_OPERATION, CapabilityDescriptor,
     CapabilityError, ChatMessage, ChatRequest, ChatResult, CompanionDecisionRequest,
     CompanionDecisionResult, ContextComposeRequest, ContextComposeResult, GrantKind,
-    MEMORY_RECALL_OPERATION, MODEL_CHAT_COMPLETE_OPERATION, MemoryContextRecord,
-    MemoryRecallRequest, MemoryRecallResult, NetworkGrant, NetworkScope,
-    PERSONA_CONTEXT_COMPILE_OPERATION, PersonaContextRequest, PersonaContextResult, SecretGrant,
-    SkillContextRequest, SkillContextResult, SkillListRequest, SkillListResult,
-    ToolApprovalRequest, ToolCall, ToolCallBatch, ToolLoopPolicy, ToolResultOutcome, capabilities,
+    MAX_STREAM_EVENTS_PER_TURN, MAX_STREAM_TEXT_BYTES, MEMORY_MANAGEMENT_LIST_OPERATION,
+    MEMORY_MANAGEMENT_SHOW_OPERATION, MEMORY_MANAGEMENT_STATUS_OPERATION, MEMORY_RECALL_OPERATION,
+    MODEL_CHAT_COMPLETE_OPERATION, MemoryContextRecord, MemoryListRequest, MemoryRecallRequest,
+    MemoryRecallResult, MemoryShowRequest, MemoryStatusRequest, NetworkGrant, NetworkScope,
+    PERSONA_CONTEXT_COMPILE_OPERATION, PERSONA_MANAGEMENT_LIST_OPERATION,
+    PERSONA_MANAGEMENT_PROFILE_OPERATION, PERSONA_MANAGEMENT_STATUS_OPERATION,
+    PersonaContextRequest, PersonaContextResult, PersonaListRequest, PersonaProfileRequest,
+    PersonaStatusRequest, SecretGrant, SkillActionRequest, SkillContextRequest, SkillContextResult,
+    SkillListRequest, SkillListResult, StreamError, StreamEvent, StreamTurnState,
+    ToolApprovalRequest, ToolCall, ToolCallBatch, ToolLoopPolicy, ToolResultOutcome,
+    WorkspaceGrant, capabilities,
 };
 use yunxi_scheduler::SCHEDULER_PLUGIN_ID;
 use yunxi_settings::{CapabilitySettingsStore, next_state_root};
@@ -56,11 +73,18 @@ use yunxi_tool_mcp::{
 };
 use yunxi_tool_patch::PATCH_PLUGIN_ID;
 use yunxi_tool_shell::SHELL_PLUGIN_ID;
-use yunxi_tool_skills::{SKILLS_DISABLED_ENV, SKILLS_MODE_ENV, SKILLS_PLUGIN_ID, SKILLS_ROOT_ENV};
+use yunxi_tool_skills::{
+    SKILLS_DISABLED_ENV, SKILLS_MODE_ENV, SKILLS_PLUGIN_ID, SKILLS_ROOT_ENV, SkillActionError,
+    SkillActionExecutor, SkillsConfig,
+};
 use yunxi_voice::VOICE_FIXTURE_PLUGIN_ID;
 use yunxi_web_gateway::{GatewayProjection, GatewayStatus};
-use yunxi_weixin::WEIXIN_PLUGIN_ID;
+use yunxi_weixin::{
+    WEIXIN_ACCOUNT_ENV, WEIXIN_MASTER_KEY_ENV, WEIXIN_MASTER_KEY_HEX_ENV, WEIXIN_MODE_ENV,
+    WEIXIN_PLUGIN_ID, WEIXIN_SECRET_STORE_ENV, WEIXIN_TOKEN_REF_ENV, WeixinPluginResponse,
+};
 
+use crate::args::{ApprovalMode, SandboxMode, SessionOptions};
 use crate::{
     INTERNAL_COMPANION_PLUGIN_ARGUMENT, INTERNAL_CONTEXT_PLUGIN_ARGUMENT,
     INTERNAL_FILES_PLUGIN_ARGUMENT, INTERNAL_MAILBOX_PLUGIN_ARGUMENT, INTERNAL_MCP_PLUGIN_ARGUMENT,
@@ -75,6 +99,7 @@ use crate::{
 
 use cordis::CordisBridge;
 use plugin_policy::PluginSwitches;
+use scheduler::HostScheduler;
 use spine_adapter::ProcessPluginHostHandle;
 use spine_runtime::{SpineController, SpineRuntimeConfig};
 
@@ -88,6 +113,9 @@ const RESPONSE_TIMEOUT_MARGIN: Duration = Duration::from_secs(5);
 pub(crate) const DYNAMIC_PLUGIN_DIRECTORY_ENV: &str = "YUNXI_NEXT_PLUGIN_DIR";
 const DYNAMIC_PLUGIN_DIRECTORY_ALIAS_ENV: &str = "YUNXI_NEXT_PLUGIN_DIRECTORY";
 const DYNAMIC_PLUGIN_DIRECTORY_NAME: &str = "plugins";
+const HOST_SECRET_STORE_ENV: &str = "YUNXI_NEXT_HOST_SECRET_STORE";
+const HOST_SECRET_KEY_HEX_ENV: &str = "YUNXI_NEXT_HOST_SECRET_KEY_HEX";
+const HOST_SECRET_STORE_FILE: &str = "host-secrets.bin";
 
 // A plugin process starts with a small launch environment.  Provider and MCP
 // credentials/configuration are copied only by their dedicated helpers below.
@@ -113,10 +141,6 @@ const MODEL_ENVIRONMENT: &[&str] = &[
     "YUNXI_PROVIDER_PROFILE",
     "YUNXI_PROVIDER_BASE_URL",
     "OPENAI_BASE_URL",
-    "YUNXI_PROVIDER_API_KEY",
-    "YUNXI_PROVIDER_API_KEY_ENV",
-    "DEEPSEEK_API_KEY",
-    "OPENAI_API_KEY",
     "YUNXI_AGENT_MODEL",
     "YUNXI_PROVIDER_TIMEOUT_MILLIS",
     "HTTP_PROXY",
@@ -152,6 +176,32 @@ const MCP_ENVIRONMENT: &[&str] = &[
     "SSL_CERT_DIR",
 ];
 
+const VOICE_ENVIRONMENT: &[&str] = &[
+    "YUNXI_VOICE_SIDECAR_PROGRAM",
+    "YUNXI_VOICE_SIDECAR_ARGS",
+    "YUNXI_VOICE_SIDECAR_MAX_FRAME_BYTES",
+    "YUNXI_VOICE_SIDECAR_TIMEOUT_MS",
+];
+
+const WEIXIN_ENVIRONMENT: &[&str] = &[
+    WEIXIN_MODE_ENV,
+    WEIXIN_ACCOUNT_ENV,
+    WEIXIN_MASTER_KEY_HEX_ENV,
+    WEIXIN_MASTER_KEY_ENV,
+    WEIXIN_SECRET_STORE_ENV,
+    WEIXIN_TOKEN_REF_ENV,
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "no_proxy",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+];
+
 const CONTEXT_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_CONTEXT_PLUGIN";
 const COMPANION_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_COMPANION_PLUGIN";
 const MAILBOX_PLUGIN_PATH_ENV: &str = "YUNXI_NEXT_MAILBOX_PLUGIN";
@@ -171,6 +221,22 @@ const AGENT_ENGINE_ENV: &str = "YUNXI_NEXT_AGENT_ENGINE";
 
 pub(crate) trait ChatBackend {
     fn complete(&mut self, messages: &[ChatMessage]) -> Result<String, ChatFailure>;
+    fn complete_streaming<S: EventSink>(
+        &mut self,
+        messages: &[ChatMessage],
+        cancellation: &CancellationToken,
+        sink: &mut S,
+    ) -> Result<String, ChatFailure> {
+        cancellation
+            .check()
+            .map_err(|error| ChatFailure::Unavailable(error.to_string()))?;
+        let reply = self.complete(messages)?;
+        cancellation
+            .check()
+            .map_err(|error| ChatFailure::Unavailable(error.to_string()))?;
+        let _ = sink;
+        Ok(reply)
+    }
     fn provider(&self) -> &str;
     fn model(&self) -> &str;
     fn status(&mut self) -> BackendStatus;
@@ -203,11 +269,17 @@ pub(crate) struct ChatSession {
     context_capability: Option<CapabilityDescriptor>,
     memory_capability: Option<CapabilityDescriptor>,
     memory_write_capability: Option<CapabilityDescriptor>,
+    memory_management_capability: Option<CapabilityDescriptor>,
     persona_capability: Option<CapabilityDescriptor>,
+    persona_management_capability: Option<CapabilityDescriptor>,
     companion_capability: Option<CapabilityDescriptor>,
     storage_capability: Option<CapabilityDescriptor>,
     mailbox_capability: Option<CapabilityDescriptor>,
+    voice_transcribe_capability: Option<CapabilityDescriptor>,
+    voice_synthesize_capability: Option<CapabilityDescriptor>,
+    weixin_capability: Option<CapabilityDescriptor>,
     scheduler_capability: Option<CapabilityDescriptor>,
+    scheduler_worker: Option<HostScheduler>,
     shell_capability: Option<CapabilityDescriptor>,
     patch_capability: Option<CapabilityDescriptor>,
     files_capability: Option<CapabilityDescriptor>,
@@ -218,6 +290,7 @@ pub(crate) struct ChatSession {
     skills_capability: Option<CapabilityDescriptor>,
     skill_ids: Vec<String>,
     skill_tools: Vec<tool_loop::SkillToolBinding>,
+    skill_action_executor: Option<SkillActionExecutor>,
     multi_agent_capability: Option<CapabilityDescriptor>,
     agent_session_id: String,
     agent_budget: yunxi_protocol::AgentBudget,
@@ -231,8 +304,11 @@ pub(crate) struct ChatSession {
     reported_notices: BTreeSet<String>,
     pending_action: Option<PendingAction>,
     next_action_ticket: u64,
+    next_compat_turn_id: u64,
     tool_continuation: Option<ToolContinuation>,
     tool_loop_policy: ToolLoopPolicy,
+    approval: ApprovalMode,
+    sandbox: SandboxMode,
 }
 
 #[derive(Clone, Debug)]
@@ -259,32 +335,47 @@ struct ToolContinuation {
 }
 
 impl ChatSession {
-    pub(crate) fn launch(plugin_path: Option<&Path>) -> Result<Self, SessionError> {
-        let config = ProviderConfig::from_env()?;
+    pub(crate) fn launch_with_options(options: &SessionOptions) -> Result<Self, SessionError> {
+        let config = ProviderConfig::from_env_with(|name| match name {
+            "YUNXI_PROVIDER_PROFILE" => options.provider.clone().or_else(|| env::var(name).ok()),
+            "YUNXI_AGENT_MODEL" => options.model.clone().or_else(|| env::var(name).ok()),
+            _ => env::var(name).ok(),
+        })?;
         let response_timeout = config
             .timeout()
             .checked_add(RESPONSE_TIMEOUT_MARGIN)
             .unwrap_or(config.timeout());
         let provider = config.provider().to_string();
         let model = config.model().to_string();
-        drop(config);
-
         let executable = env::current_exe()?;
-        let cwd = env::current_dir()?;
+        let cwd = resolve_session_cwd(options.cwd.as_deref())?;
         let mut capability_settings = CapabilitySettingsStore::from_environment();
         let legacy_switches = capability_settings.effective_from_environment();
         let switches = PluginSwitches::resolve(&capability_settings, &legacy_switches);
         let composition = build_composition(&switches)?;
         let cordis = CordisBridge::start()?;
-        let mut host = ProcessPluginHost::new();
+        let mut host = ProcessPluginHost::new_with_secret_broker(configured_host_secret_broker()?);
         let mut notices = capability_settings.take_warnings();
+        append_policy_notices(options, &mut notices);
 
         let model_plugin_id = PluginId::new(MODEL_PLUGIN_ID)?;
-        let model_command = with_model_environment(match plugin_path {
+        let model_command = with_model_environment(match options.plugin_path.as_deref() {
             Some(path) => PluginCommand::new(path),
             None => PluginCommand::new(&executable).arg(INTERNAL_MODEL_PLUGIN_ARGUMENT),
         });
-        let model_required_grants = if plugin_path.is_none() {
+        let model_command = if options.plugin_path.is_none() {
+            inject_model_credential(
+                model_command,
+                &config,
+                &host.secret_broker(),
+                &model_plugin_id,
+            )?
+        } else {
+            model_command
+        }
+        .current_dir(cwd.clone());
+        let model_command = apply_session_overrides(model_command, options);
+        let model_required_grants = if options.plugin_path.is_none() {
             vec![GrantKind::Network, GrantKind::ProviderCredential]
         } else {
             Vec::new()
@@ -299,6 +390,7 @@ impl ChatSession {
             .with_expected_capabilities([model_capability.clone()]);
         host.launch(model_launch)?;
         require_provider(&mut host, &model_plugin_id, &model_capability)?;
+        drop(config);
 
         let context_capability = if switches.context {
             let id = PluginId::new(CONTEXT_PLUGIN_ID)?;
@@ -324,12 +416,17 @@ impl ChatSession {
         };
 
         let persona_process_needed = switches.persona;
-        let persona_capability = if persona_process_needed {
+        let persona_capabilities = if persona_process_needed {
             let id = PluginId::new(PERSONA_PLUGIN_ID)?;
-            let capability = descriptor(
+            let context_capability = descriptor(
                 capabilities::PERSONA_CONTEXT,
                 capabilities::PERSONA_CONTEXT_VERSION,
             )?;
+            let management_capability = descriptor(
+                capabilities::PERSONA_MANAGEMENT,
+                capabilities::PERSONA_MANAGEMENT_VERSION,
+            )?;
+            let expected_capabilities = [context_capability.clone(), management_capability.clone()];
             let command = optional_command(
                 &executable,
                 INTERNAL_PERSONA_PLUGIN_ARGUMENT,
@@ -339,18 +436,39 @@ impl ChatSession {
                 "YUNXI_PERSONA_ENABLED",
                 if switches.persona { "true" } else { "false" },
             );
-            launch_optional(
+            let launched = launch_optional_with_expected_capabilities(
                 &mut host,
                 id,
                 "Persona context compiler",
                 command,
-                &capability,
+                &context_capability,
+                &expected_capabilities,
+                OptionalLaunchPolicy {
+                    required_grants: &[GrantKind::WorkspaceRead, GrantKind::WorkspaceWrite],
+                    read_timeout: READ_ONLY_RESPONSE_TIMEOUT,
+                },
                 &mut notices,
-            )
-            .then_some(capability)
+            );
+            launched.then_some((context_capability, management_capability))
         } else {
             None
         };
+
+        let (persona_capability, persona_management_capability) =
+            if let Some((context_capability, management_capability)) = persona_capabilities {
+                let management_available = optional_secondary_capability(
+                    &mut host,
+                    &PluginId::new(PERSONA_PLUGIN_ID)?,
+                    &management_capability,
+                    &mut notices,
+                );
+                (
+                    Some(context_capability),
+                    management_available.then_some(management_capability),
+                )
+            } else {
+                (None, None)
+            };
 
         let memory_capabilities = if switches.memory {
             let id = PluginId::new(MEMORY_PLUGIN_ID)?;
@@ -362,7 +480,15 @@ impl ChatSession {
                 capabilities::MEMORY_WRITE,
                 capabilities::MEMORY_WRITE_VERSION,
             )?;
-            let expected_capabilities = [recall_capability.clone(), write_capability.clone()];
+            let management_capability = descriptor(
+                capabilities::MEMORY_MANAGEMENT,
+                capabilities::MEMORY_MANAGEMENT_VERSION,
+            )?;
+            let expected_capabilities = [
+                recall_capability.clone(),
+                write_capability.clone(),
+                management_capability.clone(),
+            ];
             let launched = launch_optional_with_expected_capabilities(
                 &mut host,
                 id,
@@ -375,30 +501,39 @@ impl ChatSession {
                 &recall_capability,
                 &expected_capabilities,
                 OptionalLaunchPolicy {
-                    required_grants: &[],
+                    required_grants: &[GrantKind::WorkspaceRead, GrantKind::WorkspaceWrite],
                     read_timeout: READ_ONLY_RESPONSE_TIMEOUT,
                 },
                 &mut notices,
             );
-            launched.then_some((recall_capability, write_capability))
+            launched.then_some((recall_capability, write_capability, management_capability))
         } else {
             None
         };
 
-        let (memory_capability, memory_write_capability) =
-            if let Some((recall_capability, write_capability)) = memory_capabilities {
+        let (memory_capability, memory_write_capability, memory_management_capability) =
+            if let Some((recall_capability, write_capability, management_capability)) =
+                memory_capabilities
+            {
                 let write_available = optional_secondary_capability(
                     &mut host,
                     &PluginId::new(MEMORY_PLUGIN_ID)?,
                     &write_capability,
                     &mut notices,
                 );
+                let management_available = optional_secondary_capability(
+                    &mut host,
+                    &PluginId::new(MEMORY_PLUGIN_ID)?,
+                    &management_capability,
+                    &mut notices,
+                );
                 (
                     Some(recall_capability),
                     write_available.then_some(write_capability),
+                    management_available.then_some(management_capability),
                 )
             } else {
-                (None, None)
+                (None, None, None)
             };
 
         let storage_capability = if switches.storage {
@@ -407,7 +542,7 @@ impl ChatSession {
                 capabilities::STORAGE_SESSIONS,
                 capabilities::STORAGE_SESSIONS_VERSION,
             )?;
-            launch_optional(
+            launch_optional_with_expected_capabilities(
                 &mut host,
                 id,
                 "Persistent conversation sessions",
@@ -417,6 +552,11 @@ impl ChatSession {
                     STORAGE_PLUGIN_PATH_ENV,
                 ),
                 &capability,
+                std::slice::from_ref(&capability),
+                OptionalLaunchPolicy {
+                    required_grants: &[GrantKind::WorkspaceRead, GrantKind::WorkspaceWrite],
+                    read_timeout: READ_ONLY_RESPONSE_TIMEOUT,
+                },
                 &mut notices,
             )
             .then_some(capability)
@@ -426,11 +566,17 @@ impl ChatSession {
 
         let companion_capability = if switches.companion {
             let id = PluginId::new(COMPANION_PLUGIN_ID)?;
-            let capability = descriptor(
+            let decision_capability = descriptor(
                 capabilities::COMPANION_DECIDE,
                 capabilities::COMPANION_DECIDE_VERSION,
             )?;
-            launch_optional(
+            let management_capability = descriptor(
+                capabilities::COMPANION_MANAGEMENT,
+                capabilities::COMPANION_MANAGEMENT_VERSION,
+            )?;
+            let expected_capabilities =
+                [decision_capability.clone(), management_capability.clone()];
+            launch_optional_with_expected_capabilities(
                 &mut host,
                 id,
                 "Deterministic companion policy",
@@ -439,10 +585,15 @@ impl ChatSession {
                     INTERNAL_COMPANION_PLUGIN_ARGUMENT,
                     COMPANION_PLUGIN_PATH_ENV,
                 ),
-                &capability,
+                &decision_capability,
+                &expected_capabilities,
+                OptionalLaunchPolicy {
+                    required_grants: &[GrantKind::WorkspaceRead, GrantKind::WorkspaceWrite],
+                    read_timeout: READ_ONLY_RESPONSE_TIMEOUT,
+                },
                 &mut notices,
             )
-            .then_some(capability)
+            .then_some(decision_capability)
         } else {
             None
         };
@@ -632,12 +783,36 @@ impl ChatSession {
 
         let mut skill_ids = Vec::new();
         let mut skill_tools = Vec::new();
+        let mut skill_action_executor = None;
         let skills_capability = if switches.skills {
             let id = PluginId::new(SKILLS_PLUGIN_ID)?;
             let capability =
                 descriptor(capabilities::TOOL_SKILLS, capabilities::TOOL_SKILLS_VERSION)?;
             let root = resolve_skills_root(&cwd, &mut notices);
             if let Some(root) = root {
+                let (prepared_executor, action_declarations) = match SkillsConfig::for_root_from_env(
+                    root.clone(),
+                ) {
+                    Ok(config) if config.actions_enabled() => {
+                        let executor = SkillActionExecutor::new(config);
+                        match executor.declarations() {
+                            Ok(declarations) => (Some(executor), declarations),
+                            Err(error) => {
+                                notices.push(format!(
+                                        "Executable Skills were disabled after discovery failed: {error}"
+                                    ));
+                                (None, Vec::new())
+                            }
+                        }
+                    }
+                    Ok(_) => (None, Vec::new()),
+                    Err(error) => {
+                        notices.push(format!(
+                            "Executable Skills configuration was ignored: {error}"
+                        ));
+                        (None, Vec::new())
+                    }
+                };
                 let launched = launch_skills_optional(
                     &mut host,
                     id.clone(),
@@ -656,8 +831,18 @@ impl ChatSession {
                                 .extend(result.skills().iter().map(|skill| skill.id().to_string()));
                             for skill in result.skills() {
                                 for tool in skill.tools() {
-                                    match tool_loop::SkillToolBinding::from_descriptor(skill, tool)
-                                    {
+                                    let action_requires_workspace_write = action_declarations
+                                        .iter()
+                                        .find(|action| {
+                                            action.skill_id() == skill.id()
+                                                && action.tool_name() == tool.name()
+                                        })
+                                        .map(|action| action.requires_workspace_write());
+                                    match tool_loop::SkillToolBinding::from_descriptor(
+                                        skill,
+                                        tool,
+                                        action_requires_workspace_write,
+                                    ) {
                                         Ok(binding) => skill_tools.push(binding),
                                         Err(error) => notices.push(format!(
                                             "Skill tool `{}` was not exposed: {error}",
@@ -672,6 +857,7 @@ impl ChatSession {
                             if result.truncated() {
                                 notices.push("Skills discovery was truncated".to_string());
                             }
+                            skill_action_executor = prepared_executor;
                             Some(capability)
                         }
                         Err(error) => {
@@ -734,11 +920,15 @@ impl ChatSession {
             )?;
             let expected_capabilities =
                 [transcribe_capability.clone(), synthesize_capability.clone()];
+            let external_voice_plugin_configured =
+                env::var_os(VOICE_PLUGIN_PATH_ENV).is_some_and(|path| !path.is_empty());
+            let voice_required_grants =
+                voice_runtime::session_required_grants(external_voice_plugin_configured);
             let launched = launch_optional_with_expected_capabilities(
                 &mut host,
                 id,
                 "Voice transcription and synthesis",
-                optional_command(
+                optional_voice_command(
                     &executable,
                     INTERNAL_VOICE_PLUGIN_ARGUMENT,
                     VOICE_PLUGIN_PATH_ENV,
@@ -746,8 +936,8 @@ impl ChatSession {
                 &transcribe_capability,
                 &expected_capabilities,
                 OptionalLaunchPolicy {
-                    required_grants: &[],
-                    read_timeout: READ_ONLY_RESPONSE_TIMEOUT,
+                    required_grants: &voice_required_grants,
+                    read_timeout: voice_runtime::session_response_timeout(),
                 },
                 &mut notices,
             );
@@ -755,7 +945,7 @@ impl ChatSession {
         } else {
             None
         };
-        let (_voice_transcribe_capability, _voice_synthesize_capability) =
+        let (voice_transcribe_capability, voice_synthesize_capability) =
             if let Some((transcribe_capability, synthesize_capability)) = voice_capabilities {
                 let synthesize_available = optional_secondary_capability(
                     &mut host,
@@ -771,7 +961,7 @@ impl ChatSession {
                 (None, None)
             };
 
-        let _weixin_capability = if switches.weixin {
+        let weixin_capability = if switches.weixin {
             let id = PluginId::new(WEIXIN_PLUGIN_ID)?;
             let capability = descriptor(
                 capabilities::CHANNEL_WEIXIN,
@@ -781,7 +971,7 @@ impl ChatSession {
                 &mut host,
                 id,
                 "Weixin channel bridge",
-                optional_command(
+                optional_weixin_command(
                     &executable,
                     INTERNAL_WEIXIN_PLUGIN_ARGUMENT,
                     WEIXIN_PLUGIN_PATH_ENV,
@@ -809,6 +999,26 @@ impl ChatSession {
 
         let agent_session_id = multi_agent::new_agent_session_id();
         let agent_budget = yunxi_protocol::AgentBudget::conservative();
+        let scheduler_worker = if scheduler_capability.is_some() && mailbox_capability.is_some() {
+            match HostScheduler::start(&cwd, agent_session_id.clone()) {
+                Ok((worker, warnings)) => {
+                    notices.extend(warnings);
+                    Some(worker)
+                }
+                Err(error) => {
+                    notices.push(error);
+                    None
+                }
+            }
+        } else {
+            if scheduler_capability.is_some() && mailbox_capability.is_none() {
+                notices.push(
+                    "scheduler background worker requires the mailbox plugin; immediate scheduler evaluation remains available"
+                        .to_string(),
+                );
+            }
+            None
+        };
 
         let reported_notices = notices.iter().cloned().collect();
         let mut session = Self {
@@ -826,11 +1036,17 @@ impl ChatSession {
             context_capability,
             memory_capability,
             memory_write_capability,
+            memory_management_capability,
             persona_capability,
+            persona_management_capability,
             companion_capability,
             storage_capability,
             mailbox_capability,
+            voice_transcribe_capability,
+            voice_synthesize_capability,
+            weixin_capability,
             scheduler_capability,
+            scheduler_worker,
             shell_capability,
             patch_capability,
             files_capability,
@@ -841,6 +1057,7 @@ impl ChatSession {
             skills_capability,
             skill_ids,
             skill_tools,
+            skill_action_executor,
             multi_agent_capability,
             agent_session_id,
             agent_budget,
@@ -854,8 +1071,11 @@ impl ChatSession {
             reported_notices,
             pending_action: None,
             next_action_ticket: 1,
+            next_compat_turn_id: 1,
             tool_continuation: None,
             tool_loop_policy: ToolLoopPolicy::default(),
+            approval: options.approval,
+            sandbox: options.sandbox,
         };
         session.initialize_spine();
         Ok(session)
@@ -871,6 +1091,7 @@ impl ChatSession {
         let config = SpineRuntimeConfig {
             host: self.host.clone(),
             model_capability: self.model_capability.clone(),
+            model: self.model.clone(),
             cwd: self.cwd.clone(),
             shell_capability: self.shell_capability.clone(),
             patch_capability: self.patch_capability.clone(),
@@ -880,12 +1101,15 @@ impl ChatSession {
             mcp_network_grant: self.mcp_network_grant.clone(),
             mcp_secret_grant: self.mcp_secret_grant.clone(),
             skill_tools: self.skill_tools.clone(),
+            skill_action_executor: self.skill_action_executor.clone(),
             multi_agent_capability: self.multi_agent_capability.clone(),
             agent_session_id: self.agent_session_id.clone(),
             agent_budget: self.agent_budget,
             child_model_command: self.child_model_command.clone(),
             child_model_required_grants: self.child_model_required_grants.clone(),
             child_model_response_timeout: self.child_model_response_timeout,
+            approval: self.approval,
+            sandbox: self.sandbox,
         };
         match SpineController::new(config) {
             Ok(spine) => self.spine = Some(spine),
@@ -972,6 +1196,9 @@ impl ChatSession {
     }
 
     fn reset_spine(&mut self) {
+        if let Some(scheduler) = &self.scheduler_worker {
+            scheduler.reset_session(&self.agent_session_id);
+        }
         if let Some(spine) = self.spine.as_mut()
             && let Err(error) = spine.reset()
         {
@@ -1000,6 +1227,240 @@ impl ChatSession {
         GatewayProjection::new(gateway_status, inventory)
             .with_sessions(sessions)
             .with_host_paths(self.cwd.to_string_lossy(), home.to_string_lossy())
+    }
+
+    /// Expose the trusted Cordis lifecycle journal to the Web/CLI adapters.
+    /// The page is bounded by the runtime and contains no service values or
+    /// credentials.
+    pub(crate) fn cordis_events_since(
+        &self,
+        after_sequence: u64,
+        limit: usize,
+    ) -> RuntimeEventPage {
+        self.cordis.events_since(after_sequence, limit)
+    }
+
+    pub(crate) fn workspace_root(&self) -> &Path {
+        &self.cwd
+    }
+
+    fn state_read_grant(&self) -> WorkspaceGrant {
+        WorkspaceGrant::read_only(&self.cwd).with_state_root(next_state_root())
+    }
+
+    /// Whether the live Host route for a management-backed capability exists.
+    /// Web management calls use these checks so disabling a plugin also
+    /// revokes its read-only projection instead of merely hiding the UI.
+    pub(crate) fn memory_web_available(&self) -> bool {
+        self.memory_management_capability.is_some()
+    }
+
+    pub(crate) fn persona_web_available(&self) -> bool {
+        self.persona_management_capability.is_some()
+    }
+
+    pub(crate) fn web_memory_status(&mut self) -> Result<MemoryStatusReport, String> {
+        let capability = self
+            .memory_management_capability
+            .clone()
+            .ok_or_else(|| "memory plugin is disabled or unavailable".to_string())?;
+        let request = MemoryStatusRequest::new(self.state_read_grant());
+        self.host
+            .invoke(&capability, MEMORY_MANAGEMENT_STATUS_OPERATION, &request)
+            .map_err(|error| {
+                if call_lost_route(&error) {
+                    self.revoke_memory_routes();
+                }
+                error.to_string()
+            })
+    }
+
+    pub(crate) fn web_memory_list(&mut self, limit: usize) -> Result<MemoryListResult, String> {
+        let capability = self
+            .memory_management_capability
+            .clone()
+            .ok_or_else(|| "memory plugin is disabled or unavailable".to_string())?;
+        let request = MemoryListRequest::new(self.state_read_grant(), limit);
+        self.host
+            .invoke(&capability, MEMORY_MANAGEMENT_LIST_OPERATION, &request)
+            .map_err(|error| {
+                if call_lost_route(&error) {
+                    self.revoke_memory_routes();
+                }
+                error.to_string()
+            })
+    }
+
+    pub(crate) fn web_memory_show(
+        &mut self,
+        id: &str,
+    ) -> Result<Option<MemoryRecordSummary>, String> {
+        let capability = self
+            .memory_management_capability
+            .clone()
+            .ok_or_else(|| "memory plugin is disabled or unavailable".to_string())?;
+        let request = MemoryShowRequest::new(self.state_read_grant(), id);
+        self.host
+            .invoke(&capability, MEMORY_MANAGEMENT_SHOW_OPERATION, &request)
+            .map_err(|error| {
+                if call_lost_route(&error) {
+                    self.revoke_memory_routes();
+                }
+                error.to_string()
+            })
+    }
+
+    pub(crate) fn web_persona_status(&mut self) -> Result<PersonaStatus, String> {
+        let capability = self
+            .persona_management_capability
+            .clone()
+            .ok_or_else(|| "persona plugin is disabled or unavailable".to_string())?;
+        let request = PersonaStatusRequest::new(self.state_read_grant());
+        self.host
+            .invoke(&capability, PERSONA_MANAGEMENT_STATUS_OPERATION, &request)
+            .map_err(|error| {
+                if call_lost_route(&error) {
+                    self.revoke_persona_routes();
+                }
+                error.to_string()
+            })
+    }
+
+    pub(crate) fn web_persona_list(&mut self) -> Result<Vec<PersonaProfileSummary>, String> {
+        let capability = self
+            .persona_management_capability
+            .clone()
+            .ok_or_else(|| "persona plugin is disabled or unavailable".to_string())?;
+        let request = PersonaListRequest::new(self.state_read_grant());
+        self.host
+            .invoke(&capability, PERSONA_MANAGEMENT_LIST_OPERATION, &request)
+            .map_err(|error| {
+                if call_lost_route(&error) {
+                    self.revoke_persona_routes();
+                }
+                error.to_string()
+            })
+    }
+
+    pub(crate) fn web_persona_profile(
+        &mut self,
+        id: Option<String>,
+    ) -> Result<Option<PersonaProfileSummary>, String> {
+        let capability = self
+            .persona_management_capability
+            .clone()
+            .ok_or_else(|| "persona plugin is disabled or unavailable".to_string())?;
+        let request = PersonaProfileRequest::new(self.state_read_grant(), id);
+        self.host
+            .invoke(&capability, PERSONA_MANAGEMENT_PROFILE_OPERATION, &request)
+            .map_err(|error| {
+                if call_lost_route(&error) {
+                    self.revoke_persona_routes();
+                }
+                error.to_string()
+            })
+    }
+
+    fn revoke_memory_routes(&mut self) {
+        self.memory_capability = None;
+        self.memory_write_capability = None;
+        self.memory_management_capability = None;
+    }
+
+    fn revoke_persona_routes(&mut self) {
+        self.persona_capability = None;
+        self.persona_management_capability = None;
+    }
+
+    pub(crate) fn mailbox_web_available(&self) -> bool {
+        self.mailbox_capability.is_some()
+    }
+
+    pub(crate) fn voice_web_available(&self) -> bool {
+        self.voice_transcribe_capability.is_some() || self.voice_synthesize_capability.is_some()
+    }
+
+    pub(crate) fn weixin_web_available(&self) -> bool {
+        self.weixin_capability.is_some()
+    }
+
+    /// Invoke one bounded Voice operation through the session-owned process.
+    ///
+    /// Management and duplex operations use the transcription route; output
+    /// operations use synthesis. Losing either route means the shared child
+    /// process is no longer trustworthy, so both descriptors are revoked.
+    pub(crate) fn invoke_voice(
+        &mut self,
+        operation: &str,
+        payload: &serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let capability = match operation {
+            "doctor" | "enumerate_devices" | "transcribe" | "chat" | "talk" => {
+                self.voice_transcribe_capability.clone()
+            }
+            "synthesize" | "speak" | "playback" | "save" => {
+                self.voice_synthesize_capability.clone()
+            }
+            "cancel" => self
+                .voice_transcribe_capability
+                .clone()
+                .or_else(|| self.voice_synthesize_capability.clone()),
+            _ => return Err(format!("unsupported voice operation `{operation}`")),
+        }
+        .ok_or_else(|| "voice plugin is disabled or unavailable".to_string())?;
+
+        self.host
+            .invoke(&capability, operation, payload)
+            .map_err(|error| {
+                if call_lost_route(&error) {
+                    self.voice_transcribe_capability = None;
+                    self.voice_synthesize_capability = None;
+                }
+                error.to_string()
+            })
+    }
+
+    /// Invoke a lifecycle operation on the session-owned Weixin process.
+    ///
+    /// The Web layer receives only the bounded, serialized runtime report. A
+    /// missing route is retained as an ordinary capability failure so callers
+    /// observe the same enable/disable semantics as model and mailbox routes.
+    pub(crate) fn invoke_weixin(
+        &mut self,
+        operation: &str,
+        payload: &serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let capability = self
+            .weixin_capability
+            .clone()
+            .ok_or_else(|| "weixin plugin is disabled or unavailable".to_string())?;
+        let response: WeixinPluginResponse = self
+            .host
+            .invoke(&capability, operation, payload)
+            .map_err(|error| {
+                if call_lost_route(&error) {
+                    self.weixin_capability = None;
+                }
+                error.to_string()
+            })?;
+        match response {
+            WeixinPluginResponse::Runtime {
+                operation: actual,
+                mode,
+                report,
+            } if actual == operation => Ok(serde_json::json!({
+                "operation": actual,
+                "mode": mode,
+                "report": report,
+            })),
+            WeixinPluginResponse::Runtime {
+                operation: actual, ..
+            } => Err(format!(
+                "weixin plugin returned operation `{actual}` for `{operation}`"
+            )),
+            other => serde_json::to_value(other)
+                .map_err(|error| format!("weixin response serialization failed: {error}")),
+        }
     }
 
     /// Build the same bounded plugin catalog used by a live session without
@@ -1125,8 +1586,11 @@ impl ChatSession {
         if self.persona_capability.is_some()
             && let Some(capability) = self.memory_capability.clone()
         {
-            let request = MemoryRecallRequest::new(&self.cwd, memory_recall_query(messages))
-                .with_boot_context(include_boot_context);
+            let request = MemoryRecallRequest::new_with_grant(
+                self.state_read_grant(),
+                memory_recall_query(messages),
+            )
+            .with_boot_context(include_boot_context);
             match self.host.invoke::<_, MemoryRecallResult>(
                 &capability,
                 MEMORY_RECALL_OPERATION,
@@ -1144,7 +1608,7 @@ impl ChatSession {
                 }
                 Err(error) => {
                     if call_lost_route(&error) {
-                        self.memory_capability = None;
+                        self.revoke_memory_routes();
                     }
                     self.push_notice(format!("memory capability degraded: {error}"));
                 }
@@ -1162,7 +1626,8 @@ impl ChatSession {
                 boot_memories.clone(),
                 dynamic_memories.clone(),
                 include_boot_context,
-            );
+            )
+            .with_grant(self.state_read_grant());
             match self.host.invoke::<_, PersonaContextResult>(
                 &capability,
                 PERSONA_CONTEXT_COMPILE_OPERATION,
@@ -1184,8 +1649,7 @@ impl ChatSession {
                 }
                 Err(error) => {
                     if call_lost_route(&error) {
-                        self.persona_capability = None;
-                        self.memory_capability = None;
+                        self.revoke_persona_routes();
                     }
                     self.push_notice(format!("persona capability degraded: {error}"));
                 }
@@ -1305,6 +1769,82 @@ impl ChatBackend for ChatSession {
             .map(|reply| reply.content)
     }
 
+    fn complete_streaming<S: EventSink>(
+        &mut self,
+        messages: &[ChatMessage],
+        cancellation: &CancellationToken,
+        sink: &mut S,
+    ) -> Result<String, ChatFailure> {
+        if self.has_pending_action() {
+            let pending = self.pending_approval();
+            return Err(ChatFailure::ToolApprovalRequired {
+                tool: pending
+                    .as_ref()
+                    .map(|value| value.tool_name.clone())
+                    .unwrap_or_else(|| "pending action".to_string()),
+                summary: pending
+                    .as_ref()
+                    .map(|value| value.summary.clone())
+                    .unwrap_or_else(|| {
+                        "approve or deny the pending action before starting another turn"
+                            .to_string()
+                    }),
+            });
+        }
+        self.prepare_agent_session();
+        let prompt = latest_user_message(messages)
+            .unwrap_or_default()
+            .to_string();
+        let assembled = self.assemble_messages(messages);
+
+        if let Some(spine) = self.spine.as_mut() {
+            spine.set_agent_session_id(self.agent_session_id.clone());
+            let mut seed = assembled.clone();
+            let current_index = seed
+                .iter()
+                .rposition(|message| {
+                    message.role() == yunxi_protocol::ChatRole::User && message.content() == prompt
+                })
+                .or_else(|| {
+                    seed.iter()
+                        .rposition(|message| message.role() == yunxi_protocol::ChatRole::User)
+                });
+            let Some(current_index) = current_index else {
+                self.sync_spine_notices();
+                return Err(ChatFailure::ProtocolViolation(
+                    "a chat turn requires a user message".to_string(),
+                ));
+            };
+            seed.remove(current_index);
+            let outcome =
+                spine.start_streaming(ChatMessage::user(prompt.clone()), seed, cancellation, sink);
+            self.sync_spine_notices();
+            return match outcome {
+                Ok(yunxi_agent_spine::AgentTurnOutcome::Completed(result)) => {
+                    let reply = result.content().to_string();
+                    self.persist_turn(&prompt, &reply);
+                    self.extract_turn_memories(&prompt, &reply);
+                    self.evaluate_proactive(&prompt);
+                    Ok(reply)
+                }
+                Ok(yunxi_agent_spine::AgentTurnOutcome::AwaitingApproval(request)) => {
+                    Err(ChatFailure::ToolApprovalRequired {
+                        tool: request.tool_name().to_string(),
+                        summary: request.summary().to_string(),
+                    })
+                }
+                Err(error) => Err(spine_runtime::chat_failure_from_agent(error)),
+            };
+        }
+
+        // `YUNXI_NEXT_AGENT_ENGINE=compatibility` is an explicit fallback.
+        // Keep its historical model/tool loop, but expose the same bounded
+        // event contract as the Spine so Web and CLI consumers do not need a
+        // second lifecycle protocol when a provider is temporarily degraded.
+        let history_prefix = vec![ChatMessage::user(prompt.clone())];
+        self.run_compatibility_streaming(assembled, prompt, history_prefix, cancellation, sink)
+    }
+
     fn provider(&self) -> &str {
         &self.provider
     }
@@ -1325,16 +1865,13 @@ impl ChatBackend for ChatSession {
         let protocol_ready = cordis_ready
             && self
                 .host
-                .catalog()
-                .providers(capabilities::MODEL_CHAT, capabilities::MODEL_CHAT_VERSION)
-                .iter()
-                .any(|provider| provider.id() == &self.model_plugin_id);
+                .provides(&self.model_capability, &self.model_plugin_id);
         BackendStatus {
             kernel: snapshot.state().to_string(),
             plugin,
             protocol_ready,
             plugins: self.host.connection_count(),
-            capabilities: self.host.catalog().capability_count(),
+            capabilities: self.host.capability_count(),
             failed_plugins: snapshot.failed_plugin_count(),
         }
     }
@@ -1353,7 +1890,225 @@ struct ModelReply {
     history: Vec<ChatMessage>,
 }
 
+const COMPATIBILITY_TEXT_CHUNK_BYTES: usize = 1024;
+
+/// Provides the same bounded sequence and terminal lifecycle for the
+/// explicitly selected legacy model loop that the Spine emits natively.
+struct CompatibilityStream<'a> {
+    sink: &'a mut dyn EventSink,
+    cancellation: &'a CancellationToken,
+    turn_id: String,
+    next_sequence: u64,
+    emitted: usize,
+}
+
+impl<'a> CompatibilityStream<'a> {
+    fn new(
+        sink: &'a mut dyn EventSink,
+        cancellation: &'a CancellationToken,
+        turn_id: String,
+    ) -> Self {
+        Self {
+            sink,
+            cancellation,
+            turn_id,
+            next_sequence: 1,
+            emitted: 0,
+        }
+    }
+
+    fn state(&mut self, round: u16, state: StreamTurnState) -> Result<(), ChatFailure> {
+        let event = StreamEvent::turn_state(self.next_sequence, self.turn_id.clone(), round, state)
+            .map_err(|error| ChatFailure::ProtocolViolation(error.to_string()))?;
+        self.send(event)
+    }
+
+    fn best_effort_state(&mut self, round: u16, state: StreamTurnState) {
+        let Ok(event) =
+            StreamEvent::turn_state(self.next_sequence, self.turn_id.clone(), round, state)
+        else {
+            return;
+        };
+        self.best_effort_send(event);
+    }
+
+    fn text(&mut self, round: u16, text: &str) -> Result<(), ChatFailure> {
+        let mut start = 0;
+        while start < text.len() {
+            self.cancellation
+                .check()
+                .map_err(|error| ChatFailure::Unavailable(error.to_string()))?;
+            let mut end = (start + COMPATIBILITY_TEXT_CHUNK_BYTES).min(text.len());
+            while end > start && !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            if end == start {
+                end = text[start..]
+                    .char_indices()
+                    .nth(1)
+                    .map(|(index, _)| start + index)
+                    .unwrap_or(text.len());
+            }
+            let delta = &text[start..end];
+            debug_assert!(delta.len() <= MAX_STREAM_TEXT_BYTES);
+            let event =
+                StreamEvent::text_delta(self.next_sequence, self.turn_id.clone(), round, delta)
+                    .map_err(|error| ChatFailure::ProtocolViolation(error.to_string()))?;
+            self.send(event)?;
+            start = end;
+        }
+        Ok(())
+    }
+
+    fn done(&mut self, round: u16, response: Option<ChatResult>) -> Result<(), ChatFailure> {
+        let event =
+            StreamEvent::turn_done(self.next_sequence, self.turn_id.clone(), round, response)
+                .map_err(|error| ChatFailure::ProtocolViolation(error.to_string()))?;
+        self.send(event)
+    }
+
+    fn finish_failure(&mut self, round: u16, failure: &ChatFailure) {
+        let message = bounded_stream_message(&failure.to_string());
+        let error = StreamError::new("compatibility_failed", message, false)
+            .unwrap_or_else(|_| StreamError::redacted("compatibility_failed", false));
+        let Ok(event) =
+            StreamEvent::turn_error(self.next_sequence, self.turn_id.clone(), round, error)
+        else {
+            return;
+        };
+        self.best_effort_send(event);
+        self.best_effort_state(round, StreamTurnState::Failed);
+        self.best_effort_done(round);
+    }
+
+    fn finish_cancellation(&mut self, round: u16, code: &str, reason: &str) {
+        let timed_out = code == "timeout";
+        let error = StreamError::new(code, bounded_stream_message(reason), false)
+            .unwrap_or_else(|_| StreamError::redacted("cancelled", false));
+        let Ok(event) =
+            StreamEvent::turn_error(self.next_sequence, self.turn_id.clone(), round, error)
+        else {
+            return;
+        };
+        self.best_effort_send(event);
+        self.best_effort_state(
+            round,
+            if timed_out {
+                StreamTurnState::TimedOut
+            } else {
+                StreamTurnState::Cancelled
+            },
+        );
+        self.best_effort_done(round);
+    }
+
+    fn best_effort_done(&mut self, round: u16) {
+        let Ok(event) =
+            StreamEvent::turn_done(self.next_sequence, self.turn_id.clone(), round, None)
+        else {
+            return;
+        };
+        self.best_effort_send(event);
+    }
+
+    fn send(&mut self, event: StreamEvent) -> Result<(), ChatFailure> {
+        if self.emitted >= MAX_STREAM_EVENTS_PER_TURN {
+            return Err(ChatFailure::Unavailable(format!(
+                "compatibility stream exceeded {MAX_STREAM_EVENTS_PER_TURN} events"
+            )));
+        }
+        event
+            .validate()
+            .map_err(|error| ChatFailure::ProtocolViolation(error.to_string()))?;
+        self.sink
+            .emit_with_cancellation(event, self.cancellation)
+            .map_err(event_sink_failure)?;
+        self.advance_sequence();
+        Ok(())
+    }
+
+    fn best_effort_send(&mut self, event: StreamEvent) {
+        if self.emitted >= MAX_STREAM_EVENTS_PER_TURN || event.validate().is_err() {
+            return;
+        }
+        if self.sink.emit(event).is_ok() {
+            self.advance_sequence();
+        }
+    }
+
+    fn advance_sequence(&mut self) {
+        self.emitted = self.emitted.saturating_add(1);
+        self.next_sequence = self.next_sequence.saturating_add(1);
+    }
+}
+
+fn event_sink_failure(error: EventSinkError) -> ChatFailure {
+    ChatFailure::Unavailable(format!("compatibility event stream failed: {error}"))
+}
+
+fn bounded_stream_message(message: &str) -> String {
+    let mut bounded = String::new();
+    for character in message.replace('\0', " ").chars() {
+        if bounded.len() + character.len_utf8() > yunxi_protocol::MAX_STREAM_ERROR_MESSAGE_BYTES {
+            break;
+        }
+        bounded.push(character);
+    }
+    if bounded.trim().is_empty() {
+        "turn operation failed".to_string()
+    } else {
+        bounded
+    }
+}
+
 impl ChatSession {
+    fn run_compatibility_streaming<S: EventSink>(
+        &mut self,
+        assembled: Vec<ChatMessage>,
+        prompt: String,
+        history_prefix: Vec<ChatMessage>,
+        cancellation: &CancellationToken,
+        sink: &mut S,
+    ) -> Result<String, ChatFailure> {
+        let turn_number = self.next_compat_turn_id;
+        self.next_compat_turn_id = self.next_compat_turn_id.saturating_add(1);
+        let turn_id = format!("compat-turn-{turn_number}");
+        let mut stream = CompatibilityStream::new(sink, cancellation, turn_id);
+
+        stream.state(0, StreamTurnState::Created)?;
+        stream.state(0, StreamTurnState::ContextBuilding)?;
+        stream.state(1, StreamTurnState::ModelCalling)?;
+
+        let result = self.run_model_loop(assembled, prompt, history_prefix, 1);
+        if let Err(error) = cancellation.check() {
+            stream.finish_cancellation(1, error.code(), error.reason());
+            return Err(ChatFailure::Unavailable(error.to_string()));
+        }
+
+        match result {
+            Ok(reply) => {
+                if let Err(error) = stream.text(1, &reply.content) {
+                    stream.finish_failure(1, &error);
+                    return Err(error);
+                }
+                stream.state(1, StreamTurnState::Completed)?;
+                stream.done(
+                    1,
+                    Some(ChatResult::new(&reply.content, Some("stop".to_string()))),
+                )?;
+                Ok(reply.content)
+            }
+            Err(error @ ChatFailure::ToolApprovalRequired { .. }) => {
+                stream.best_effort_state(1, StreamTurnState::AwaitingApproval);
+                Err(error)
+            }
+            Err(error) => {
+                stream.finish_failure(1, &error);
+                Err(error)
+            }
+        }
+    }
+
     fn run_model_loop(
         &mut self,
         mut messages: Vec<ChatMessage>,
@@ -1454,7 +2209,6 @@ impl ChatSession {
             Ok(
                 action @ (tool_loop::ToolAction::FileSearch { .. }
                 | tool_loop::ToolAction::FileRead { .. }
-                | tool_loop::ToolAction::Skill { .. }
                 | tool_loop::ToolAction::AgentList
                 | tool_loop::ToolAction::AgentInterrupt { .. }),
             ) => {
@@ -1462,7 +2216,41 @@ impl ChatSession {
                 self.append_tool_outcome(&call, outcome);
                 self.advance_tool_continuation()
             }
+            Ok(ref action @ tool_loop::ToolAction::Skill { ref binding, .. })
+                if !binding.executable() || self.skill_action_executor.is_none() =>
+            {
+                let outcome = self.execute_model_tool(action);
+                self.append_tool_outcome(&call, outcome);
+                self.advance_tool_continuation()
+            }
             Ok(action) => {
+                if self.approval == ApprovalMode::Never
+                    || (self.sandbox == SandboxMode::ReadOnly
+                        && (matches!(action, tool_loop::ToolAction::Patch { .. })
+                            || matches!(
+                                action,
+                                tool_loop::ToolAction::Skill { ref binding, .. }
+                                    if binding.requires_workspace_write()
+                            )))
+                {
+                    let (code, message) = if self.approval == ApprovalMode::Never {
+                        (
+                            "approval_disabled",
+                            "model action rejected because --approval never is active",
+                        )
+                    } else {
+                        (
+                            "sandbox_read_only",
+                            "workspace-write execution is disabled by --sandbox read-only",
+                        )
+                    };
+                    self.append_tool_outcome(
+                        &call,
+                        ToolResultOutcome::rejected(code, message)
+                            .expect("bounded policy rejection"),
+                    );
+                    return self.advance_tool_continuation();
+                }
                 let requested_grants = match &action {
                     tool_loop::ToolAction::Shell { .. } => {
                         vec![GrantKind::Approval, GrantKind::WorkspaceRead]
@@ -1486,16 +2274,27 @@ impl ChatSession {
                         }
                         grants
                     }
-                    tool_loop::ToolAction::Skill { .. } => {
-                        unreachable!("metadata-only Skill tools are handled before approval")
+                    tool_loop::ToolAction::Skill { binding, .. } => {
+                        let mut grants = vec![GrantKind::Approval, GrantKind::WorkspaceRead];
+                        if binding.requires_workspace_write() {
+                            grants.push(GrantKind::WorkspaceWrite);
+                        }
+                        grants
                     }
-                    tool_loop::ToolAction::AgentSpawn { .. }
-                    | tool_loop::ToolAction::AgentMessage { .. } => vec![
-                        GrantKind::Approval,
-                        GrantKind::WorkspaceRead,
-                        GrantKind::WorkspaceWrite,
-                        GrantKind::AgentDelegation,
-                    ],
+                    tool_loop::ToolAction::AgentSpawn {
+                        requested_grants, ..
+                    } => {
+                        let mut grants = vec![GrantKind::Approval, GrantKind::AgentDelegation];
+                        for grant in requested_grants.iter().copied() {
+                            if !grants.contains(&grant) {
+                                grants.push(grant);
+                            }
+                        }
+                        grants
+                    }
+                    tool_loop::ToolAction::AgentMessage { .. } => {
+                        vec![GrantKind::Approval, GrantKind::AgentDelegation]
+                    }
                     tool_loop::ToolAction::AgentList
                     | tool_loop::ToolAction::AgentInterrupt { .. } => {
                         unreachable!("read-only and cancellation agent tools run without approval")
@@ -1581,6 +2380,27 @@ impl ChatSession {
         self.finish_model_tool_progress()
     }
 
+    pub(super) fn resolve_pending_model_tool_streaming<S: EventSink>(
+        &mut self,
+        approved: bool,
+        cancellation: &CancellationToken,
+        sink: &mut S,
+    ) -> Result<crate::management::ManagementResult, String> {
+        if !self.has_spine_pending_approval() {
+            return if approved {
+                self.approve_pending_model_tool()
+            } else {
+                self.deny_pending_model_tool()
+            };
+        }
+        let outcome = self
+            .spine
+            .as_mut()
+            .ok_or_else(|| "Agent spine is unavailable".to_string())?
+            .resolve_streaming(approved, cancellation, sink);
+        self.finish_spine_resolution(outcome)
+    }
+
     pub(super) fn deny_pending_model_tool(
         &mut self,
     ) -> Result<crate::management::ManagementResult, String> {
@@ -1616,6 +2436,24 @@ impl ChatSession {
                 .expect("bounded cancellation result"),
         );
         self.finish_model_tool_progress()
+    }
+
+    pub(super) fn abort_pending_model_tool(&mut self, reason: &str) -> Result<(), String> {
+        if self.has_spine_pending_approval() {
+            let spine = self
+                .spine
+                .as_mut()
+                .ok_or_else(|| "Agent spine is unavailable".to_string())?;
+            spine.cancel(reason).map_err(|error| error.to_string())?;
+            let _ = spine.take_prompt();
+            self.sync_spine_notices();
+            return Ok(());
+        }
+        if self.pending_action.take().is_none() && self.tool_continuation.is_none() {
+            return Err("there is no pending model tool action".to_string());
+        }
+        self.tool_continuation = None;
+        Ok(())
     }
 
     fn finish_model_tool_progress(
@@ -1704,20 +2542,21 @@ impl ChatSession {
         );
         self.next_action_ticket = self.next_action_ticket.saturating_add(1);
         match action {
-            tool_loop::ToolAction::Skill { binding, .. } => ToolResultOutcome::rejected(
-                "skill_tool_unavailable",
-                format!(
-                    "Skill `{}` declared tool `{}` as metadata only; execution is not enabled",
-                    binding.skill_id(),
-                    binding.remote_name()
-                ),
-            )
-            .expect("bounded Skill tool rejection"),
+            tool_loop::ToolAction::Skill { binding, arguments } => {
+                self.execute_skill_model_tool(binding, arguments, &ticket)
+            }
             tool_loop::ToolAction::AgentSpawn {
                 task,
                 name,
                 parent_id,
-            } => self.execute_agent_spawn(task, name.as_deref(), parent_id.as_deref(), &ticket),
+                requested_grants,
+            } => self.execute_agent_spawn(
+                task,
+                name.as_deref(),
+                parent_id.as_deref(),
+                requested_grants,
+                &ticket,
+            ),
             tool_loop::ToolAction::AgentList => self.execute_agent_list(&ticket),
             tool_loop::ToolAction::AgentMessage { agent_id, message } => {
                 self.execute_agent_message(agent_id, message, &ticket)
@@ -1922,6 +2761,84 @@ impl ChatSession {
         }
     }
 
+    fn execute_skill_model_tool(
+        &mut self,
+        binding: &tool_loop::SkillToolBinding,
+        arguments: &serde_json::Value,
+        ticket: &str,
+    ) -> ToolResultOutcome {
+        if !binding.executable() {
+            return ToolResultOutcome::rejected(
+                "skill_tool_unavailable",
+                format!(
+                    "Skill `{}` declared tool `{}` as metadata only",
+                    binding.skill_id(),
+                    binding.remote_name()
+                ),
+            )
+            .expect("bounded Skill tool rejection");
+        }
+        let Some(executor) = self.skill_action_executor.clone() else {
+            return ToolResultOutcome::rejected(
+                "skill_action_disabled",
+                "executable Skill actions are not enabled",
+            )
+            .expect("bounded Skill action rejection");
+        };
+        if binding.requires_workspace_write() && self.sandbox == SandboxMode::ReadOnly {
+            return ToolResultOutcome::rejected(
+                "sandbox_read_only",
+                "Skill action requires workspace write access while --sandbox read-only is active",
+            )
+            .expect("bounded Skill sandbox rejection");
+        }
+        let request = match SkillActionRequest::new(
+            binding.skill_id(),
+            binding.remote_name(),
+            arguments.clone(),
+        ) {
+            Ok(request) => request,
+            Err(error) => {
+                return ToolResultOutcome::rejected(
+                    "invalid_skill_action_request",
+                    error.to_string(),
+                )
+                .expect("bounded Skill request rejection");
+            }
+        };
+        let workspace = if binding.requires_workspace_write() {
+            yunxi_protocol::WorkspaceGrant::read_write(&self.cwd).with_workspace_write()
+        } else {
+            yunxi_protocol::WorkspaceGrant::read_only(&self.cwd)
+        };
+        let mut grant = ActionGrant::approved(workspace, &self.cwd, ticket).with_limits(
+            yunxi_protocol::MAX_SKILL_ACTION_TIMEOUT_MILLIS,
+            yunxi_protocol::MAX_SKILL_ACTION_OUTPUT_BYTES,
+        );
+        if binding.requires_workspace_write() {
+            grant = grant.with_write(true);
+        }
+        match executor.execute(&request, &grant) {
+            Ok(execution) => serde_json::to_value(execution)
+                .ok()
+                .and_then(|value| ToolResultOutcome::completed(value).ok())
+                .unwrap_or_else(|| {
+                    ToolResultOutcome::rejected(
+                        "invalid_tool_result",
+                        "Skill action returned an invalid bounded result",
+                    )
+                    .expect("bounded invalid Skill result")
+                }),
+            Err(error) => {
+                self.push_notice(format!(
+                    "model Skill tool `{}` failed: {error}",
+                    binding.model_name()
+                ));
+                compatibility_skill_action_error_outcome(error)
+            }
+        }
+    }
+
     fn tool_error_outcome(
         &mut self,
         tool_name: &str,
@@ -2039,6 +2956,23 @@ fn tool_approval_lines(tool: &str, summary: &str) -> Vec<String> {
     ]
 }
 
+fn compatibility_skill_action_error_outcome(error: SkillActionError) -> ToolResultOutcome {
+    match error {
+        error @ (SkillActionError::ActionsDisabled
+        | SkillActionError::SkillNotFound { .. }
+        | SkillActionError::ActionNotDeclared { .. }
+        | SkillActionError::WorkspaceWriteRequired
+        | SkillActionError::ForbiddenGrant
+        | SkillActionError::Grant(_)
+        | SkillActionError::Request(_)) => {
+            ToolResultOutcome::rejected("skill_action_rejected", error.to_string())
+                .expect("bounded Skill action rejection")
+        }
+        other => ToolResultOutcome::failed("skill_action_failed", other.to_string(), false)
+            .expect("bounded Skill action failure"),
+    }
+}
+
 fn descriptor(id: &str, version: u32) -> Result<CapabilityDescriptor, CapabilityError> {
     CapabilityDescriptor::new(id, version)
 }
@@ -2063,6 +2997,37 @@ fn optional_mcp_command(
     )
 }
 
+fn optional_voice_command(
+    executable: &Path,
+    internal_argument: &str,
+    path_env: &str,
+) -> PluginCommand {
+    with_process_environment(
+        optional_command(executable, internal_argument, path_env),
+        VOICE_ENVIRONMENT,
+    )
+}
+
+fn optional_weixin_command(
+    executable: &Path,
+    internal_argument: &str,
+    path_env: &str,
+) -> PluginCommand {
+    let mut command = with_process_environment(
+        optional_command(executable, internal_argument, path_env),
+        WEIXIN_ENVIRONMENT,
+    );
+    if yunxi_weixin::weixin_production_requested()
+        && env::var_os(WEIXIN_SECRET_STORE_ENV).is_none_or(|path| path.is_empty())
+    {
+        command = command.env(
+            WEIXIN_SECRET_STORE_ENV,
+            next_state_root().join("weixin").join("secrets.bin"),
+        );
+    }
+    command
+}
+
 fn isolate_plugin_command(command: PluginCommand) -> PluginCommand {
     with_process_environment(command.clear_environment(), SAFE_PLUGIN_ENVIRONMENT)
 }
@@ -2077,13 +3042,146 @@ fn with_process_environment(mut command: PluginCommand, names: &[&str]) -> Plugi
 }
 
 fn with_model_environment(command: PluginCommand) -> PluginCommand {
-    let mut command = with_process_environment(isolate_plugin_command(command), MODEL_ENVIRONMENT);
-    if let Some(name) = env::var_os("YUNXI_PROVIDER_API_KEY_ENV").filter(|value| !value.is_empty())
-        && let Some(value) = env::var_os(&name)
-    {
-        command = command.env(name, value);
+    with_process_environment(isolate_plugin_command(command), MODEL_ENVIRONMENT)
+}
+
+fn configured_host_secret_broker() -> Result<HostSecretBroker, SessionError> {
+    let store_path = env::var_os(HOST_SECRET_STORE_ENV).filter(|value| !value.is_empty());
+    let key_text = match env::var(HOST_SECRET_KEY_HEX_ENV) {
+        Ok(value) => Some(value),
+        Err(env::VarError::NotPresent) => None,
+        Err(env::VarError::NotUnicode(_)) => {
+            return Err(SessionError::SecretConfiguration(format!(
+                "{HOST_SECRET_KEY_HEX_ENV} must be UTF-8 hexadecimal"
+            )));
+        }
+    };
+
+    let Some(key_text) = key_text else {
+        if store_path.is_some() {
+            return Err(SessionError::SecretConfiguration(format!(
+                "{HOST_SECRET_STORE_ENV} requires {HOST_SECRET_KEY_HEX_ENV}"
+            )));
+        }
+        return Ok(HostSecretBroker::new());
+    };
+
+    let mut master_key = parse_host_secret_master_key(&key_text)?;
+    let path = store_path.map(PathBuf::from).unwrap_or_else(|| {
+        next_state_root()
+            .join("secrets")
+            .join(HOST_SECRET_STORE_FILE)
+    });
+    let broker = HostSecretBroker::from_file(path, master_key).map_err(PluginHostError::from);
+    master_key.fill(0);
+    broker.map_err(SessionError::from)
+}
+
+fn parse_host_secret_master_key(
+    value: &str,
+) -> Result<[u8; yunxi_secret_broker::MASTER_KEY_BYTES], SessionError> {
+    if value.len() != yunxi_secret_broker::MASTER_KEY_BYTES * 2 {
+        return Err(SessionError::SecretConfiguration(format!(
+            "{HOST_SECRET_KEY_HEX_ENV} must contain exactly {} hexadecimal characters",
+            yunxi_secret_broker::MASTER_KEY_BYTES * 2
+        )));
+    }
+    let mut key = [0_u8; yunxi_secret_broker::MASTER_KEY_BYTES];
+    for (index, pair) in value.as_bytes().chunks_exact(2).enumerate() {
+        let high = hex_nibble(pair[0]).ok_or_else(|| {
+            SessionError::SecretConfiguration(format!(
+                "{HOST_SECRET_KEY_HEX_ENV} contains a non-hexadecimal character"
+            ))
+        })?;
+        let low = hex_nibble(pair[1]).ok_or_else(|| {
+            SessionError::SecretConfiguration(format!(
+                "{HOST_SECRET_KEY_HEX_ENV} contains a non-hexadecimal character"
+            ))
+        })?;
+        key[index] = (high << 4) | low;
+    }
+    Ok(key)
+}
+
+const fn hex_nibble(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// Resolves the provider key through the Host broker and injects it only at
+/// the final built-in model process boundary. The broker reference is
+/// single-use, so a later disable/re-enable cycle cannot reuse this launch's
+/// authorization accidentally.
+fn inject_model_credential(
+    command: PluginCommand,
+    config: &ProviderConfig,
+    broker: &HostSecretBroker,
+    plugin_id: &PluginId,
+) -> Result<PluginCommand, PluginHostError> {
+    broker.set_plugin_enabled(plugin_id, true)?;
+    config.with_api_key(|key| broker.put_provider_credential(key))?;
+    let reference = broker.issue_provider_credential(plugin_id)?;
+    broker
+        .with_secret(reference, plugin_id, |bytes| {
+            // ProviderConfig is UTF-8 by construction; lossy conversion keeps
+            // this final process-boundary helper total even for a replacement
+            // SecretStore implementation.
+            command.env(
+                "YUNXI_PROVIDER_API_KEY",
+                String::from_utf8_lossy(bytes).into_owned(),
+            )
+        })
+        .map_err(PluginHostError::from)
+}
+
+fn apply_session_overrides(mut command: PluginCommand, options: &SessionOptions) -> PluginCommand {
+    if let Some(provider) = &options.provider {
+        command = command.env("YUNXI_PROVIDER_PROFILE", provider);
+    }
+    if let Some(model) = &options.model {
+        command = command.env("YUNXI_AGENT_MODEL", model);
     }
     command
+}
+
+fn resolve_session_cwd(path: Option<&Path>) -> Result<PathBuf, SessionError> {
+    let path = path.unwrap_or_else(|| Path::new("."));
+    let resolved = std::fs::canonicalize(path)?;
+    if !resolved.is_dir() {
+        return Err(SessionError::Executable(io::Error::new(
+            io::ErrorKind::NotADirectory,
+            format!("workspace is not a directory: {}", resolved.display()),
+        )));
+    }
+    Ok(resolved)
+}
+
+fn append_policy_notices(options: &SessionOptions, notices: &mut Vec<String>) {
+    match options.approval {
+        ApprovalMode::Never => notices.push(
+            "approval policy `never` rejects model actions that require approval; it never auto-executes them"
+                .to_string(),
+        ),
+        ApprovalMode::OnRequest => {}
+        ApprovalMode::OnFailure => notices.push(
+            "approval policy `on-failure` is conservatively handled as `on-request` by this bounded Host"
+                .to_string(),
+        ),
+        ApprovalMode::Untrusted => notices.push(
+            "approval policy `untrusted` is conservatively handled as `on-request` by this bounded Host"
+                .to_string(),
+        ),
+    }
+    if options.sandbox == SandboxMode::DangerFullAccess {
+        notices.push(
+            "sandbox `danger-full-access` is compatibility input only; this build remains workspace-bound"
+                .to_string(),
+        );
+    }
 }
 
 fn optional_skills_command(executable: &Path, root: &Path) -> PluginCommand {
@@ -2684,6 +3782,7 @@ fn append_dynamic_report_notices(report: &PluginReloadReport, notices: &mut Vec<
 #[derive(Debug)]
 pub(crate) enum SessionError {
     Config(ProviderConfigError),
+    SecretConfiguration(String),
     Executable(io::Error),
     PluginId(PluginIdError),
     Capability(CapabilityError),
@@ -2703,6 +3802,9 @@ impl fmt::Display for SessionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Config(error) => write!(formatter, "provider configuration failed: {error}"),
+            Self::SecretConfiguration(message) => {
+                write!(formatter, "Host secret configuration failed: {message}")
+            }
             Self::Executable(error) => write!(formatter, "failed to resolve host paths: {error}"),
             Self::PluginId(error) => write!(formatter, "plugin id is invalid: {error}"),
             Self::Capability(error) => write!(formatter, "capability is invalid: {error}"),
@@ -2731,6 +3833,7 @@ impl Error for SessionError {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Config(error) => Some(error),
+            Self::SecretConfiguration(_) => None,
             Self::Executable(error) => Some(error),
             Self::PluginId(error) => Some(error),
             Self::Capability(error) => Some(error),
@@ -2847,6 +3950,15 @@ impl Error for ChatFailure {}
 mod tests {
     use super::*;
 
+    fn assert_send<T: Send>() {}
+    fn assert_send_sync<T: Send + Sync>() {}
+
+    #[test]
+    fn session_and_shared_host_keep_the_background_worker_contract() {
+        assert_send::<ChatSession>();
+        assert_send_sync::<ProcessPluginHostHandle>();
+    }
+
     #[test]
     fn recall_query_includes_bounded_recent_conversation() {
         let messages = vec![
@@ -2881,6 +3993,131 @@ mod tests {
         assert!(
             !mcp.environment()
                 .contains_key(std::ffi::OsStr::new("OPENAI_API_KEY"))
+        );
+    }
+
+    #[test]
+    fn built_in_model_credential_uses_a_single_host_broker_reference() {
+        let config = ProviderConfig::new(
+            "fixture",
+            "fixture-model",
+            "http://127.0.0.1:1/v1",
+            "credential-never-log",
+        )
+        .expect("valid provider config");
+        let broker = HostSecretBroker::new();
+        let plugin_id = PluginId::new(MODEL_PLUGIN_ID).expect("model plugin id");
+        let command = inject_model_credential(
+            PluginCommand::new("yunxi-model"),
+            &config,
+            &broker,
+            &plugin_id,
+        )
+        .expect("credential injection");
+        assert_eq!(
+            command
+                .environment()
+                .get(std::ffi::OsStr::new("YUNXI_PROVIDER_API_KEY"))
+                .and_then(|value| value.to_str()),
+            Some("credential-never-log")
+        );
+        assert!(!format!("{broker:?}").contains("credential-never-log"));
+        assert!(
+            broker
+                .with_secret(
+                    broker
+                        .issue_provider_credential(&plugin_id)
+                        .expect("new reference"),
+                    &plugin_id,
+                    |_| ()
+                )
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn host_secret_master_key_parser_is_strict_and_case_insensitive() {
+        let lower = parse_host_secret_master_key(&"a5".repeat(32)).expect("lowercase key");
+        let upper = parse_host_secret_master_key(&"A5".repeat(32)).expect("uppercase key");
+        assert_eq!(lower, [0xa5; yunxi_secret_broker::MASTER_KEY_BYTES]);
+        assert_eq!(upper, lower);
+        assert!(parse_host_secret_master_key("00").is_err());
+        assert!(parse_host_secret_master_key(&"gg".repeat(32)).is_err());
+    }
+
+    #[test]
+    fn compatibility_stream_preserves_unicode_and_sequence_order() {
+        let cancellation = CancellationToken::new();
+        let mut events = Vec::new();
+        let text = format!("{}终", "a".repeat(COMPATIBILITY_TEXT_CHUNK_BYTES + 17));
+        {
+            let mut sink = |event: StreamEvent| {
+                events.push(event);
+                Ok(())
+            };
+            let mut stream =
+                CompatibilityStream::new(&mut sink, &cancellation, "compat-test".to_string());
+            stream
+                .state(0, StreamTurnState::Created)
+                .expect("created event");
+            stream
+                .state(1, StreamTurnState::ModelCalling)
+                .expect("model event");
+            stream.text(1, &text).expect("text events");
+            stream
+                .state(1, StreamTurnState::Completed)
+                .expect("completed event");
+            stream
+                .done(1, Some(ChatResult::new(&text, Some("stop".to_string()))))
+                .expect("done event");
+        }
+
+        let reconstructed = events
+            .iter()
+            .filter_map(|event| match event {
+                StreamEvent::TextDelta { delta, .. } => Some(delta.as_str()),
+                _ => None,
+            })
+            .collect::<String>();
+        assert_eq!(reconstructed, text);
+        assert!(
+            events
+                .windows(2)
+                .all(|pair| { pair[1].sequence() == pair[0].sequence().saturating_add(1) })
+        );
+        assert!(events.iter().all(|event| event.validate().is_ok()));
+        assert!(events.iter().any(|event| {
+            matches!(event, StreamEvent::TextDelta { delta, .. } if delta.len() <= COMPATIBILITY_TEXT_CHUNK_BYTES)
+        }));
+    }
+
+    #[test]
+    fn compatibility_stream_emits_terminal_state_after_cancellation() {
+        let cancellation = CancellationToken::new();
+        cancellation.cancel("user stopped");
+        let mut events = Vec::new();
+        {
+            let mut sink = |event: StreamEvent| {
+                events.push(event);
+                Ok(())
+            };
+            let mut stream =
+                CompatibilityStream::new(&mut sink, &cancellation, "compat-cancel".to_string());
+            stream.finish_cancellation(1, "cancelled", "user stopped");
+        }
+        assert!(events.iter().any(|event| {
+            matches!(
+                event,
+                StreamEvent::TurnState {
+                    state: StreamTurnState::Cancelled,
+                    ..
+                }
+            )
+        }));
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, StreamEvent::TurnDone { response: None, .. }))
         );
     }
 }

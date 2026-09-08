@@ -3,15 +3,16 @@
 use std::fs;
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use yunxi_protocol::WorkspaceGrant;
 
-use crate::settings::yunxi_home_dir;
+use crate::settings::{PersonaRoots, yunxi_home_dir, yunxi_next_home_dir};
 
 pub(crate) const DEFAULT_PROFILE_ID: &str = "yunxi_companion_strong";
 const MAX_PROFILE_FILE_BYTES: u64 = 512 * 1024;
 const MAX_SOUL_FILE_BYTES: u64 = 128 * 1024;
 
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub(crate) struct PersonaProfile {
     pub(crate) id: String,
     pub(crate) display_name: String,
@@ -26,7 +27,7 @@ pub(crate) struct PersonaProfile {
     pub(crate) constraints: Vec<PersonaConstraint>,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 pub(crate) struct PersonaLayers {
     #[serde(default)]
     pub(crate) identity: String,
@@ -46,13 +47,13 @@ pub(crate) struct PersonaLayers {
     pub(crate) addressing: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub(crate) struct PersonaConstraint {
     pub(crate) id: String,
     pub(crate) content: String,
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 pub(crate) struct PersonaCompanionRules {
     #[serde(default)]
     pub(crate) soul_signature: Option<String>,
@@ -76,7 +77,7 @@ pub(crate) struct PersonaCompanionRules {
     pub(crate) forbidden_styles: Vec<String>,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum PersonaRuleLevel {
     Low,
@@ -102,11 +103,19 @@ pub(crate) struct LoadedProfile {
 }
 
 pub(crate) fn load_active(profile_id: &str) -> LoadedProfile {
+    load_active_with_roots(profile_id, &PersonaRoots::from_environment())
+}
+
+pub(crate) fn load_active_from_grant(profile_id: &str, grant: &WorkspaceGrant) -> LoadedProfile {
+    load_active_with_roots(profile_id, &PersonaRoots::from_grant(grant))
+}
+
+pub(crate) fn load_active_with_roots(profile_id: &str, roots: &PersonaRoots) -> LoadedProfile {
     let mut warnings = Vec::new();
     let mut profile = if profile_id == DEFAULT_PROFILE_ID {
         default_profile()
     } else {
-        match load_profile_file(profile_id) {
+        match load_profile_file_with_roots(profile_id, roots) {
             Ok(profile) => profile,
             Err(error) => {
                 warnings.push(format!(
@@ -116,7 +125,15 @@ pub(crate) fn load_active(profile_id: &str) -> LoadedProfile {
             }
         }
     };
-    let soul_path = yunxi_home_dir().join("persona").join("soul.txt");
+    let next_soul_path = roots.next_persona_root().join("soul.txt");
+    let soul_path = std::iter::once(next_soul_path.clone())
+        .chain(
+            roots
+                .legacy_persona_root()
+                .map(|root| root.join("soul.txt")),
+        )
+        .find(|path| path.is_file())
+        .unwrap_or(next_soul_path);
     if let Err(error) = apply_soul_file(&mut profile, &soul_path) {
         warnings.push(format!(
             "failed to load persona soul {}: {error}; profile layers were kept",
@@ -126,12 +143,17 @@ pub(crate) fn load_active(profile_id: &str) -> LoadedProfile {
     LoadedProfile { profile, warnings }
 }
 
-fn load_profile_file(profile_id: &str) -> Result<PersonaProfile, String> {
+fn load_profile_file_with_roots(
+    profile_id: &str,
+    roots: &PersonaRoots,
+) -> Result<PersonaProfile, String> {
     validate_profile_id(profile_id)?;
-    let path = yunxi_home_dir()
-        .join("persona")
-        .join("profiles")
-        .join(format!("{profile_id}.json"));
+    let path = profile_paths_with_roots(profile_id, roots)
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or_else(|| {
+            format!("persona profile `{profile_id}` does not exist in the Next or legacy location")
+        })?;
     let metadata = fs::metadata(&path).map_err(|error| format!("{}: {error}", path.display()))?;
     if !metadata.is_file() {
         return Err(format!("{} is not a regular file", path.display()));
@@ -154,6 +176,35 @@ fn load_profile_file(profile_id: &str) -> Result<PersonaProfile, String> {
     }
     profile.validate()?;
     Ok(profile)
+}
+
+pub(crate) fn profile_paths(profile_id: &str) -> [std::path::PathBuf; 2] {
+    [
+        yunxi_next_home_dir()
+            .join("persona")
+            .join("profiles")
+            .join(format!("{profile_id}.json")),
+        yunxi_home_dir()
+            .join("persona")
+            .join("profiles")
+            .join(format!("{profile_id}.json")),
+    ]
+}
+
+pub(crate) fn profile_paths_with_roots(
+    profile_id: &str,
+    roots: &PersonaRoots,
+) -> Vec<std::path::PathBuf> {
+    let mut paths = vec![
+        roots
+            .next_persona_root()
+            .join("profiles")
+            .join(format!("{profile_id}.json")),
+    ];
+    if let Some(root) = roots.legacy_persona_root() {
+        paths.push(root.join("profiles").join(format!("{profile_id}.json")));
+    }
+    paths
 }
 
 fn apply_soul_file(profile: &mut PersonaProfile, path: &Path) -> Result<(), String> {
@@ -183,7 +234,7 @@ fn apply_soul_file(profile: &mut PersonaProfile, path: &Path) -> Result<(), Stri
 }
 
 impl PersonaProfile {
-    fn validate(&self) -> Result<(), String> {
+    pub(crate) fn validate(&self) -> Result<(), String> {
         validate_profile_id(&self.id)?;
         validate_required("display_name", &self.display_name, 96)?;
         validate_optional("version", &self.version, 32)?;

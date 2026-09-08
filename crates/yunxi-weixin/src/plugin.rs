@@ -141,10 +141,15 @@ pub enum WeixinPluginResponse {
         mode: String,
         real_weixin: bool,
     },
+    Runtime {
+        operation: String,
+        mode: String,
+        report: serde_json::Value,
+    },
 }
 
 #[derive(Default)]
-struct ChannelRuntime {
+pub(crate) struct ChannelRuntime {
     messages: BTreeMap<String, ChannelMessage>,
 }
 
@@ -199,6 +204,13 @@ impl ChannelRuntime {
 
 /// Run the Weixin channel fixture as a protocol plugin process.
 pub fn run_weixin_plugin() -> Result<(), WeixinPluginError> {
+    run_weixin_loopback_plugin("loopback-fixture", "weixin-channel")
+}
+
+fn run_weixin_loopback_plugin(
+    mode: &'static str,
+    adapter: &'static str,
+) -> Result<(), WeixinPluginError> {
     let capability = CapabilityDescriptor::new(
         capabilities::CHANNEL_WEIXIN,
         capabilities::CHANNEL_WEIXIN_VERSION,
@@ -215,7 +227,7 @@ pub fn run_weixin_plugin() -> Result<(), WeixinPluginError> {
         GrantRequirement::required(GrantKind::Secret),
     ])
     .with_runtime_metadata(PluginRuntimeMetadata::new(
-        "weixin-channel",
+        adapter,
         PluginRiskLevel::External,
     ));
     let mut session = connect_plugin_with_manifest(manifest, CONNECT_TIMEOUT)?;
@@ -225,7 +237,7 @@ pub fn run_weixin_plugin() -> Result<(), WeixinPluginError> {
         match session.receive()? {
             HostMessage::Invoke { request } => {
                 let request_id = request.request_id();
-                match dispatch(&mut runtime, &request) {
+                match dispatch_with_mode(&mut runtime, &request, mode, false) {
                     Ok(response) => {
                         let response = InvocationResponse::encode(request_id, &response)?;
                         session.send(&PluginMessage::InvocationCompleted { response })?;
@@ -235,6 +247,7 @@ pub fn run_weixin_plugin() -> Result<(), WeixinPluginError> {
                     }
                 }
             }
+            HostMessage::Cancel { .. } => {}
             HostMessage::Shutdown => return Ok(()),
             HostMessage::Welcome { .. } => {
                 return Err(WeixinPluginError::UnexpectedHostMessage(
@@ -245,9 +258,19 @@ pub fn run_weixin_plugin() -> Result<(), WeixinPluginError> {
     }
 }
 
+#[cfg(test)]
 fn dispatch(
     runtime: &mut ChannelRuntime,
     request: &InvocationRequest,
+) -> Result<WeixinPluginResponse, WeixinPluginError> {
+    dispatch_with_mode(runtime, request, "loopback-fixture", false)
+}
+
+pub(crate) fn dispatch_with_mode(
+    runtime: &mut ChannelRuntime,
+    request: &InvocationRequest,
+    mode: &str,
+    real_weixin: bool,
 ) -> Result<WeixinPluginResponse, WeixinPluginError> {
     if request.capability().id().as_str() != capabilities::CHANNEL_WEIXIN
         || request.capability().version() != capabilities::CHANNEL_WEIXIN_VERSION
@@ -311,8 +334,8 @@ fn dispatch(
                 plugin: WEIXIN_PLUGIN_ID.to_owned(),
                 capability: capabilities::CHANNEL_WEIXIN.to_owned(),
                 contract: CHANNEL_CONTRACT.to_owned(),
-                mode: "loopback".to_owned(),
-                real_weixin: false,
+                mode: mode.to_owned(),
+                real_weixin,
             })
         }
         _ => Err(WeixinPluginError::UnsupportedOperation),

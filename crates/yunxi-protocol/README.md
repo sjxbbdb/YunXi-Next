@@ -23,6 +23,14 @@ write, sessions, companion policy, encrypted mailbox operations, and proactive
 scheduling, plus bounded multi-agent graph/turn coordination. Capability
 versions travel in both the readiness declaration and every invocation frame.
 
+Skills retain a metadata-only `tools.json` contract. Executable Skill actions
+use a separate typed contract: `SkillActionSpec` fixes a relative program and
+arguments plus timeout/output limits, while `SkillActionRequest` and
+`SkillActionResponse` use action protocol version 1. The protocol carries no
+grant or secret; the Host must enforce an approved grant and workspace scope
+before launching the child. Host cancellation is outside the child protocol
+and must terminate the child process at the Host boundary.
+
 | Path | Responsibility |
 | --- | --- |
 | [`src/`](src/README.md) | Protocol messages, transport, and handshake logic |

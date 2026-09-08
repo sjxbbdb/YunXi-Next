@@ -12,6 +12,8 @@ const SESSION_SCHEMA_VERSION: u32 = 1;
 const MAX_SESSION_ID_CHARS: usize = 128;
 const MAX_MESSAGE_CHARS: usize = 256 * 1024;
 const MAX_MESSAGES: usize = 512;
+const MAX_SESSION_TITLE_CHARS: usize = 240;
+const MAX_PROVIDER_MODEL_CHARS: usize = 256;
 static NEXT_SESSION_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -167,6 +169,47 @@ impl StoredSession {
         if let Some(model) = model {
             self.model = Some(model.to_string());
         }
+        self.updated_at_millis = now_millis();
+    }
+
+    pub(crate) fn set_title(&mut self, title: &str) -> Result<(), String> {
+        let title = title.trim();
+        if title.is_empty() {
+            return Err("session title must not be empty".to_string());
+        }
+        if title.chars().count() > MAX_SESSION_TITLE_CHARS {
+            return Err(format!(
+                "session title exceeds {MAX_SESSION_TITLE_CHARS} characters"
+            ));
+        }
+        if title.contains('\0') {
+            return Err("session title contains a NUL character".to_string());
+        }
+        self.title = title.to_string();
+        self.updated_at_millis = now_millis();
+        Ok(())
+    }
+
+    pub(crate) fn validate_provider_model(
+        provider: Option<&str>,
+        model: Option<&str>,
+    ) -> Result<(), String> {
+        for (name, value) in [("provider", provider), ("model", model)] {
+            if let Some(value) = value {
+                if value.trim().is_empty() {
+                    return Err(format!("{name} must not be empty"));
+                }
+                if value.chars().count() > MAX_PROVIDER_MODEL_CHARS {
+                    return Err(format!(
+                        "{name} exceeds {MAX_PROVIDER_MODEL_CHARS} characters"
+                    ));
+                }
+                if value.contains('\0') {
+                    return Err(format!("{name} contains a NUL character"));
+                }
+            }
+        }
+        Ok(())
     }
 
     pub(crate) fn import_from_legacy(mut self) -> Self {
@@ -182,7 +225,10 @@ impl StoredSession {
         self
     }
 
-    pub(crate) fn fork(mut self) -> Self {
+    pub(crate) fn fork_at(mut self, at_message: Option<usize>) -> Self {
+        if let Some(at_message) = at_message {
+            self.messages.truncate(at_message.min(self.messages.len()));
+        }
         let parent_id = self.id;
         let now = now_millis();
         self.id = generate_id(now);
@@ -193,6 +239,11 @@ impl StoredSession {
         self.created_at_millis = now;
         self.updated_at_millis = now;
         self
+    }
+
+    pub(crate) fn truncate_messages(&mut self, maximum: usize) {
+        self.messages.truncate(maximum.min(self.messages.len()));
+        self.updated_at_millis = now_millis();
     }
 
     pub(crate) fn set_archived(&mut self, archived: bool) {

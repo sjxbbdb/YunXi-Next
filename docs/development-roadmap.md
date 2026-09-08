@@ -1,10 +1,11 @@
 # YunXi Next 开发路线图
 
-> 版本：v1.2
-> 基线提交：`b850e8d`
-> 制定日期：2026-08-22；更新日期：2026-09-06
-> 状态：Cordis core/runtime、Agent spine、CLI/Web 默认执行链和 Voice/Weixin
-> fixture 接线已完成基线；异步多智能体、真实语音/微信适配和完整 parity 仍在开发
+> 版本：v1.3
+> 工作分支：`codex/complete-plugin-runtime`（发布提交以最终门禁记录为准）
+> 制定日期：2026-08-22；更新日期：2026-09-08
+> 状态：Rust Cordis 元内核、Agent spine、进程插件、CLI/TUI/Web、管理面、
+> 本地 Multi-agent、Voice sidecar、Weixin iLink 和安全迁移已形成发布候选；
+> 真实设备/账号/媒体、远程多机和 OS 沙箱仍属于外部或平台验收
 
 这份文档是 YunXi Next 后续开发的排序、范围和完成判定。它不是功能愿望
 清单。没有通过本文件规定的验收门槛，能力只能标记为 `planned` 或
@@ -29,41 +30,60 @@ YunXi Next 最终应成为一个以 Rust trusted kernel 为中心、所有业务
 | Cordis core / runtime | 基础版已接入 | `Context`、`Service`、`inject`、`Event`、`Effect`、Fiber 生命周期，以及静态插件注册、开关和失败隔离；动态包生命周期由 Plugin Host 承担，任意 `cdylib`/WASM 仍未开放。 |
 | Agent spine | 默认执行链已接入 | 独立 Rust loop、bounded session/context/model/tool seams、cancellation、budget 和 fail-closed approval continuation 已接入 CLI/Web；`ChatSession` 保留应用生命周期、持久化和 Web projection，不再承担第二套模型工具循环。 |
 | Kernel / Plugin Host | 已接入 | 进程监督、握手、能力路由、崩溃隔离、兄弟插件存活，以及每次启用最多 3 次的 refresh 驱动自动恢复。 |
-| Model Chat | 基础版已接入 | OpenAI/DeepSeek 兼容 Chat Completions；库层已有有界 SSE 流式适配，CLI/Web 当前仍走完整响应载体。 |
+| Model Chat | 基础版已接入 | OpenAI/DeepSeek 兼容 Chat Completions；有界 SSE 流式适配已接入 CLI REPL/TUI、`run --jsonl` 和 WebHost 的增量事件路径。 |
 | Context / Persona | 基础版已接入 | `AGENTS.md`、Persona profile 和 `soul.txt` 的受限读取与组合。 |
-| Memory | 基础版已接入 | 召回、规则提取、隐私过滤、去重、待审核写入；默认关闭。 |
+| Memory | 本地产品路径已接入 | 召回、规则提取、隐私过滤、去重、待审核写入及 status/list/show/search/approve/reject/delete/clear/on/off 均通过独立进程 Host facade；无风险默认开启。 |
 | Storage | 基础版已接入 | 会话 append/list/load/resume 和旧记录只读投影。 |
-| Companion | 基础版已接入 | 确定性语气/跟进决策；默认关闭。 |
+| Companion | 本地产品路径已接入 | 确定性语气/跟进决策及 status/check/history/clear/on/off 均通过独立进程 Host facade；无风险默认开启。 |
 | Mailbox / Scheduler | 基础版已接入 | 加密信箱和受限主动计划；跟随 Companion 默认关闭。 |
 | Shell / Patch | 基础版已接入 | 独立进程、Host 审批、workspace grant、超时和输出限制；默认关闭。 |
 | File search / view | 基础版已接入 | 独立只读进程、`tool.files@1`、workspace read grant、路径和内容大小限制；默认关闭。 |
 | MCP stdio/HTTP bridge | 基础版已接入 | 独立二层进程、MCP initialize/list/call/cancel、JSON/SSE、session id、动态工具投影、Host approval 和崩溃恢复；默认关闭。HTTP 需要显式 network scope，Secret 只通过 reference grant 发放。 |
-| Skills | 基础版已接入 | 独立只读进程、受限发现/上下文、禁用过滤和 metadata-only 动态工具声明；默认关闭。 |
-| Multi-agent | 基础版已接入 | 独立协调进程、父子图、预算、持久化、恢复和独立子模型进程；默认关闭。当前子回合同步执行，不宣称后台并行或执行中即时中断。 |
+| Skills | 本地产品路径已接入 | 独立发现/上下文、禁用过滤、惰性 metadata-only 声明，以及显式启用、固定 allowlist、Host 审批、ActionGrant、取消和隔离进程的可执行 action；默认关闭。 |
+| Multi-agent | 本地产品路径已接入 | 独立协调进程、父子图、预算、持久化、精确子工具 grants、独立子模型、Web 并行 continuable worker、模型选择、流事件、即时中断、会话重挂恢复和兄弟故障隔离；默认关闭，远程多机不在本地范围。 |
 | Composition | 基础版已接入 | Profile、Bundle、Layer 和插件 inventory 已有；settings crate 的 15 个内置可选键全部进入 CLI/Web 启动组合，动态插件目录支持受约束的包发现/重载；任意第三方 bundle 配置仍未开放。 |
-| Voice / Weixin contracts | fixture 接线已接入 | `yunxi-voice` 和 `yunxi-weixin` 已有版本化 Rust 契约、loopback process fixture、Host 边界测试，并在开关开启时进入 CLI/Web inventory；仍不提供真实设备、登录或网络能力。 |
-| Web | Phase 3 本地基线已接入 | 固定 dsh Web 客户端、session create/history/prompt、审批响应、mux/host 事件、健康/inventory/session projection 和 Settings > Plugins 能力开关共用同一个 CLI Host；当前仍是 loopback、单 Host、完整响应模式，Voice/Weixin 为默认关闭的 fixture route。 |
+| Voice / Weixin | 本地适配边界已接入 | 同一 Host 进程插件可在 loopback 与显式 Voice JSONL sidecar / Weixin HTTPS iLink 间选择；Device/Network/Secret grants、doctor/login/serve/send/reply、取消、重启、加密存储和失败回退均有自动测试；真实硬件/账号/媒体仍需人工证据。 |
+| Web | 本地产品路径已接入 | 固定 dsh Web 客户端、实时多会话、取消/审批、持久 SSE cursor、Memory/Persona/Relationship/Mailbox、Multi-agent、Voice/Weixin 和 Settings > Plugins 开关共用同一 Host；仍是 loopback 单机未认证服务。 |
 
-当前默认开关由 `yunxi-settings` 定义：Context、Persona、Storage 开启；Memory、
-Companion、Mailbox、Scheduler、Shell、Patch、Files、MCP、Skills、Multi-agent、
-Voice、Weixin 关闭。Web 当前写入
+当前组合策略：Model/Agent spine 必开；Context、Persona、Memory、Companion、
+Storage 属于无外部副作用的安全默认；Mailbox、Scheduler、Shell、Patch、Files、
+MCP、Skills、Multi-agent、Voice、Weixin 默认关闭。Web 当前写入
 `YUNXI_NEXT_HOME\settings.json`；WebHost 在写入后重建当前 Host，独立 CLI
 在下一次 Host 启动时应用；`settings.plugins`
 的显式值优先于旧 capability 环境/文件设置，后者作为兼容性回退入口。
-Voice/Weixin 开关现在会建立对应的隔离 fixture launch/route；打开它们不会
-授予真实设备、登录或网络后端权限，生产适配器仍按 Phase 5 交付。
+Voice/Weixin 开关会建立对应的隔离进程和路由；开启即获得该插件声明的 Host
+grants，关闭即停止进程并撤销路由。只有显式 sidecar/iLink 配置才选择外部适配器，
+其本地可用性仍不等于真实设备或账号已完成生产验收。
 
 ### 当前完成边界
 
 本基线已经完成：Rust Cordis 核心原语、默认 Agent spine、进程级插件隔离、
 内置能力的启停与故障恢复、受约束的动态 Rust 可执行包发现/依赖排序/重载/卸载、
-CLI 控制命令、Web 插件开关和 Voice/Weixin 的可替换 fixture 契约。上述能力均有
+CLI/TUI/Web 管理命令、插件开关、Voice/Weixin 可替换适配边界。上述能力均有
 针对协议边界、坏帧、崩溃、超时、禁用和兄弟存活的测试。
 
-仍未完成的产品级能力是：真实 Secret broker、操作系统级资源/网络沙箱、真实
-麦克风/扬声器和语音 SDK、真实 Weixin 登录/网络通道、CLI/Web 的端到端 token
-streaming、后台并行多 Agent、执行中即时取消、可执行 Skill，以及认证和多客户端
-Web 服务。它们不能由 fixture、库层接口或静态 inventory 视为已上线。
+仍未由仓库自动完成的是：真实麦克风/扬声器/语音 Provider、真实 Weixin
+账号与媒体字节、OS keychain/HSM、操作系统级 CPU/内存/句柄/文件/网络沙箱、
+远程多机调度，以及认证后的非 loopback 多客户端 Web。上述外部边界不能由
+fixture、库层接口、`production_ready` 字段或静态 inventory 视为已验收。
+
+### 发布验收门禁
+
+每次发布候选必须从 `D:\YunXi Next` 执行
+`scripts\acceptance-audit.ps1`。门禁只构建并安装 `yunxi-next.exe` 到唯一的
+私有临时目录，先后读取旧版 `D:\Apps\YunXi Agent\bin\yunxi.exe` 的保护性
+SHA-256，并对 `D:\YunXi Agent` 做只读指纹核对。它不得启动旧版，不得写旧版
+源码或二进制，不得修改 PATH、注册表、Windows 服务或当前 checkout。
+
+自动证据必须包括 PowerShell 语法/安全检查、`cargo fmt --check`、严格
+Clippy、workspace tests、release build/install、CLI/Web/ConPTY smoke，以及
+插件坏帧、崩溃、超时、三次重启耗尽、禁用/重新启用、动态替换、失败替换
+恢复、卸载归属和 migration rollback 的精确测试结果。`-DryRun` 只验证范围
+和旧版 SHA-256；任何跳过项都不能被记录为发布通过。
+
+真实 Voice 设备/sidecar 和 Weixin 账号/网络/媒体链路只允许列入人工联调
+记录。fixture、loopback、静态 inventory 和 `production_ready` 字段不能代替
+这些外部证据。
 
 ## 3. 开发排序
 
@@ -153,34 +173,42 @@ dsh 源码和 MIT 版权声明必须单独记录，不能混入 Rust Kernel 代�
 取消传播、子会话持久化和状态事件。
 
 **当前基线：** `P4-01` 已冻结 `tool.multi-agent@1` typed contract，并由
-`yunxi-multi-agent` 独立进程持久化父子图、转录、预算和有界事件；协调进程重启
-只把遗留的 Running 分支标记为失败。`P4-02` 已把 `agent.spawn/list/message/interrupt`
-接入模型工具目录，spawn/message 复用 Host approval，每次子回合启动单独的 Model
-plugin 进程，且不向子进程发放父会话工具目录或 Provider credential 协议字段。
+`yunxi-multi-agent` 独立进程持久化父子图、转录、预算和有界事件。协调进程重启会
+先把旧的 Running 分支标成可恢复状态；Web 根会话重新挂载时，Host 会用新的精确
+grant 重建可续写 worker，已取消或已失败的分支不会被错误重启。`P4-02` 已把
+`agent.spawn/list/message/interrupt` 接入模型工具目录，spawn/message 复用 Host
+approval，每次子回合启动单独的 Model plugin 进程，且不向子进程发放父会话之外的
+工具目录或 Provider credential 协议字段。
 
-**当前进展：** `P4-03` 已先完成 Web 只读投影切片：dsh 现有的
+**当前进展：** `P4-03` 已完成 WebHost 的受限 continuable worker 切片：dsh
 `subagent.list` / `subagent.history` 能读取真实父子图、子会话状态和有界 transcript，
-`session.list` 会携带 `origin: subagent` 与 `parentSessionId`。查询使用只读 grant，
-协调器重启后的运行中分支会在只读视图中降级为失败，不阻断历史查看。
+`subagent.prompt` 可续写，`subagent.interrupt` 可中断当前 Web child worker，多个
+worker 受 Host 上限约束并通过 mux 发送子模型增量和状态事件。`session.list` 会携带
+`origin: subagent` 与 `parentSessionId`。查询使用只读 grant，协调器重启后的运行中
+分支会在只读视图中降级为失败，不阻断历史查看。
 
-**待完成：** 后台并行 worker、执行中子模型请求的真实取消、子 Agent 工具 grant 和
-模型选择。当前 `interrupt` 在回合之间递归更新持久化状态，不能终止已经发出的同步
-HTTP 请求；Web 端暂只支持 one-shot 子会话查看，不支持 continuable 子会话续写。
+**当前边界：** CLI 模型工具仍以有界 one-shot 子回合为主；Web 已支持独立的
+continuable worker、精确的 file/patch 工具 grant、模型选择、并行执行、增量事件、
+即时中断和根会话重挂恢复。当前自动证据覆盖有界双 worker 的并行与兄弟隔离，尚不
+声称无限并发或远程多机调度。Web worker 的取消会立即撤销本地任务并关闭对应
+provider/process；远端 HTTP 服务本身是否在网络边界外停止，仍取决于 provider 的
+协作取消语义。
 
 **退出门槛：** 子 Agent 不能继承超出父任务的 grant；子 Agent 崩溃、超时或
 取消只结束对应分支；主会话、Kernel 和同级 Agent 仍可继续工作。
 
-当前已通过 grant 子集、失败分支和同级存活测试，但在执行中即时取消和并行调度
-完成前，Phase 4 仍保持 `baseline`，不标记为完整 `integrated`。
+当前本地阶段已通过 grant 子集、可执行子工具、失败分支、Web worker 中断、并行模型
+选择、根会话恢复和同级存活测试；远程调度与非 loopback 多租户服务仍明确排除在本地
+发布范围之外。
 
 ### Phase 5：Voice 和 Weixin Channel
 
 **目标：** 把语音和微信做成可替换的媒体/渠道适配器，文字聊天始终保持
 独立可用。
 
-**当前基线：** `yunxi-voice` 和 `yunxi-weixin` 已完成契约与 fixture 切片，
-但尚未达到产品能力完成门槛。两者都必须继续复用现有 Plugin Host、审批和
-故障隔离边界。
+**当前基线：** `yunxi-voice` 和 `yunxi-weixin` 已接入同一 Plugin Host 路径，
+并完成确定性 loopback 与显式外部适配器的本地边界。两者继续复用现有 Plugin Host、
+grant、审批和故障隔离边界；真实设备、账号和媒体仍只由人工联调确认。
 
 **实现包：** `yunxi-voice`、`yunxi-weixin`。
 
@@ -194,9 +222,11 @@ HTTP 请求；Web 端暂只支持 one-shot 子会话查看，不支持 continuab
 - 微信语音输入复用 Voice plugin 和同一个 YunXi session；渠道不嵌入第二套
   Agent runtime。
 
-当前 fixture 只证明协议和进程边界：Voice fixture 的音频是合成标记且无
-`Device` grant；Weixin fixture 只在内存中处理消息，虽声明所需
-`Network`/`Secret` grant，但没有登录、SDK 或网络传输。
+本地 Host 路径在没有外部配置时使用 bounded loopback；Voice 在显式配置
+`YUNXI_VOICE_SIDECAR_PROGRAM` 后切换到独立 JSONL sidecar，并只发放 `Device`
+grant；Weixin 在显式 production 配置完整时切换到 HTTPS iLink、加密 SecretStore
+和非阻塞 long-poll，否则使用确定性 loopback/fallback。内置 fixture 仍只用于
+协议回归，不能替代真实设备、账号、签名、媒体和网络证据。
 
 **退出门槛：** 设备拒绝、服务超时、坏音频、插件崩溃、取消和背压都有可见
 回退；微信网关或 Voice 失败时，CLI 文本聊天仍能继续。
@@ -211,9 +241,13 @@ HTTP 请求；Web 端暂只支持 one-shot 子会话查看，不支持 continuab
   状态迁移。
 - Session show/history/rollout/graph/fork/archive/pin 等命令和完整旧事件投影。
 - Persona、Companion、Controls 的持久化开关、历史、审计和清理命令。
-- Model token streaming、`--json`、`--jsonl`、结构化输出以及必要的
-  `--cwd`、provider/model、approval/sandbox 配置兼容层。
-- 在 Web 稳定后再实现完整 TUI；TUI 只调用现有 Host facade。
+- Model 的完整旧版输出 parity、`--json`、结构化输出以及必要的 `--cwd`、
+  provider/model、approval/sandbox 配置兼容层；CLI/Web 的本地增量 streaming 和
+  `--jsonl` 事件路径已属于当前基线，不再作为未实现能力记录。
+- TUI 已实现首版 parity：由本地 Host facade 驱动流式回合、取消、后端切换，
+  并提供旧版常用的会话、模型、provider、插件、Memory、Persona、Companion、
+  Controls、Voice 和迁移管理入口；仍需后续补齐语音设备交互与完整 token 计费
+  展示，不能据此宣称与旧版全部功能等价。
 
 **退出门槛：** 旧版数据仍只读可回退；新命令不会覆盖旧文件；结构化输出有
 固定 fixture；streaming 和交互取消不会留下插件进程或半写状态。
@@ -281,13 +315,14 @@ Phase 0 和 Phase 1 已按下列顺序完成。后续仍保持一次只推进一
 7. `P4-01` 已完成：冻结多智能体协议、grant 子集、预算、父子图、持久化和重启恢复。
 8. `P4-02` 基线已完成：接入 Host 审批、独立子 Model 进程及
    `agent.spawn/list/message/interrupt` 模型工具。
-9. `P4-03` 首个 Web 只读切片已完成；后台并行、执行中即时取消、子工具 grant
-   和可续写子会话仍未完成。
-10. `P5-01` fixture 接线已完成：Voice transcribe/synthesize 契约、process
-     fixture、CLI/Web composition 和开关路由已有；待 Device grant、真实音频
-     后端和失败回退。
-11. `P5-02` fixture 接线已完成：Weixin channel 契约、process fixture、CLI/Web
-     composition 和开关路由已有；待登录/网络适配、Secret broker 和失败回退。
+9. `P4-03` 已完成本地 Web worker 闭环：后台 worker、增量事件、bounded interrupt、
+     `subagent.list/history/prompt/interrupt`、精确子工具 grant、独立模型选择、并行
+     执行和根会话重挂恢复均已接入；远程调度和无限并发不属于本地发布范围。
+10. `P5-01` 已完成 Host Voice 适配边界：loopback、显式 JSONL sidecar、Device grant、
+     设备/播放/保存/取消/背压/重启/文字降级均有本地测试；真实硬件和 provider 仍待人工。
+11. `P5-02` 已完成 Host Weixin 适配边界：loopback、显式 HTTPS iLink、SecretStore、
+     login/status/doctor/serve/pair/session/logout、long-poll、幂等队列和 Agent bridge
+     均已接入；真实账号、网络签名、加密和媒体仍待人工。
 12. `P6-01` 已完成首版：Agent spine 已成为 CLI/Web 默认模型工具编排路径；
       Cordis service discovery 和应用钩子仍继续收敛，包式动态插件装载已进入
       Plugin Host 基线。
@@ -327,14 +362,22 @@ Phase 0 和 Phase 1 已按下列顺序完成。后续仍保持一次只推进一
 | --- | --- | --- |
 | `P4-03` Web 子 Agent 目录与历史 | 已完成首个切片 | `AgentInspectRequest/Result` 与协调器 `inspect` 仅返回受限 transcript；`subagent.list` 支持根及已知子父级，`subagent.history` 输出 dsh `HistoryEntry` 分页；只读重启恢复、HTTP 路由和 `yunxi-cli/tests/web_host.rs` 进程回归均通过 |
 
-### 执行记录：2026-09-06
+### 历史执行记录：2026-09-06
 
 | 项目 | 状态 | 证据 |
 | --- | --- | --- |
 | Cordis Rust foundation | 基线已完成 | `yunxi-cordis-core` 覆盖 scoped Context/Service、typed Event、Effect、Fiber 和 panic-contained callbacks；`yunxi-cordis-runtime` 覆盖 static registry、manifest policy、enable/disable、dependency resolution、local failure snapshots；两者均不负责进程/IPC。 |
 | Agent spine approval slice | 默认路径已完成 | `yunxi-agent-spine` 覆盖 bounded session、model/context/tool seams、loop budgets、cancellation、`AwaitingApproval` continuation、approval decision validation 和 denied tool results；CLI 默认 Chat/Web turn 已通过 spine-backed Host adapter，兼容循环仅由显式环境变量启用。 |
-| Voice process fixture | 接线基线已完成 | `yunxi-voice` Host tests 覆盖 protocol-v2 handshake、exact capability set、transcribe/synthesize/cancel、bounds 和 disable route removal；CLI/Web 开关开启时会启动并投影 fixture；无 device/backend/runtime。 |
-| Weixin process fixture | 接线基线已完成 | `yunxi-weixin` Host tests 覆盖 `channel.weixin@1`、required Network/Secret declarations、inbound idempotency/ACK、malformed payload and disable route removal；CLI/Web 开关开启时会启动并投影 fixture；无 login/SDK/network runtime。 |
+| Voice process fixture | 当日历史基线 | 当日记录只覆盖 process fixture；后续记录已补齐 Host loopback/sidecar、Device grant 和本地失败回退。 |
+| Weixin process fixture | 当日历史基线 | 当日记录只覆盖 process fixture；后续记录已补齐 Host loopback/iLink、SecretStore、poll worker 和管理边界。 |
+
+### 执行记录：2026-09-08
+
+| 项目 | 状态 | 证据 |
+| --- | --- | --- |
+| Web Multi-agent worker | 本地闭环已完成 | `web_host.rs` 覆盖持久 Running worker 在根会话重挂时自动恢复、两个 worker 并行使用独立模型、目标子 Agent 即时中断且兄弟仍可用；子工具目录按父级 grant 精确求交。 |
+| Voice / Weixin Host boundary | 本地适配边界已完成 | Voice Host 覆盖 loopback、显式 sidecar、Device grant、音频文件适配和文字回退；Weixin Host 覆盖 loopback、显式 iLink、SecretStore、long-poll、幂等队列和管理生命周期。真实设备/账号仍按外部清单人工验收。 |
+| Release gate correction | 定向通过 | `acceptance-audit.ps1` 的 ConPTY 使用空标准句柄并由独立线程排空 UTF-8 管道；定向审计已通过 release 安装、CLI/Web smoke、ConPTY 和旧版 SHA-256/树指纹保护。 |
 
 本批次已改变 Model 的可选工具运行时行为，但没有把 manifest 声明误当作
 实际 Secret broker 或操作系统沙箱。Phase 1 的文字 Action Path 已完成
@@ -350,13 +393,14 @@ prompt/history/approval RPC、独立 HTTP/SSE carrier、插件 inventory 和持�
 可执行路径或任意插件配置；内置开关更新通过 Host 重建应用，动态包目录在刷新边界
 重扫并支持生成代际安全的替换和卸载，不宣称运行中单插件原地热卸载。
 
-Phase 4 已形成第一版隔离基线：协调状态和子模型都位于受监督的独立进程，
-Agent grant 不能超过父级，单个子模型 API 失败只结束对应分支。当前仍按同步回合
-执行，不具备后台并行和执行中即时取消，因此不能视为多智能体阶段全部完成。
+Phase 4 当前本地闭环已完成：协调状态和子模型都位于受监督的独立进程，Agent grant
+不能超过父级，单个子模型 API 失败只结束对应分支。WebHost 支持 continuable child
+worker、增量事件、活动 worker 中断、精确 file/patch grant、模型选择、并行执行和
+根会话重挂恢复；CLI 模型工具仍按同步 one-shot 子回合执行，远程多机不在本地范围。
 
 Cordis runtime 当前是 trusted bootstrap，Agent spine 已成为 CLI/Web 的默认
 模型工具编排入口；`ChatSession` 仍负责应用钩子和投影。这不代表生产 Web
-服务已经完成。当前没有认证和非 loopback 监听策略，WebHost 仍是文本内容、
-单实例活动会话、完整响应和轮询式事件，不宣称 token streaming、多会话并发
-或真正多客户端 fan-out。继续推进后续阶段时仍应保持旧版 fallback、文字 CLI
-和 trusted kernel 的独立验证。
+服务已经完成。当前没有认证和非 loopback 监听策略，WebHost 虽支持受限独立会话、
+子 worker 增量事件和活动中断，但不提供真正的多客户端 fan-out、远端调度或完整
+dsh parity。继续推进后续阶段时仍应保持旧版 fallback、文字 CLI 和 trusted kernel
+的独立验证。

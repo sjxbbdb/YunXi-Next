@@ -16,6 +16,7 @@ members = [
     "crates/yunxi-plugin-host",
     "crates/yunxi-protocol",
     "crates/yunxi-scheduler",
+    "crates/yunxi-secret-broker",
     "crates/yunxi-settings",
     "crates/yunxi-storage",
     "crates/yunxi-tool-shell",
@@ -38,6 +39,7 @@ rust-version = "1.85"
 [workspace.dependencies]
 base64 = "0.22"
 chacha20poly1305 = "0.10"
+crossterm = "0.28.1"
 getrandom = "0.3"
 reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "json", "rustls", "system-proxy"] }
 serde = { version = "1.0.229", features = ["derive"] }

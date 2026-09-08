@@ -58,6 +58,7 @@ pub fn run_scheduler_plugin() -> Result<(), SchedulerPluginError> {
                 let response = InvocationResponse::encode(request_id, &evaluate(&payload))?;
                 session.send(&PluginMessage::InvocationCompleted { response })?;
             }
+            HostMessage::Cancel { .. } => {}
             HostMessage::Shutdown => return Ok(()),
             HostMessage::Welcome { .. } => {
                 return Err(SchedulerPluginError::UnexpectedHostMessage(

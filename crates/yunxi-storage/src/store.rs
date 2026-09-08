@@ -16,8 +16,8 @@ use yunxi_protocol::{
 
 use crate::record::{StoredSession, validate_session_id};
 
-const MAX_SESSION_FILE_BYTES: u64 = 8 * 1024 * 1024;
-const MAX_SCANNED_FILES: usize = 2_000;
+pub(crate) const MAX_SESSION_FILE_BYTES: u64 = 8 * 1024 * 1024;
+pub(crate) const MAX_SCANNED_FILES: usize = 2_000;
 const MAX_LIST_LIMIT: usize = 200;
 
 #[derive(Clone, Debug)]
@@ -144,11 +144,33 @@ impl SessionStore {
             SessionMutation::Unarchive => session.set_archived(false),
             SessionMutation::Pin => session.set_pinned(true),
             SessionMutation::Unpin => session.set_pinned(false),
+            SessionMutation::Rename => {
+                let title = request.title().ok_or_else(|| {
+                    StorageError::InvalidRecord("rename mutation requires a title".to_string())
+                })?;
+                session
+                    .set_title(title)
+                    .map_err(StorageError::InvalidRecord)?;
+            }
+            SessionMutation::SelectModel => {
+                if request.provider().is_none() && request.model().is_none() {
+                    return Err(StorageError::InvalidRecord(
+                        "select_model mutation requires provider or model".to_string(),
+                    ));
+                }
+                StoredSession::validate_provider_model(request.provider(), request.model())
+                    .map_err(StorageError::InvalidRecord)?;
+                session.set_provider_model(request.provider(), request.model());
+            }
             SessionMutation::Fork => {
                 session = if legacy {
-                    session.import_from_legacy()
+                    let mut imported = session.import_from_legacy();
+                    if let Some(at_message) = request.at_message() {
+                        imported.truncate_messages(at_message);
+                    }
+                    imported
                 } else {
-                    session.fork()
+                    session.fork_at(request.at_message())
                 };
             }
         }
@@ -288,7 +310,7 @@ fn read_next_record(path: &Path) -> Result<Option<StoredSession>, StorageError> 
     Ok(Some(record))
 }
 
-fn read_legacy_record(path: &Path) -> Result<Option<StoredSession>, StorageError> {
+pub(crate) fn read_legacy_record(path: &Path) -> Result<Option<StoredSession>, StorageError> {
     let Some(content) = read_bounded(path)? else {
         return Ok(None);
     };
@@ -308,7 +330,7 @@ fn read_legacy_record(path: &Path) -> Result<Option<StoredSession>, StorageError
         })
 }
 
-fn read_bounded(path: &Path) -> Result<Option<Vec<u8>>, StorageError> {
+pub(crate) fn read_bounded(path: &Path) -> Result<Option<Vec<u8>>, StorageError> {
     let metadata = match fs::metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),

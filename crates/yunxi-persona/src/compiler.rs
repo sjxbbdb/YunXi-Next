@@ -7,7 +7,7 @@ use yunxi_protocol::{
     MemoryContextKind, MemoryContextRecord, PersonaContextRequest, PersonaContextResult,
 };
 
-use crate::profile::{PersonaProfile, load_active};
+use crate::profile::{PersonaProfile, load_active, load_active_from_grant};
 use crate::settings::PersonaSettings;
 
 const MIN_CONTEXT_BUDGET_CHARS: usize = 1400;
@@ -21,8 +21,13 @@ pub fn compile_context(
     request: &PersonaContextRequest,
 ) -> Result<PersonaContextResult, PersonaCompileError> {
     validate_request(request)?;
-    let loaded_settings = PersonaSettings::load();
-    let loaded_profile = load_active(&loaded_settings.settings.active_profile);
+    let loaded_settings = request.grant().map_or_else(PersonaSettings::load, |grant| {
+        PersonaSettings::load_from_grant(grant)
+    });
+    let loaded_profile = request.grant().map_or_else(
+        || load_active(&loaded_settings.settings.active_profile),
+        |grant| load_active_from_grant(&loaded_settings.settings.active_profile, grant),
+    );
     let mut warnings = loaded_settings.warnings;
     warnings.extend(loaded_profile.warnings);
     Ok(compile_with(

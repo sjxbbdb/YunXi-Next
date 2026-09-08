@@ -12,6 +12,7 @@ getrandom.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 yunxi-protocol = { path = "../yunxi-protocol" }
+yunxi-scheduler = { path = "../yunxi-scheduler" }
 
 [lints]
 workspace = true

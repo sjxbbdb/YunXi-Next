@@ -10,9 +10,11 @@ preserving process isolation.
 
 The client supports bounded OpenAI-compatible SSE streaming for text and tool
 call deltas. The current legacy plugin invocation remains completion-shaped so
-older Hosts stay compatible; the stream API is the bridge used by the newer
-Agent event path. An API or observer error is reported as a failed request and
-does not end the plugin loop.
+older Hosts stay compatible; the stream API is used by the Agent event path,
+including the CLI/TUI/Web adapters and `run --jsonl`. The Web carrier still
+uses bounded finite SSE polls with cursors rather than a remotely persistent
+connection. An API or observer error is reported as a failed request and does
+not end the plugin loop.
 Configuration is documented in
 [`../../docs/provider-configuration.md`](../../docs/provider-configuration.md).
 

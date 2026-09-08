@@ -8,6 +8,10 @@ publish = false
 [dependencies]
 yunxi-protocol = { path = "../yunxi-protocol" }
 
+[dev-dependencies]
+yunxi-kernel = { path = "../yunxi-kernel" }
+yunxi-plugin-host = { path = "../yunxi-plugin-host" }
+
 [lints]
 workspace = true
 

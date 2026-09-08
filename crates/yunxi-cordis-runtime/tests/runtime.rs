@@ -448,6 +448,47 @@ fn unresolved_dependencies_fail_once_without_retrying_forever() {
 }
 
 #[test]
+fn lifecycle_event_facade_keeps_cursor_order_across_disable_and_shutdown() {
+    let registry = PluginRegistry::new(&DEFINITIONS).expect("definitions are valid");
+    let mut runtime = CordisRuntime::new(registry);
+    runtime.start_default().expect("startup works");
+
+    let initial = runtime.events_since(0, 128);
+    assert!(!initial.gap());
+    assert!(
+        initial.events().iter().any(|event| {
+            event.kind() == yunxi_cordis_runtime::RuntimeEventKind::StartupStarted
+        })
+    );
+    assert!(
+        initial
+            .events()
+            .windows(2)
+            .all(|events| { events[0].sequence() < events[1].sequence() })
+    );
+
+    let cursor = initial.next_sequence();
+    runtime.disable("integration.safe").expect("disable works");
+    let after_disable = runtime.events_since(cursor, 128);
+    assert!(after_disable.events().iter().any(|event| {
+        event.kind() == yunxi_cordis_runtime::RuntimeEventKind::PluginUnmounting
+            && event.plugin_id() == Some("integration.safe")
+    }));
+    assert!(after_disable.events().iter().any(|event| {
+        event.kind() == yunxi_cordis_runtime::RuntimeEventKind::PluginDisabled
+            && event.plugin_id() == Some("integration.safe")
+    }));
+
+    let cursor = after_disable.next_sequence();
+    runtime.shutdown().expect("shutdown works");
+    let after_shutdown = runtime.events_since(cursor, 128);
+    assert_eq!(
+        after_shutdown.events().last().map(|event| event.kind()),
+        Some(yunxi_cordis_runtime::RuntimeEventKind::ShutdownCompleted)
+    );
+}
+
+#[test]
 fn contradictory_optional_policy_is_rejected_by_the_static_registry() {
     static INVALID: [PluginDefinition; 1] = [PluginDefinition::new(
         PluginManifest::new(

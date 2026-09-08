@@ -245,6 +245,7 @@ pub fn run_mcp_plugin() -> Result<(), McpPluginError> {
                     _ => unreachable!("operation checked above"),
                 }
             }
+            HostMessage::Cancel { .. } => {}
             HostMessage::Shutdown => return Ok(()),
             HostMessage::Welcome { .. } => {
                 return Err(McpPluginError::UnexpectedHostMessage(

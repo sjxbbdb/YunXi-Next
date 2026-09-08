@@ -10115,36 +10115,123 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
 		const HOST_EVENTS_PATH = `${API_PATH}/events.host`;
 		//#endregion
 		//#region lib/types/client/web-api-client.js
-		/** Browser API carrier for YunXi: HTTP unary calls plus bounded SSE polling. */
-		/** Delay between bounded event responses so an idle browser does not busy-loop. */
-		const POLL_DELAY_MS = 250;
+		/** Browser API carrier for YunXi: HTTP unary calls plus recoverable SSE polling. */
+		/** Small client-side yield after a bounded long-poll response. */
+		const POLL_DELAY_MS = 5;
+		const RETRY_DELAY_MS = 100;
+		const SERVER_LONG_POLL_MS = 40;
+		const MAX_SSE_RESPONSE_BYTES = 512 * 1024;
+		const MAX_CURSOR = Number.MAX_SAFE_INTEGER;
 		/**
 		* YunXi's Rust gateway deliberately closes each bounded SSE response. Keep the
 		* logical dsh stream open by polling that carrier until the connection
 		* generation is aborted.
 		*/
 		var WebApiClient = class extends AbstractApiClient {
+			eventCursors = /* @__PURE__ */ new Map();
 			doFetch(input, init) {
 				return globalThis.fetch(input, init);
 			}
 			openMux(_payload, signal, onOpen) {
-				return this.pollSse(signal, (opened) => this.readSse(MUX_EVENTS_PATH, signal, muxFrameSchema, opened), onOpen);
+				return this.pollSse(signal, (opened) => this.readRecoverableSse(MUX_EVENTS_PATH, signal, muxFrameSchema, opened), onOpen);
 			}
 			openHost(_payload, signal, onOpen) {
-				return this.pollSse(signal, (opened) => this.readSse(HOST_EVENTS_PATH, signal, hostFrameSchema, opened), onOpen);
+				return this.pollSse(signal, (opened) => this.readRecoverableSse(HOST_EVENTS_PATH, signal, hostFrameSchema, opened), onOpen);
 			}
 			async *pollSse(signal, openStream, onOpen) {
 				let opened = false;
 				while (!signal.aborted) {
-					for await (const envelope of openStream(() => {
-						if (opened) return;
-						opened = true;
-						onOpen?.();
-					})) yield envelope;
+					try {
+						for await (const envelope of openStream(() => {
+							if (opened) return;
+							opened = true;
+							onOpen?.();
+						})) yield envelope;
+					} catch (error) {
+						if (signal.aborted) return;
+						console.error("[client-connection] SSE poll failed; retrying:", error);
+						await abortableDelay(RETRY_DELAY_MS, signal);
+						continue;
+					}
 					if (!signal.aborted) await abortableDelay(POLL_DELAY_MS, signal);
 				}
 			}
+			/** Read one finite response and retain its transport cursor for the next poll. */
+			async *readRecoverableSse(path, signal, frameSchema, onOpen) {
+				const streamKey = path;
+				const cursor = this.eventCursors.get(streamKey) ?? 0;
+				const url = new URL(path, this.resolveBase());
+				url.searchParams.set("afterSeq", String(cursor));
+				url.searchParams.set("waitMs", String(SERVER_LONG_POLL_MS));
+				const response = await this.doFetch(url, {
+					signal,
+					headers: {
+						Accept: "text/event-stream",
+						"Last-Event-ID": String(cursor)
+					}
+				});
+				if (!response.ok || response.body === null) throw new Error(`transport failure for ${path}: HTTP ${response.status}`);
+				const declaredLength = response.headers.get("content-length");
+				if (declaredLength !== null && Number(declaredLength) > MAX_SSE_RESPONSE_BYTES) throw new Error(`SSE response for ${path} exceeds ${MAX_SSE_RESPONSE_BYTES} bytes`);
+				const replayGapCursor = parseCursor(response.headers.get("x-yunxi-event-oldest"));
+				if (response.headers.get("x-yunxi-replay-gap") === "true" && replayGapCursor !== void 0) advanceCursor(this.eventCursors, streamKey, replayGapCursor - 1);
+				onOpen?.();
+				const reader = response.body.getReader();
+				const decoder = new TextDecoder();
+				let buffer = "";
+				let receivedBytes = 0;
+				try {
+					while (true) {
+						const { done, value } = await reader.read();
+						if (done) return;
+						receivedBytes += value.byteLength;
+						if (receivedBytes > MAX_SSE_RESPONSE_BYTES) throw new Error(`SSE response for ${path} exceeds ${MAX_SSE_RESPONSE_BYTES} bytes`);
+						buffer += decoder.decode(value, { stream: true });
+						if (buffer.length > MAX_SSE_RESPONSE_BYTES * 2) throw new Error(`SSE response for ${path} has an unbounded frame`);
+						let boundary;
+						while ((boundary = buffer.indexOf("\n\n")) !== -1) {
+							const chunk = buffer.slice(0, boundary);
+							buffer = buffer.slice(boundary + 2);
+							const id = sseId(chunk);
+							const data = chunk.split("\n").filter((line) => line.startsWith("data: ")).map((line) => line.slice(6)).join("");
+							if (data === "") continue;
+							let full;
+							let frame;
+							try {
+								full = serverRequestSchema.parse(JSON.parse(data));
+								frame = frameSchema.parse(full.payload);
+							} catch (error) {
+								console.error(`[client-connection] dropping malformed SSE frame on ${path}:`, error);
+								advanceCursor(this.eventCursors, streamKey, id);
+								continue;
+							}
+							advanceCursor(this.eventCursors, streamKey, id);
+							this.onEnvelope(full);
+							yield {
+								rpcId: full.rpcId,
+								payload: frame
+							};
+						}
+					}
+				} finally {
+					await reader.cancel().catch(() => void 0);
+				}
+			}
 		};
+		function sseId(chunk) {
+			const line = chunk.split("\n").find((value) => value.startsWith("id:"));
+			if (line === void 0) return void 0;
+			return parseCursor(line.slice(3).trim());
+		}
+		function advanceCursor(cursors, streamKey, id) {
+			if (id === void 0) return;
+			if (id > (cursors.get(streamKey) ?? 0)) cursors.set(streamKey, id);
+		}
+		function parseCursor(value) {
+			if (value === null || !/^\d+$/.test(value.trim())) return void 0;
+			const cursor = Number(value);
+			return Number.isSafeInteger(cursor) && cursor > 0 && cursor <= MAX_CURSOR ? cursor : void 0;
+		}
 		/** Resolve after one poll interval, or immediately when the stream is aborted. */
 		function abortableDelay(ms, signal) {
 			return new Promise((resolve) => {

@@ -74,6 +74,27 @@ impl RequestContext {
         }
     }
 
+    /// Creates a request context backed by a caller-owned cancellation token.
+    /// This is used by background channel workers so a Host can request stop
+    /// without borrowing or blocking the worker thread.
+    pub fn with_cancellation(cancellation: CancellationToken) -> Self {
+        Self {
+            cancellation,
+            deadline: None,
+        }
+    }
+
+    pub fn with_cancellation_and_timeout(
+        cancellation: CancellationToken,
+        timeout: Duration,
+    ) -> Self {
+        let now = Instant::now();
+        Self {
+            cancellation,
+            deadline: Some(now.checked_add(timeout).unwrap_or(now)),
+        }
+    }
+
     pub fn cancellation_token(&self) -> CancellationToken {
         self.cancellation.clone()
     }

@@ -9,6 +9,7 @@ use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use serde::Deserialize;
 use yunxi_protocol::WorkspaceGrant;
 
 use crate::record::{MemoryScope, MemoryStatus, StoredMemoryRecord};
@@ -16,6 +17,7 @@ use crate::record::{MemoryScope, MemoryStatus, StoredMemoryRecord};
 const MAX_MEMORY_FILE_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_MEMORY_LINE_BYTES: usize = 1024 * 1024;
 const MAX_LOADED_RECORDS: usize = 50_000;
+const MEMORY_SETTINGS_FILE: &str = "config.json";
 
 #[derive(Clone, Debug)]
 pub(crate) struct MemoryStore {
@@ -73,6 +75,42 @@ impl MemoryStore {
 
     pub(crate) fn workspace_fingerprint(&self) -> &str {
         &self.workspace_fingerprint
+    }
+
+    pub(crate) fn enabled(&self, warnings: &mut Vec<String>) -> bool {
+        let path = self.next_global_root.join(MEMORY_SETTINGS_FILE);
+        let content = match fs::read(&path) {
+            Ok(content) => content,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return true,
+            Err(error) => {
+                warnings.push(format!(
+                    "failed to read memory settings {}: {error}",
+                    path.display()
+                ));
+                return true;
+            }
+        };
+        if content.len() > 16 * 1024 {
+            warnings.push(format!(
+                "memory settings {} exceed 16 KiB; defaults were used",
+                path.display()
+            ));
+            return true;
+        }
+        match serde_json::from_slice::<MemorySettings>(&content) {
+            Ok(settings) => settings.enabled,
+            Err(error) => {
+                warnings.push(format!(
+                    "invalid memory settings {}: {error}; defaults were used",
+                    path.display()
+                ));
+                true
+            }
+        }
+    }
+
+    pub(crate) fn settings_path(&self) -> PathBuf {
+        self.next_global_root.join(MEMORY_SETTINGS_FILE)
     }
 
     pub(crate) fn load(&self) -> MemoryLoad {
@@ -145,6 +183,17 @@ impl MemoryStore {
             .and_then(|_| file.sync_data())
             .map_err(|source| MemoryStoreError::Io { path, source })
     }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct MemorySettings {
+    #[serde(default = "default_enabled")]
+    enabled: bool,
+}
+
+fn default_enabled() -> bool {
+    true
 }
 
 pub(crate) fn workspace_fingerprint(path: &Path) -> String {

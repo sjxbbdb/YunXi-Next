@@ -181,6 +181,13 @@ impl GatewaySessionSummary {
         self
     }
 
+    /// Overlay the ephemeral Host execution state without changing the
+    /// durable session metadata used to construct this summary.
+    pub fn with_running(mut self, running: bool) -> Self {
+        self.running = running;
+        self
+    }
+
     pub fn session_id(&self) -> &str {
         &self.session_id
     }

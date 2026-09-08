@@ -1,7 +1,9 @@
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
+use std::path::PathBuf;
+use std::sync::{Arc, Barrier};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 use yunxi_composition::{CompositionEntry, ConfigLayer, Profile};
@@ -10,11 +12,18 @@ use yunxi_web_gateway::{
     AGENT_PRESET_LIST_METHOD, COMMANDS_LIST_METHOD, CREDENTIALS_DESCRIBE_METHOD,
     DYNAMIC_CORDIS_INVENTORY_METHOD, DYNAMIC_CORDIS_SYNC_INSPECT_METHOD, Gateway,
     GatewayProjection, GatewaySessionSummary, GatewayStatus, HOST_DESCRIBE_METHOD, HttpCarrier,
-    HttpResponse, LLM_PROVIDERS_METHOD, MAX_HTTP_BODY_BYTES, MAX_HTTP_HEADER_BYTES,
-    PLUGIN_INVENTORY_LIST_METHOD, SESSION_CREATE_METHOD, SESSION_HISTORY_METHOD,
-    SESSION_LIST_METHOD, SESSION_MODELS_METHOD, SESSION_PROMPT_METHOD, SETTINGS_DESCRIBE_METHOD,
-    SETTINGS_MUTATE_METHOD, SETTINGS_REPLACE_METHOD, SETTINGS_UPDATE_METHOD, SKILL_LIST_METHOD,
-    SUBAGENT_LIST_METHOD, WORKSPACE_LIST_METHOD,
+    HttpResponse, LLM_PROVIDERS_METHOD, MAILBOX_GET_METHOD, MAILBOX_LIST_METHOD,
+    MAILBOX_MARK_READ_METHOD, MAX_HTTP_BODY_BYTES, MAX_HTTP_HEADER_BYTES, MEMORY_LIST_METHOD,
+    MEMORY_SHOW_METHOD, MEMORY_STATUS_METHOD, PERSONA_LIST_METHOD, PERSONA_PROFILE_METHOD,
+    PERSONA_STATUS_METHOD, PLUGIN_INVENTORY_LIST_METHOD, RELATIONSHIP_LIST_METHOD,
+    RELATIONSHIP_STATUS_METHOD, SESSION_CANCEL_METHOD, SESSION_CREATE_METHOD,
+    SESSION_HISTORY_METHOD, SESSION_LIST_METHOD, SESSION_MODELS_METHOD, SESSION_PROMPT_METHOD,
+    SETTINGS_DESCRIBE_METHOD, SETTINGS_MUTATE_METHOD, SETTINGS_REPLACE_METHOD,
+    SETTINGS_UPDATE_METHOD, SKILL_LIST_METHOD, SUBAGENT_LIST_METHOD, ShutdownToken,
+    VOICE_CANCEL_METHOD, VOICE_CHAT_METHOD, VOICE_DEVICES_METHOD, VOICE_DOCTOR_METHOD,
+    VOICE_PLAYBACK_METHOD, VOICE_SAVE_METHOD, VOICE_SPEAK_METHOD, VOICE_TALK_METHOD,
+    VOICE_TRANSCRIBE_METHOD, WEIXIN_SERVE_START_METHOD, WEIXIN_SERVE_STATUS_METHOD,
+    WEIXIN_SERVE_STOP_METHOD, WORKSPACE_LIST_METHOD,
 };
 
 fn gateway() -> Gateway {
@@ -74,6 +83,17 @@ fn post(path: &str, body: Vec<u8>) -> Vec<u8> {
     raw_request("POST", path, &[("Content-Type", "application/json")], &body)
 }
 
+fn temporary_event_journal_path(name: &str) -> PathBuf {
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    std::env::temp_dir().join(format!(
+        "yunxi-web-gateway-http-{name}-{}-{stamp}.jsonl",
+        std::process::id()
+    ))
+}
+
 fn rpc_response(response: &HttpResponse) -> yunxi_web_contract::ServerResponse {
     assert_eq!(response.status(), 200);
     assert_eq!(response.header("content-type"), Some("application/json"));
@@ -104,6 +124,26 @@ fn sse_messages(response: &HttpResponse) -> Vec<RpcMessage> {
         .filter_map(|line| line.strip_prefix("data: "))
         .map(|line| RpcMessage::decode(line.as_bytes()).expect("SSE RPC frame"))
         .collect()
+}
+
+fn sse_records(response: &HttpResponse) -> Vec<(Option<u64>, RpcMessage)> {
+    assert_eq!(response.status(), 200);
+    let body = std::str::from_utf8(response.body()).expect("SSE is UTF-8");
+    let mut records = Vec::new();
+    for chunk in body.split("\n\n") {
+        let id = chunk
+            .lines()
+            .find_map(|line| line.strip_prefix("id: "))
+            .map(|value| value.parse::<u64>().expect("numeric SSE id"));
+        let Some(data) = chunk.lines().find_map(|line| line.strip_prefix("data: ")) else {
+            continue;
+        };
+        records.push((
+            id,
+            RpcMessage::decode(data.as_bytes()).expect("SSE RPC frame"),
+        ));
+    }
+    records
 }
 
 #[test]
@@ -148,10 +188,61 @@ fn unary_http_routes_return_dsh_json_envelopes() {
 }
 
 #[test]
+fn management_http_routes_are_registered_with_the_carrier() {
+    let mut carrier = HttpCarrier::new(gateway());
+    let cases = [
+        (MEMORY_STATUS_METHOD, json!({})),
+        (MEMORY_LIST_METHOD, json!({})),
+        (MEMORY_SHOW_METHOD, json!({ "id": "memory-1" })),
+        (PERSONA_STATUS_METHOD, json!({})),
+        (PERSONA_LIST_METHOD, json!({})),
+        (PERSONA_PROFILE_METHOD, json!({})),
+        (RELATIONSHIP_STATUS_METHOD, json!({})),
+        (RELATIONSHIP_LIST_METHOD, json!({})),
+        (MAILBOX_LIST_METHOD, json!({})),
+        (MAILBOX_GET_METHOD, json!({ "itemId": "mailbox-1" })),
+        (
+            MAILBOX_MARK_READ_METHOD,
+            json!({ "itemId": "mailbox-1", "read": true }),
+        ),
+        (VOICE_DOCTOR_METHOD, json!({})),
+        (VOICE_DEVICES_METHOD, json!({})),
+        (VOICE_TRANSCRIBE_METHOD, json!({})),
+        (VOICE_SPEAK_METHOD, json!({})),
+        (VOICE_CHAT_METHOD, json!({})),
+        (VOICE_TALK_METHOD, json!({})),
+        (VOICE_PLAYBACK_METHOD, json!({})),
+        (VOICE_SAVE_METHOD, json!({})),
+        (VOICE_CANCEL_METHOD, json!({})),
+        (WEIXIN_SERVE_START_METHOD, json!({})),
+        (WEIXIN_SERVE_STATUS_METHOD, json!({})),
+        (WEIXIN_SERVE_STOP_METHOD, json!({})),
+    ];
+
+    for (index, (method, payload)) in cases.into_iter().enumerate() {
+        let response = carrier.handle_bytes(&post(
+            &format!("/api/{method}"),
+            client_request(&format!("rpc-management-{index}"), method, payload),
+        ));
+        let response = rpc_response(&response);
+        assert_eq!(
+            response
+                .result()
+                .error()
+                .expect("read-only Gateway fixture failure")
+                .code(),
+            "method-not-supported",
+            "management method was not routed through the RPC envelope: {method}"
+        );
+    }
+}
+
+#[test]
 fn session_http_routes_are_registered_with_the_carrier() {
     let mut carrier = HttpCarrier::new(gateway());
     let cases = [
         (SESSION_CREATE_METHOD, json!({})),
+        (SESSION_CANCEL_METHOD, json!({ "sessionId": "session-1" })),
         (SESSION_HISTORY_METHOD, json!({ "sessionId": "session-1" })),
         (
             SESSION_PROMPT_METHOD,
@@ -443,6 +534,158 @@ fn sse_routes_keep_mux_and_host_channels_isolated() {
 }
 
 #[test]
+fn sse_reconnects_replay_from_last_event_id_or_after_seq() {
+    let mut carrier = HttpCarrier::new(gateway());
+    carrier
+        .backend_mut()
+        .publish_event(EventChannel::Host, json!({ "type": "host/one" }))
+        .expect("first event");
+
+    let first = carrier.handle_bytes(&raw_request("GET", "/api/events.host", &[], &[]));
+    let first_records = sse_records(&first);
+    assert_eq!(first_records.len(), 1);
+    assert_eq!(first_records[0].0, Some(1));
+
+    carrier
+        .backend_mut()
+        .publish_event(EventChannel::Host, json!({ "type": "host/two" }))
+        .expect("second event");
+    let second = carrier.handle_bytes(&raw_request(
+        "GET",
+        "/api/events.host?afterSeq=1",
+        &[("Last-Event-ID", "1")],
+        &[],
+    ));
+    let second_records = sse_records(&second);
+    assert_eq!(second_records.len(), 1);
+    assert_eq!(second_records[0].0, Some(2));
+    let (_, message) = &second_records[0];
+    assert_eq!(
+        parse_event_message(message).expect("event").2["type"],
+        "host/two"
+    );
+
+    let replay = carrier.handle_bytes(&raw_request("GET", "/api/events.host?afterSeq=0", &[], &[]));
+    let replay_records = sse_records(&replay);
+    assert_eq!(replay_records.len(), 2);
+    assert_eq!(replay_records[0].0, Some(1));
+    assert_eq!(replay_records[1].0, Some(2));
+}
+
+#[test]
+fn sse_reports_a_structured_replay_gap_after_window_eviction() {
+    let mut carrier = HttpCarrier::new(gateway());
+    for index in 0..(yunxi_web_gateway::MAX_PENDING_EVENTS + 2) {
+        carrier
+            .backend_mut()
+            .publish_event(EventChannel::Host, json!({ "index": index }))
+            .expect("event is queued and immediately polled");
+        let response = carrier.handle_bytes(&raw_request("GET", "/api/events.host", &[], &[]));
+        assert_eq!(sse_records(&response).len(), 1);
+    }
+
+    let response =
+        carrier.handle_bytes(&raw_request("GET", "/api/events.host?afterSeq=0", &[], &[]));
+    let records = sse_records(&response);
+    assert_eq!(records.len(), yunxi_web_gateway::MAX_PENDING_EVENTS);
+    let (id, message) = records.first().expect("replay gap event");
+    assert_eq!(*id, Some(2));
+    let (_, _, payload) = parse_event_message(message).expect("replay gap event envelope");
+    assert_eq!(payload["type"], "stream/error");
+    assert_eq!(payload["error"]["code"], "internal");
+    assert!(
+        payload["error"]["message"]
+            .as_str()
+            .expect("gap message")
+            .contains("afterSeq=0")
+    );
+    assert_eq!(response.header("x-yunxi-replay-gap"), Some("true"));
+    assert_eq!(response.header("x-yunxi-event-after"), Some("0"));
+    assert_eq!(response.header("x-yunxi-event-oldest"), Some("3"));
+    assert_eq!(response.header("x-yunxi-event-latest"), Some("258"));
+    assert_eq!(response.header("x-yunxi-event-has-more"), Some("true"));
+    let ids = records
+        .iter()
+        .map(|(id, _)| id.expect("every replay record has a monotonic id"))
+        .collect::<Vec<_>>();
+    assert!(ids.windows(2).all(|window| window[0] < window[1]));
+}
+
+#[test]
+fn sse_long_poll_is_bounded_and_rejects_invalid_wait_values() {
+    let mut carrier = HttpCarrier::new(gateway());
+    let invalid = carrier.handle_bytes(&raw_request(
+        "GET",
+        "/api/events.host?waitMs=not-a-number",
+        &[],
+        &[],
+    ));
+    assert_eq!(invalid.status(), 400);
+
+    let started = std::time::Instant::now();
+    let idle = carrier.handle_bytes(&raw_request(
+        "GET",
+        "/api/events.host?waitMs=999999",
+        &[],
+        &[],
+    ));
+    assert_eq!(idle.status(), 200);
+    assert_eq!(idle.header("x-yunxi-event-has-more"), Some("false"));
+    assert!(started.elapsed() < Duration::from_millis(500));
+
+    let duplicate = carrier.handle_bytes(&raw_request(
+        "GET",
+        "/api/events.host?waitMs=1&waitMs=2",
+        &[],
+        &[],
+    ));
+    assert_eq!(duplicate.status(), 400);
+}
+
+#[test]
+fn sse_rejects_invalid_cursors_without_touching_backend_events() {
+    let mut carrier = HttpCarrier::new(gateway());
+    carrier
+        .backend_mut()
+        .publish_event(EventChannel::Mux, json!({ "type": "mux/event" }))
+        .expect("event");
+    let invalid =
+        carrier.handle_bytes(&raw_request("GET", "/api/events.mux?afterSeq=-1", &[], &[]));
+    assert_eq!(invalid.status(), 400);
+
+    let ahead = carrier.handle_bytes(&raw_request("GET", "/api/events.mux?afterSeq=1", &[], &[]));
+    assert_eq!(ahead.status(), 400);
+    assert!(String::from_utf8_lossy(ahead.body()).contains("ahead"));
+
+    let valid = carrier.handle_bytes(&raw_request("GET", "/api/events.mux", &[], &[]));
+    assert_eq!(sse_records(&valid).len(), 1);
+}
+
+#[test]
+fn sse_rejects_conflicting_cursor_forms_without_consuming_events() {
+    let mut carrier = HttpCarrier::new(gateway());
+    carrier
+        .backend_mut()
+        .publish_event(EventChannel::Host, json!({ "type": "host/event" }))
+        .expect("event");
+
+    let conflicting = carrier.handle_bytes(&raw_request(
+        "GET",
+        "/api/events.host?afterSeq=0",
+        &[("Last-Event-ID", "1")],
+        &[],
+    ));
+    assert_eq!(conflicting.status(), 400);
+    assert!(String::from_utf8_lossy(conflicting.body()).contains("same event cursor"));
+
+    let recovered =
+        carrier.handle_bytes(&raw_request("GET", "/api/events.host?afterSeq=0", &[], &[]));
+    let records = sse_records(&recovered);
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].0, Some(1));
+}
+
+#[test]
 fn http_response_wire_bytes_are_self_delimiting() {
     let mut carrier = HttpCarrier::new(gateway());
     let response = carrier.handle_bytes(&post(
@@ -529,6 +772,295 @@ fn accepted_nonblocking_connections_wait_for_a_request() {
 
     assert!(response.starts_with(b"HTTP/1.1 200 OK\r\n"));
     assert!(response.windows(4).any(|window| window == b"\r\n\r\n"));
+}
+
+#[test]
+fn concurrent_carrier_serves_sse_and_unary_connections_independently() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("listener");
+    let address = listener.local_addr().expect("listener address");
+    let shutdown = ShutdownToken::new();
+    let server_shutdown = shutdown.clone();
+    let server = thread::spawn(move || {
+        HttpCarrier::new(gateway())
+            .with_read_timeout(Duration::from_millis(250))
+            .serve_until_concurrent(listener, &server_shutdown)
+            .expect("serve concurrent connections");
+    });
+
+    let event_client = thread::spawn(move || {
+        let mut client = TcpStream::connect(address).expect("event connection");
+        client
+            .write_all(&raw_request("GET", "/api/events.host?waitMs=40", &[], &[]))
+            .expect("write event request");
+        client
+            .shutdown(Shutdown::Write)
+            .expect("finish event request");
+        let mut response = Vec::new();
+        client
+            .read_to_end(&mut response)
+            .expect("read event response");
+        response
+    });
+    let unary_client = thread::spawn(move || {
+        let mut client = TcpStream::connect(address).expect("unary connection");
+        client
+            .write_all(&post(
+                "/api/health.status",
+                client_request("rpc-concurrent", "health.status", json!({})),
+            ))
+            .expect("write unary request");
+        client
+            .shutdown(Shutdown::Write)
+            .expect("finish unary request");
+        let mut response = Vec::new();
+        client
+            .read_to_end(&mut response)
+            .expect("read unary response");
+        response
+    });
+
+    let event_response = event_client.join().expect("event client thread");
+    let unary_response = unary_client.join().expect("unary client thread");
+    shutdown.request_shutdown();
+    server.join().expect("server thread");
+
+    assert!(event_response.starts_with(b"HTTP/1.1 200 OK\r\n"));
+    assert!(
+        event_response
+            .windows(4)
+            .any(|window| window == b"\r\n\r\n")
+    );
+    assert!(unary_response.starts_with(b"HTTP/1.1 200 OK\r\n"));
+    let separator = unary_response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .expect("unary response separator");
+    assert!(RpcMessage::decode(&unary_response[separator + 4..]).is_ok());
+}
+
+#[test]
+fn concurrent_initial_sse_subscribers_take_disjoint_live_batches() {
+    let mut gateway = gateway();
+    gateway
+        .publish_event(EventChannel::Host, json!({ "type": "host/one" }))
+        .expect("first event");
+    gateway
+        .publish_event(EventChannel::Host, json!({ "type": "host/two" }))
+        .expect("second event");
+
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("listener");
+    let address = listener.local_addr().expect("listener address");
+    let shutdown = ShutdownToken::new();
+    let server_shutdown = shutdown.clone();
+    let server = thread::spawn(move || {
+        HttpCarrier::new(gateway)
+            .serve_until_concurrent(listener, &server_shutdown)
+            .expect("serve concurrent connections");
+    });
+
+    let barrier = Arc::new(Barrier::new(3));
+    let clients = (0..2)
+        .map(|_| {
+            let barrier = Arc::clone(&barrier);
+            thread::spawn(move || {
+                let mut client = TcpStream::connect(address).expect("connect");
+                barrier.wait();
+                client
+                    .write_all(&raw_request("GET", "/api/events.host", &[], &[]))
+                    .expect("write event request");
+                client.shutdown(Shutdown::Write).expect("finish request");
+                let mut response = Vec::new();
+                client.read_to_end(&mut response).expect("read response");
+                response
+            })
+        })
+        .collect::<Vec<_>>();
+    barrier.wait();
+    let responses = clients
+        .into_iter()
+        .map(|client| client.join().expect("join client"))
+        .collect::<Vec<_>>();
+    shutdown.request_shutdown();
+    server.join().expect("join server");
+
+    let mut ids = responses
+        .iter()
+        .flat_map(|response| sse_ids_from_wire(response))
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    assert_eq!(ids, vec![1, 2]);
+}
+
+#[test]
+fn tcp_sse_reconnect_replays_from_a_persistent_carrier_journal() {
+    let mut gateway = gateway();
+    gateway
+        .publish_event(EventChannel::Host, json!({ "type": "host/one" }))
+        .expect("event");
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("listener");
+    let address = listener.local_addr().expect("listener address");
+    let shutdown = ShutdownToken::new();
+    let server_shutdown = shutdown.clone();
+    let server = thread::spawn(move || {
+        HttpCarrier::new(gateway)
+            .serve_until_concurrent(listener, &server_shutdown)
+            .expect("serve HTTP/SSE");
+    });
+
+    let mut first_client = TcpStream::connect(address).expect("first connection");
+    first_client
+        .write_all(&raw_request(
+            "GET",
+            "/api/events.host?afterSeq=0",
+            &[("Last-Event-ID", "0")],
+            &[],
+        ))
+        .expect("write first SSE request");
+    first_client
+        .shutdown(Shutdown::Write)
+        .expect("finish first request");
+    let mut first_response = Vec::new();
+    first_client
+        .read_to_end(&mut first_response)
+        .expect("read first SSE response");
+    assert!(first_response.starts_with(b"HTTP/1.1 200 OK\r\n"));
+    assert_eq!(sse_ids_from_wire(&first_response), vec![1]);
+
+    let mut reconnect = TcpStream::connect(address).expect("reconnect");
+    reconnect
+        .write_all(&raw_request(
+            "GET",
+            "/api/events.host?afterSeq=1",
+            &[("Last-Event-ID", "1")],
+            &[],
+        ))
+        .expect("write reconnect request");
+    reconnect
+        .shutdown(Shutdown::Write)
+        .expect("finish reconnect request");
+    let mut reconnect_response = Vec::new();
+    reconnect
+        .read_to_end(&mut reconnect_response)
+        .expect("read reconnect response");
+    assert!(reconnect_response.starts_with(b"HTTP/1.1 200 OK\r\n"));
+    assert!(sse_ids_from_wire(&reconnect_response).is_empty());
+    let reconnect_text = String::from_utf8_lossy(&reconnect_response);
+    assert!(reconnect_text.contains("X-Yunxi-Event-After: 1\r\n"));
+    assert!(reconnect_text.contains("X-Yunxi-Event-Oldest: 1\r\n"));
+    assert!(reconnect_text.contains("X-Yunxi-Event-Latest: 1\r\n"));
+
+    shutdown.request_shutdown();
+    server.join().expect("join server");
+}
+
+#[test]
+fn sse_cursor_replays_after_carrier_restart_with_durable_journal() {
+    let path = temporary_event_journal_path("restart");
+    let mut first = HttpCarrier::new(gateway())
+        .with_event_journal_path(&path)
+        .expect("attach durable journal");
+    first
+        .backend_mut()
+        .publish_event(EventChannel::Host, json!({ "type": "host/restarted" }))
+        .expect("event");
+    let first_response =
+        first.handle_bytes(&raw_request("GET", "/api/events.host?afterSeq=0", &[], &[]));
+    assert_eq!(sse_ids_from_wire(&first_response.to_bytes()), vec![1]);
+    drop(first);
+
+    let mut restarted = HttpCarrier::new(gateway())
+        .with_event_journal_path(&path)
+        .expect("reload durable journal");
+    let replay =
+        restarted.handle_bytes(&raw_request("GET", "/api/events.host?afterSeq=0", &[], &[]));
+    assert_eq!(sse_ids_from_wire(&replay.to_bytes()), vec![1]);
+    assert_eq!(restarted.event_journal_path(), Some(path.as_path()));
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn concurrent_server_cancels_a_connection_with_an_incomplete_request() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("listener");
+    let address = listener.local_addr().expect("listener address");
+    let shutdown = ShutdownToken::new();
+    let server_shutdown = shutdown.clone();
+    let server = thread::spawn(move || {
+        HttpCarrier::new(gateway())
+            .serve_until_concurrent(listener, &server_shutdown)
+            .expect("serve HTTP");
+    });
+
+    let mut client = TcpStream::connect(address).expect("connect");
+    client
+        .write_all(b"GET /api/events.host HTTP/1.1\r\nHost: localhost\r\n")
+        .expect("write incomplete request");
+    thread::sleep(Duration::from_millis(35));
+    let started = std::time::Instant::now();
+    shutdown.request_shutdown();
+    server.join().expect("join cancelled server");
+    assert!(started.elapsed() < Duration::from_millis(500));
+}
+
+#[test]
+fn slow_sse_consumer_does_not_block_an_independent_unary_request() {
+    let mut gateway = gateway();
+    gateway
+        .publish_event(
+            EventChannel::Host,
+            json!({ "type": "host/large", "data": "x".repeat(240_000) }),
+        )
+        .expect("large event");
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("listener");
+    let address = listener.local_addr().expect("listener address");
+    let shutdown = ShutdownToken::new();
+    let server_shutdown = shutdown.clone();
+    let server = thread::spawn(move || {
+        HttpCarrier::new(gateway)
+            .serve_until_concurrent(listener, &server_shutdown)
+            .expect("serve HTTP/SSE");
+    });
+
+    let mut slow_client = TcpStream::connect(address).expect("slow connection");
+    slow_client
+        .write_all(&raw_request("GET", "/api/events.host", &[], &[]))
+        .expect("write slow SSE request");
+    slow_client
+        .shutdown(Shutdown::Write)
+        .expect("finish slow SSE request");
+    thread::sleep(Duration::from_millis(30));
+
+    let started = std::time::Instant::now();
+    let mut unary_client = TcpStream::connect(address).expect("unary connection");
+    unary_client
+        .write_all(&post(
+            "/api/health.status",
+            client_request("rpc-after-slow", "health.status", json!({})),
+        ))
+        .expect("write unary request");
+    unary_client
+        .shutdown(Shutdown::Write)
+        .expect("finish unary request");
+    let mut unary_response = Vec::new();
+    unary_client
+        .read_to_end(&mut unary_response)
+        .expect("read unary response");
+    assert!(started.elapsed() < Duration::from_millis(500));
+    assert!(unary_response.starts_with(b"HTTP/1.1 200 OK\r\n"));
+
+    shutdown.request_shutdown();
+    server.join().expect("join server");
+}
+
+fn sse_ids_from_wire(response: &[u8]) -> Vec<u64> {
+    let separator = response
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .expect("HTTP response separator");
+    String::from_utf8_lossy(&response[separator + 4..])
+        .lines()
+        .filter_map(|line| line.strip_prefix("id: "))
+        .map(|id| id.parse::<u64>().expect("numeric SSE id"))
+        .collect()
 }
 
 #[test]

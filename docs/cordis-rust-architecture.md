@@ -95,7 +95,9 @@ context by a proxy service. Its implementation runs in a Rust Host process.
   `PluginDiscoveryManager`; dependency ordering, enablement, replacement, and
   manager-owned unload are bounded and deterministic at refresh boundaries.
 - Lazy start, host reuse, arbitrary package formats, and finer-grained
-  failure-domain grouping remain planned runtime work.
+  failure-domain grouping remain planned runtime extensions; the current
+  package manager already supports deterministic discovery, replacement, and
+  manager-owned unload at refresh boundaries.
 - High-risk or unstable capabilities receive a dedicated Host.
 - IPC uses a bounded, versioned request/response/event protocol.
 - A replacement Host generation is started and handshaken before new traffic is
@@ -129,8 +131,9 @@ first version intentionally small and does not expose a second permission tree.
 The legacy project write boundary is a system invariant and cannot be opened by
 a normal plugin switch. The settings crate contains 15 built-in optional keys,
 and the current CLI/Web launch path wires all 15. Voice and Weixin are live
-Host/inventory routes when enabled, backed by deterministic fixtures rather than
-production device or login adapters.
+Host/inventory routes when enabled, selecting loopback by default or their
+explicit sidecar/iLink adapters; real device, account, and media acceptance is
+still external.
 
 ## Failure Policy
 
@@ -186,8 +189,9 @@ full YunXi feature parity. Tests demonstrate:
 
 Remaining planned work includes direct service discovery from the Cordis
 runtime, arbitrary dynamic-library/WASM package formats, true live hot-unmount
-semantics, and production Voice/Weixin adapters. Package-based external
-discovery and lifecycle reconciliation are already part of the Plugin Host
-baseline. The current Voice and Weixin crates provide process fixtures and typed
-contracts plus launch/inventory wiring. The present Web switch path rebuilds the
-Host before applying a change rather than hot-unloading a running CLI Host.
+semantics, and external validation of Voice/Weixin device and account adapters.
+Package-based external discovery and lifecycle reconciliation are already part of
+the Plugin Host baseline. The current Voice and Weixin crates provide loopback
+and explicit sidecar/iLink process adapters plus typed contracts and
+launch/inventory wiring. The present Web switch path rebuilds the Host before
+applying a change rather than hot-unloading a running CLI Host.

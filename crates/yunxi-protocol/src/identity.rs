@@ -4,6 +4,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::WorkspaceGrant;
+
 pub const CONTEXT_COMPOSE_OPERATION: &str = "compose";
 pub const MEMORY_RECALL_OPERATION: &str = "recall";
 pub const PERSONA_CONTEXT_COMPILE_OPERATION: &str = "compile";
@@ -102,15 +104,19 @@ impl MemoryContextRecord {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MemoryRecallRequest {
-    cwd: PathBuf,
+    grant: WorkspaceGrant,
     query: String,
     include_boot_context: bool,
 }
 
 impl MemoryRecallRequest {
     pub fn new(cwd: impl Into<PathBuf>, query: impl Into<String>) -> Self {
+        Self::new_with_grant(WorkspaceGrant::read_only(cwd), query)
+    }
+
+    pub fn new_with_grant(grant: WorkspaceGrant, query: impl Into<String>) -> Self {
         Self {
-            cwd: cwd.into(),
+            grant,
             query: query.into(),
             include_boot_context: true,
         }
@@ -122,7 +128,11 @@ impl MemoryRecallRequest {
     }
 
     pub fn cwd(&self) -> &Path {
-        &self.cwd
+        self.grant.root()
+    }
+
+    pub fn grant(&self) -> &WorkspaceGrant {
+        &self.grant
     }
 
     pub fn query(&self) -> &str {
@@ -186,6 +196,8 @@ pub struct PersonaContextRequest {
     boot_memories: Vec<MemoryContextRecord>,
     dynamic_memories: Vec<MemoryContextRecord>,
     include_boot_context: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    grant: Option<WorkspaceGrant>,
 }
 
 impl PersonaContextRequest {
@@ -198,7 +210,13 @@ impl PersonaContextRequest {
             boot_memories,
             dynamic_memories,
             include_boot_context,
+            grant: None,
         }
+    }
+
+    pub fn with_grant(mut self, grant: WorkspaceGrant) -> Self {
+        self.grant = Some(grant);
+        self
     }
 
     pub fn boot_memories(&self) -> &[MemoryContextRecord] {
@@ -211,6 +229,10 @@ impl PersonaContextRequest {
 
     pub fn include_boot_context(&self) -> bool {
         self.include_boot_context
+    }
+
+    pub fn grant(&self) -> Option<&WorkspaceGrant> {
+        self.grant.as_ref()
     }
 }
 

@@ -3,7 +3,8 @@
 `yunxi-agent-spine` is the default, replaceable Rust Agent layer for YunXi
 Next. It is deliberately a small orchestration crate. It does not perform
 HTTP, shell execution, file access, voice I/O, Web serving, or plugin process
-management.
+management. It does provide the bounded Agent event stream consumed by the
+CLI/TUI/Web adapters.
 
 ## Responsibilities
 
@@ -16,6 +17,7 @@ management.
 - Drive model -> tool calls -> tool results -> next model step.
 - Enforce round, model-call, and tool-call budgets.
 - Check a cloneable cancellation token at every orchestration boundary.
+- Emit bounded turn, text-delta, tool-progress, error, and terminal events.
 - Return structured errors without poisoning the reusable Agent.
 
 The implementation reuses `yunxi-protocol` types instead of defining a second

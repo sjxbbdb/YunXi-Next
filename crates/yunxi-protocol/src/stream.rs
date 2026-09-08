@@ -47,6 +47,15 @@ pub enum StreamTurnState {
     TimedOut,
 }
 
+impl StreamTurnState {
+    pub const fn is_terminal(self) -> bool {
+        matches!(
+            self,
+            Self::Completed | Self::Failed | Self::Cancelled | Self::TimedOut
+        )
+    }
+}
+
 /// A bounded, structured failure that is safe to put on the event stream.
 ///
 /// The stream layer does not log component errors.  Hosts that do not want to
@@ -545,6 +554,7 @@ impl StreamEvent {
     /// Terminal events are never silently classified as progress.
     pub fn is_terminal(&self) -> bool {
         matches!(self, Self::TurnError { .. } | Self::TurnDone { .. })
+            || matches!(self, Self::TurnState { state, .. } if state.is_terminal())
     }
 
     pub fn validate(&self) -> Result<(), StreamProtocolError> {

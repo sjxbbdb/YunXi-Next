@@ -11,7 +11,7 @@ use yunxi_cordis_core::{Context, CordisError, Effect, Plugin, ServiceKey};
 use yunxi_cordis_runtime::PluginRuntimeState;
 use yunxi_cordis_runtime::{
     CordisRuntime, DefaultEnablement, PluginDefinition, PluginFactory, PluginManifest,
-    PluginRegistry, PluginRisk, PluginRole, RuntimeError, RuntimeSnapshot,
+    PluginRegistry, PluginRisk, PluginRole, RuntimeError, RuntimeEventPage, RuntimeSnapshot,
 };
 
 pub(crate) const CORE_PLUGIN_ID: &str = "yunxi.core";
@@ -84,6 +84,13 @@ impl CordisBridge {
 
     pub(crate) fn snapshot(&self) -> Result<RuntimeSnapshot, RuntimeError> {
         self.runtime.snapshot()
+    }
+
+    /// Return the bounded lifecycle journal owned by this session's trusted
+    /// Cordis runtime. Callers receive metadata only and must use the returned
+    /// cursor for incremental polling.
+    pub(crate) fn events_since(&self, after_sequence: u64, limit: usize) -> RuntimeEventPage {
+        self.runtime.events_since(after_sequence, limit)
     }
 
     pub(crate) fn ready(&self) -> bool {
@@ -177,6 +184,16 @@ mod tests {
                 .iter()
                 .all(|plugin| plugin.state() == PluginRuntimeState::Mounted)
         );
+
+        let events = bridge.events_since(0, 32);
+        assert!(!events.events().is_empty());
+        assert_eq!(events.events()[0].kind().to_string(), "startup_started");
+        assert!(
+            events
+                .events()
+                .iter()
+                .any(|event| event.kind().to_string() == "plugin_mounted")
+        );
     }
 
     #[test]
@@ -185,5 +202,12 @@ mod tests {
         bridge.shutdown();
         bridge.shutdown();
         assert!(bridge.snapshot().expect("snapshot").closed());
+        let events = bridge.events_since(0, 32);
+        assert!(
+            events
+                .events()
+                .iter()
+                .any(|event| event.kind().to_string() == "shutdown_completed")
+        );
     }
 }

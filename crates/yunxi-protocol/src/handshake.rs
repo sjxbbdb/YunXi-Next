@@ -86,6 +86,23 @@ impl PluginAcceptor {
         expected_plugin_id: &str,
         timeout: Duration,
     ) -> Result<HostPluginSession, ProtocolError> {
+        self.accept_with_max_frame_bytes(
+            expected_plugin_id,
+            timeout,
+            crate::DEFAULT_MAX_FRAME_BYTES,
+        )
+    }
+
+    /// Accepts a plugin while applying the caller's frame bound before the
+    /// first hello is decoded.  The plain [`Self::accept`] method keeps the
+    /// historical protocol default for low-level callers; process hosts use
+    /// this method to enforce their launch policy across the handshake too.
+    pub fn accept_with_max_frame_bytes(
+        &self,
+        expected_plugin_id: &str,
+        timeout: Duration,
+        max_frame_bytes: usize,
+    ) -> Result<HostPluginSession, ProtocolError> {
         let deadline = Instant::now() + timeout;
         let stream = loop {
             match self.listener.accept() {
@@ -107,7 +124,7 @@ impl PluginAcceptor {
         };
 
         let remaining = deadline.saturating_duration_since(Instant::now());
-        let mut transport = JsonLineTransport::new(stream)?;
+        let mut transport = JsonLineTransport::new(stream)?.with_max_frame_bytes(max_frame_bytes);
         transport.set_timeouts(Some(remaining), Some(remaining))?;
         let hello = transport.receive::<PluginMessage>()?;
         let info = match hello {
@@ -197,6 +214,14 @@ impl HostPluginSession {
         self.transport.set_timeouts(read_timeout, write_timeout)
     }
 
+    pub fn set_max_frame_bytes(&mut self, max_frame_bytes: usize) {
+        self.transport.set_max_frame_bytes(max_frame_bytes);
+    }
+
+    pub const fn max_frame_bytes(&self) -> usize {
+        self.transport.max_frame_bytes()
+    }
+
     pub fn send(&mut self, message: &HostMessage) -> Result<(), ProtocolError> {
         self.transport.send(message)
     }
@@ -211,6 +236,24 @@ pub struct PluginSession {
 }
 
 impl PluginSession {
+    /// Sets bounded socket timeouts while the plugin multiplexes host control
+    /// frames with a worker performing provider I/O.
+    pub fn set_timeouts(
+        &self,
+        read_timeout: Option<Duration>,
+        write_timeout: Option<Duration>,
+    ) -> Result<(), ProtocolError> {
+        self.transport.set_timeouts(read_timeout, write_timeout)
+    }
+
+    pub fn set_max_frame_bytes(&mut self, max_frame_bytes: usize) {
+        self.transport.set_max_frame_bytes(max_frame_bytes);
+    }
+
+    pub const fn max_frame_bytes(&self) -> usize {
+        self.transport.max_frame_bytes()
+    }
+
     pub fn receive(&mut self) -> Result<HostMessage, ProtocolError> {
         self.transport.receive()
     }

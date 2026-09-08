@@ -70,9 +70,11 @@ The connected identity and stateful paths add:
 - `companion.decide@1`, `scheduler.proactive@1`, and an encrypted
   `companion.mailbox@1` path;
 - persisted plugin launch switches: Model/Agent spine are always on, Context,
-  Persona, and Storage are enabled by default, while external or side-effecting
-  capabilities are disabled by default;
-- inherited YunXi/DeepSeek/OpenAI environment configuration;
+  Persona, Memory, Companion, and Storage are enabled by default, while
+  externally connected or side-effecting capabilities are disabled by default;
+- inherited YunXi/DeepSeek/OpenAI environment configuration, with the Host
+  broker limiting built-in model credential exposure to the final child
+  process boundary;
 - an interactive CLI with bounded working history backed by persistent
   sessions;
 - session list/resume/new, memory review, mailbox, status, clear, and quit
@@ -82,26 +84,40 @@ The connected identity and stateful paths add:
   bounded HTTP/SSE adapter, real session chat, and composition-scoped capability
   switches.
 
-Voice and Weixin now have Rust contract crates, process-host fixtures, and
-launch-wired optional entries. When enabled, `yunxi-voice` exposes bounded
-transcribe/synthesize routes and `yunxi-weixin` exposes a bounded
-`channel.weixin@1` route with idempotent inbound/outbound delivery state. The
-current implementations are deterministic fixtures: they do not provide a
-real microphone, speaker, Weixin login, or Weixin network transport.
+Voice and Weixin have launch-wired Rust process plugins rather than in-process
+SDK dependencies. Voice selects a deterministic loopback provider by default
+or a bounded external JSONL sidecar when `YUNXI_VOICE_SIDECAR_PROGRAM` is set;
+the latter requires the Host-issued `Device` grant and is used by the same CLI,
+TUI, and Web route. Weixin likewise selects deterministic loopback behavior by
+default or the bounded HTTPS iLink control plane, encrypted `FileSecretStore`,
+and non-blocking long-poll worker when production mode is explicitly configured.
+Neither path certifies a physical audio device or real Weixin account without
+the external integration checks documented below.
 
 When enabled, the Files tool exposes bounded `file.search` and `file.read`
 model calls under a read-only workspace grant. Shell and Patch model calls
 remain behind the Host approval boundary; any tool failure is visible in the
 CLI and returned to the model for recovery.
 
-The optional MCP bridge discovers one external stdio Server and projects its
-tools behind Host approval. The optional Skills process discovers bounded
-workspace-local `SKILL.md` files, injects their instructions, and projects
-`tools.json` entries as metadata-only declarations that cannot execute yet.
-The optional Multi-agent coordinator provides bounded agent graphs and
-Host-approved child turns, each using a separate Model plugin process. Its
-current baseline is synchronous; background parallelism and live interruption
-remain Phase 4 work.
+The optional MCP bridge discovers one external stdio or opt-in HTTP Server and
+projects its tools behind Host approval. The optional Skills process discovers
+bounded workspace-local `SKILL.md` files, injects their instructions, and keeps
+metadata-only `tools.json` declarations inert. A separate `actions.json`
+allowlist can expose fixed executables only when Skill actions are explicitly
+enabled; every action remains approval-gated, grant-bounded, cancellable, and
+process-isolated. The optional Multi-agent coordinator provides bounded agent
+graphs and Host-approved child turns, each using a separate Model plugin
+process. Child turns receive only the file/patch tool subset justified by their
+stored grants and the parent sandbox. WebHost adds bounded continuable child
+prompts, concurrent background workers, per-turn model selection, streamed
+events, immediate targeted interruption, and persisted worker recovery when a
+root session is reattached; the CLI model-tool path remains a synchronous
+one-shot interaction.
+
+Model SSE is converted into bounded Agent events. The REPL, TUI, `run
+--jsonl`, and Web mux event path can render text/tool progress before a turn
+completes and can request cancellation. This is local end-to-end event
+streaming, not a claim of multi-user or remotely authenticated Web service.
 
 API failures are returned per request and do not terminate the model plugin.
 An optional capability failure produces a visible warning and falls back to
@@ -110,15 +126,22 @@ recovery for an unexpectedly failed plugin, at most three retries per enable
 cycle. Recovery advances at its synchronous `refresh()` boundary; after the
 limit, the plugin is disabled until explicit user enable or manual restart.
 
-Process isolation protects the kernel from plugin crashes. It is not yet a
-filesystem, network, or resource-usage sandbox.
+Process isolation protects the kernel from plugin crashes. Host grants bound
+the intended workspace/network/secret authority, and the model credential is
+held by the Host Secret Broker until the final model-child boundary. The broker
+is process-local by default and can use an explicitly keyed authenticated file
+store for durable rotation and removal. Protocol frame, request, output,
+duration, plugin-count, and per-plugin concurrency limits are enforced, but
+none of this is an OS keychain or a filesystem, network, CPU, memory, handle,
+or child-process sandbox.
 
-The remaining product plan for richer model-based memory extraction, companion
-automation, production Voice/Weixin adapters, CLI/Web streaming transport,
-background multi-agent execution, and executable Skills is tracked in
+The remaining external acceptance work for real audio hardware/providers, a
+real Weixin account/media path, platform keychain policy, OS-level resource
+sandboxing, remote multi-host workers, and authenticated non-loopback Web is tracked in
 [`docs/capability-migration.md`](docs/capability-migration.md). A capability is
 counted as migrated only after it has a real process boundary, versioned
-contract, explicit grants, and failure-containment tests.
+contract, explicit grants, failure-containment tests, and any required external
+provider/device/account validation.
 
 The dsh-inspired composition layer and the initial Cordis primitives are now
 represented by
@@ -141,7 +164,8 @@ capability environment/file settings are retained as compatibility fallbacks.
 The settings crate knows 15 built-in optional keys, including `voice` and
 `weixin`, and the current CLI Host and Web schema expose all 15 launch-wired
 optional entries alongside the required Model entry. Voice and Weixin remain
-off by default and use fixture implementations until their real adapters land.
+off by default; enabling them grants their declared Host authority and launches
+their process plugin, while disabling them removes the route and process.
 
 ## Run
 
@@ -174,6 +198,12 @@ Send one prompt without entering interactive mode:
 yunxi-next --once "你好"
 ```
 
+Emit bounded lifecycle, text, tool, warning, and final-result records:
+
+```powershell
+yunxi-next run --once "你好" --jsonl
+```
+
 Start the bounded Web HTTP/SSE carrier on loopback:
 
 ```powershell
@@ -184,11 +214,33 @@ The default listener is `127.0.0.1:8787`. Use `yunxi-next web --bind
 127.0.0.1:0` for an available port during local testing. Closing the Web
 command's standard input performs an explicit Host shutdown. Open
 `http://127.0.0.1:8787` to use the embedded dsh workbench. The current Web
-surface supports text sessions, model selection projection, history, real
-chat replies, Host approvals, plugin inventory, and capability switches in
-Settings > Plugins. Switch changes are persisted immediately; WebHost applies
-them by rebuilding its current Host, while a standalone CLI applies them on its
-next Host launch. Provider credentials stay in the Host process environment.
+surface supports bounded multi-session text chat, per-session history and
+cancellation, model projection, Host approvals, plugin inventory, and
+capability switches in Settings > Plugins. Switch changes are persisted
+immediately; WebHost applies them by rebuilding its current Host, while a
+standalone CLI applies them on its next Host launch. Provider credentials are
+not Web payloads; the Host broker exposes them only at the model child boundary.
+
+The Web server is loopback-only and unauthenticated. It is a local development
+surface, not a remotely exposed service. Voice management defaults to a
+deterministic loopback provider; setting `YUNXI_VOICE_SIDECAR_PROGRAM` selects
+the explicit sidecar boundary but still reports readiness only from its doctor
+and device results. Weixin management defaults to loopback; setting
+`YUNXI_WEIXIN_MODE=production` selects the HTTPS iLink path and requires an
+operator-managed 32-byte master key, secret-store path, and account login.
+Both selections are consumed by the same process plugin represented in Host
+inventory; real device/account readiness still depends on their doctor and
+external acceptance results.
+
+Migration is explicit and writes only YunXi Next state:
+
+```powershell
+yunxi-next migrate sessions plan --json
+yunxi-next migrate sessions apply --json
+yunxi-next migrate rollback <migration-id> --json
+```
+The plan is read-only, apply preserves the legacy source, and rollback removes
+only unchanged files recorded as created by that migration.
 
 See [`docs/provider-configuration.md`](docs/provider-configuration.md) for
 custom OpenAI-compatible endpoints and the complete resolution order. The

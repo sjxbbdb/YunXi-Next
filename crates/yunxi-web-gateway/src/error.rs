@@ -5,16 +5,22 @@ use std::fmt;
 
 use yunxi_web_contract::{EventChannel, WebContractError};
 
+use crate::events::EventJournalError;
+
 #[derive(Debug)]
 pub enum GatewayError {
     Contract(WebContractError),
     Json(serde_json::Error),
+    EventJournal(EventJournalError),
     UnexpectedMessage {
         message: String,
     },
     EventQueueFull {
         channel: EventChannel,
         capacity: usize,
+    },
+    EventSequenceExhausted {
+        channel: EventChannel,
     },
     ResponseTooLarge {
         kind: &'static str,
@@ -33,6 +39,7 @@ impl fmt::Display for GatewayError {
                 formatter,
                 "Gateway projection is not JSON serializable: {error}"
             ),
+            Self::EventJournal(error) => write!(formatter, "event journal failure: {error}"),
             Self::UnexpectedMessage { message } => {
                 write!(
                     formatter,
@@ -42,6 +49,11 @@ impl fmt::Display for GatewayError {
             Self::EventQueueFull { channel, capacity } => write!(
                 formatter,
                 "event channel `{}` reached its pending frame limit of {capacity}",
+                channel.method()
+            ),
+            Self::EventSequenceExhausted { channel } => write!(
+                formatter,
+                "event channel `{}` exhausted its sequence space",
                 channel.method()
             ),
             Self::ResponseTooLarge {
@@ -61,8 +73,10 @@ impl Error for GatewayError {
         match self {
             Self::Contract(error) => Some(error),
             Self::Json(error) => Some(error),
+            Self::EventJournal(error) => Some(error),
             Self::UnexpectedMessage { .. }
             | Self::EventQueueFull { .. }
+            | Self::EventSequenceExhausted { .. }
             | Self::ResponseTooLarge { .. } => None,
         }
     }
@@ -77,5 +91,11 @@ impl From<WebContractError> for GatewayError {
 impl From<serde_json::Error> for GatewayError {
     fn from(error: serde_json::Error) -> Self {
         Self::Json(error)
+    }
+}
+
+impl From<EventJournalError> for GatewayError {
+    fn from(error: EventJournalError) -> Self {
+        Self::EventJournal(error)
     }
 }

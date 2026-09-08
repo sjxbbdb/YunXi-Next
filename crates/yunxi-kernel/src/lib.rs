@@ -2,11 +2,13 @@
 #![forbid(unsafe_code)]
 
 mod error;
+mod limits;
 mod plugin;
 mod runtime;
 mod supervision;
 
 pub use error::KernelError;
+pub use limits::KernelLimits;
 pub use plugin::{
     PluginCommand, PluginFailure, PluginId, PluginIdError, PluginSnapshot, PluginSpec, PluginState,
 };

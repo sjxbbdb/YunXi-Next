@@ -64,6 +64,7 @@ pub fn run_shell_plugin() -> Result<(), ShellPluginError> {
                     }
                 }
             }
+            HostMessage::Cancel { .. } => {}
             HostMessage::Shutdown => return Ok(()),
             HostMessage::Welcome { .. } => {
                 return Err(ShellPluginError::UnexpectedHostMessage(

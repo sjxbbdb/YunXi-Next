@@ -18,10 +18,11 @@ use yunxi_protocol::{
     PatchApplyRequest, PatchApplyResult, PatchChangeKind, ProactiveSchedulerRequest,
     ProactiveSchedulerResult, ROOT_AGENT_ID, SCHEDULER_PROACTIVE_EVALUATE_OPERATION,
     STORAGE_SESSIONS_APPEND_OPERATION, STORAGE_SESSIONS_CREATE_OPERATION,
-    STORAGE_SESSIONS_LIST_OPERATION, STORAGE_SESSIONS_LOAD_OPERATION, SessionAppendRequest,
-    SessionCreateRequest, SessionCreateResult, SessionListRequest, SessionListResult,
-    SessionLoadRequest, SessionLoadResult, ShellExecuteRequest, ShellExecuteResult,
-    TOOL_PATCH_APPLY_OPERATION, TOOL_SHELL_EXECUTE_OPERATION, WorkspaceGrant,
+    STORAGE_SESSIONS_LIST_OPERATION, STORAGE_SESSIONS_LOAD_OPERATION,
+    STORAGE_SESSIONS_MUTATE_OPERATION, SessionAppendRequest, SessionCreateRequest,
+    SessionCreateResult, SessionListRequest, SessionListResult, SessionLoadRequest,
+    SessionLoadResult, SessionMutationRequest, SessionMutationResult, ShellExecuteRequest,
+    ShellExecuteResult, TOOL_PATCH_APPLY_OPERATION, TOOL_SHELL_EXECUTE_OPERATION, WorkspaceGrant,
 };
 use yunxi_web_gateway::GatewaySessionSummary;
 
@@ -30,6 +31,50 @@ use crate::management::{ManagementCommand, ManagementResult};
 use super::{ChatSession, call_lost_route, dynamic_inventory_entry, dynamic_plugin_phase};
 
 impl ChatSession {
+    pub(crate) fn mutate_web_session(
+        &mut self,
+        request: &SessionMutationRequest,
+    ) -> Result<SessionMutationResult, String> {
+        let capability = self
+            .storage_capability
+            .clone()
+            .ok_or_else(|| "session storage capability is disabled or unavailable".to_string())?;
+        self.host
+            .invoke::<_, SessionMutationResult>(
+                &capability,
+                STORAGE_SESSIONS_MUTATE_OPERATION,
+                request,
+            )
+            .map_err(|error| {
+                if call_lost_route(&error) {
+                    self.storage_capability = None;
+                }
+                error.to_string()
+            })
+    }
+
+    pub(crate) fn list_web_sessions(
+        &mut self,
+        include_archived: bool,
+        limit: usize,
+    ) -> Result<SessionListResult, String> {
+        let capability = self
+            .storage_capability
+            .clone()
+            .ok_or_else(|| "session storage capability is disabled or unavailable".to_string())?;
+        let request = SessionListRequest::new(WorkspaceGrant::read_only(&self.cwd))
+            .with_archived(include_archived)
+            .with_limit(limit);
+        self.host
+            .invoke::<_, SessionListResult>(&capability, STORAGE_SESSIONS_LIST_OPERATION, &request)
+            .map_err(|error| {
+                if call_lost_route(&error) {
+                    self.storage_capability = None;
+                }
+                error.to_string()
+            })
+    }
+
     pub(crate) fn create_web_session(&mut self) -> Result<yunxi_protocol::SessionSnapshot, String> {
         let capability = self
             .storage_capability
@@ -166,8 +211,7 @@ impl ChatSession {
             }
             Err(error) => {
                 if call_lost_route(&error) {
-                    self.memory_write_capability = None;
-                    self.memory_capability = None;
+                    self.revoke_memory_routes();
                 }
                 self.push_notice(format!("memory write capability degraded: {error}"));
             }
@@ -175,6 +219,9 @@ impl ChatSession {
     }
 
     pub(super) fn evaluate_proactive(&mut self, prompt: &str) {
+        if let Some(scheduler) = &self.scheduler_worker {
+            scheduler.observe_activity(prompt);
+        }
         let Some(capability) = self.scheduler_capability.clone() else {
             return;
         };
@@ -414,6 +461,9 @@ impl ChatSession {
         if self.patch_capability.is_none() {
             return Err("patch capability is disabled or unavailable".to_string());
         }
+        if self.sandbox == super::SandboxMode::ReadOnly {
+            return Err("patch execution is disabled by --sandbox read-only".to_string());
+        }
         let value = value.trim();
         if value.is_empty() {
             return Err("usage: /patch <patch-file>".to_string());
@@ -453,13 +503,15 @@ impl ChatSession {
             .ok_or_else(|| "there is no pending action".to_string())?;
         let ticket = format!("action-{}-{}", process::id(), self.next_action_ticket);
         self.next_action_ticket = self.next_action_ticket.saturating_add(1);
-        let grant = ActionGrant::approved(
-            yunxi_protocol::WorkspaceGrant::read_write(&self.cwd).with_workspace_write(),
-            &self.cwd,
-            ticket,
-        )
-        .with_write(true)
-        .with_network(action_network_allowed());
+        let allow_write = self.sandbox != super::SandboxMode::ReadOnly;
+        let workspace = if allow_write {
+            yunxi_protocol::WorkspaceGrant::read_write(&self.cwd).with_workspace_write()
+        } else {
+            yunxi_protocol::WorkspaceGrant::read_only(&self.cwd)
+        };
+        let grant = ActionGrant::approved(workspace, &self.cwd, ticket)
+            .with_write(allow_write)
+            .with_network(action_network_allowed() && allow_write);
 
         match action {
             super::PendingAction::Shell { command } => {
@@ -689,8 +741,7 @@ impl ChatSession {
             .invoke::<_, MemoryReviewResult>(&capability, MEMORY_WRITE_REVIEW_OPERATION, &request)
             .map_err(|error| {
                 if call_lost_route(&error) {
-                    self.memory_write_capability = None;
-                    self.memory_capability = None;
+                    self.revoke_memory_routes();
                 }
                 error.to_string()
             })?;
@@ -709,20 +760,7 @@ impl ChatSession {
     }
 
     fn list_mailbox(&mut self) -> Result<ManagementResult, String> {
-        let capability = self
-            .mailbox_capability
-            .clone()
-            .ok_or_else(|| "mailbox capability is disabled or unavailable".to_string())?;
-        let request = MailboxListRequest::new(WorkspaceGrant::read_only(&self.cwd));
-        let result = self
-            .host
-            .invoke::<_, MailboxListResult>(&capability, COMPANION_MAILBOX_LIST_OPERATION, &request)
-            .map_err(|error| {
-                if call_lost_route(&error) {
-                    self.mailbox_capability = None;
-                }
-                error.to_string()
-            })?;
+        let result = self.web_mailbox_list(200, false)?;
         for warning in result.warnings() {
             self.push_notice(format!("mailbox data warning: {warning}"));
         }
@@ -752,16 +790,7 @@ impl ChatSession {
             .mailbox_capability
             .clone()
             .ok_or_else(|| "mailbox capability is disabled or unavailable".to_string())?;
-        let request = MailboxGetRequest::new(WorkspaceGrant::read_only(&self.cwd), id);
-        let result = self
-            .host
-            .invoke::<_, MailboxGetResult>(&capability, COMPANION_MAILBOX_GET_OPERATION, &request)
-            .map_err(|error| {
-                if call_lost_route(&error) {
-                    self.mailbox_capability = None;
-                }
-                error.to_string()
-            })?;
+        let result = self.web_mailbox_get(id)?;
         for warning in result.warnings() {
             self.push_notice(format!("mailbox data warning: {warning}"));
         }
@@ -782,6 +811,71 @@ impl ChatSession {
             format!("{subject} [{id}]"),
             content,
         ]))
+    }
+
+    /// Read-only Web/management facade for the mailbox capability.  Keeping
+    /// these calls on the ChatSession ensures the same Host route, grant, and
+    /// failure isolation are used by REPL and Web callers.
+    pub(crate) fn web_mailbox_list(
+        &mut self,
+        limit: usize,
+        unread_only: bool,
+    ) -> Result<MailboxListResult, String> {
+        let capability = self
+            .mailbox_capability
+            .clone()
+            .ok_or_else(|| "mailbox capability is disabled or unavailable".to_string())?;
+        let request = MailboxListRequest::new(WorkspaceGrant::read_only(&self.cwd))
+            .with_limit(limit)
+            .unread_only(unread_only);
+        self.host
+            .invoke::<_, MailboxListResult>(&capability, COMPANION_MAILBOX_LIST_OPERATION, &request)
+            .map_err(|error| {
+                if call_lost_route(&error) {
+                    self.mailbox_capability = None;
+                }
+                error.to_string()
+            })
+    }
+
+    pub(crate) fn web_mailbox_get(&mut self, id: &str) -> Result<MailboxGetResult, String> {
+        let capability = self
+            .mailbox_capability
+            .clone()
+            .ok_or_else(|| "mailbox capability is disabled or unavailable".to_string())?;
+        let request = MailboxGetRequest::new(WorkspaceGrant::read_only(&self.cwd), id);
+        self.host
+            .invoke::<_, MailboxGetResult>(&capability, COMPANION_MAILBOX_GET_OPERATION, &request)
+            .map_err(|error| {
+                if call_lost_route(&error) {
+                    self.mailbox_capability = None;
+                }
+                error.to_string()
+            })
+    }
+
+    pub(crate) fn web_mailbox_mark_read(
+        &mut self,
+        id: &str,
+        read: bool,
+    ) -> Result<MailboxMutationResult, String> {
+        let capability = self
+            .mailbox_capability
+            .clone()
+            .ok_or_else(|| "mailbox capability is disabled or unavailable".to_string())?;
+        let request = MailboxMarkReadRequest::new(WorkspaceGrant::read_write(&self.cwd), id, read);
+        self.host
+            .invoke::<_, MailboxMutationResult>(
+                &capability,
+                COMPANION_MAILBOX_MARK_READ_OPERATION,
+                &request,
+            )
+            .map_err(|error| {
+                if call_lost_route(&error) {
+                    self.mailbox_capability = None;
+                }
+                error.to_string()
+            })
     }
 }
 

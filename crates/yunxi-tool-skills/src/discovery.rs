@@ -10,16 +10,18 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 use yunxi_protocol::{
     MAX_SKILL_INSTRUCTION_BYTES, MAX_SKILL_METADATA, MAX_SKILL_PATH_BYTES,
-    MAX_SKILL_TOOL_DECLARATIONS, MAX_SKILL_TOOL_SCHEMA_BYTES, SkillContextBlock, SkillMetadata,
-    SkillProtocolError, SkillToolDescriptor,
+    MAX_SKILL_TOOL_DECLARATIONS, MAX_SKILL_TOOL_SCHEMA_BYTES, SkillActionSpec, SkillContextBlock,
+    SkillMetadata, SkillProtocolError, SkillToolDescriptor,
 };
 
 use crate::SkillsConfig;
 
 const SKILL_FILE_NAME: &str = "SKILL.md";
 const TOOLS_FILE_NAME: &str = "tools.json";
+const ACTIONS_FILE_NAME: &str = "actions.json";
 const MAX_SKILL_FILE_BYTES: usize = MAX_SKILL_INSTRUCTION_BYTES + 8 * 1024;
 const MAX_TOOLS_FILE_BYTES: usize = MAX_SKILL_TOOL_SCHEMA_BYTES;
+const MAX_ACTIONS_FILE_BYTES: usize = 128 * 1024;
 const MAX_DISCOVERY_WARNINGS: usize = 32;
 const MAX_DISCOVERY_WARNING_BYTES: usize = 1024;
 
@@ -27,6 +29,8 @@ const MAX_DISCOVERY_WARNING_BYTES: usize = 1024;
 pub(crate) struct DiscoveredSkill {
     pub metadata: SkillMetadata,
     pub instructions: String,
+    pub directory: PathBuf,
+    pub actions: Vec<SkillActionSpec>,
 }
 
 #[derive(Clone, Debug)]
@@ -194,6 +198,13 @@ fn load_skill(
         .join("/");
     SkillContextBlock::new(id.clone(), instructions.clone()).map_err(SkillLoadError::Protocol)?;
     let tools = load_tools(canonical_root, skill_dir)?;
+    let actions = load_actions(canonical_root, skill_dir)?;
+    if actions
+        .iter()
+        .any(|action| !tools.iter().any(|tool| tool.name() == action.tool_name()))
+    {
+        return Err(SkillLoadError::ActionToolNotDeclared);
+    }
     let metadata = SkillMetadata::new(
         id,
         name,
@@ -206,7 +217,52 @@ fn load_skill(
     Ok(DiscoveredSkill {
         metadata,
         instructions,
+        directory: fs::canonicalize(skill_dir).map_err(|source| SkillLoadError::Io {
+            path: skill_dir.to_path_buf(),
+            source,
+        })?,
+        actions,
     })
+}
+
+fn load_actions(
+    canonical_root: &Path,
+    skill_dir: &Path,
+) -> Result<Vec<SkillActionSpec>, SkillLoadError> {
+    let path = skill_dir.join(ACTIONS_FILE_NAME);
+    if !path.is_file() {
+        return Ok(Vec::new());
+    }
+    let canonical_path = fs::canonicalize(&path).map_err(|source| SkillLoadError::Io {
+        path: path.clone(),
+        source,
+    })?;
+    if !canonical_path.starts_with(canonical_root) {
+        return Err(SkillLoadError::PathEscape);
+    }
+    let bytes = read_bounded(&path, MAX_ACTIONS_FILE_BYTES)?;
+    let actions = serde_json::from_slice::<Vec<SkillActionSpec>>(&bytes).map_err(|source| {
+        SkillLoadError::Json {
+            path: path.clone(),
+            message: source.to_string(),
+        }
+    })?;
+    if actions.len() > yunxi_protocol::MAX_SKILL_ACTIONS {
+        return Err(SkillLoadError::TooManyActions {
+            count: actions.len(),
+            maximum: yunxi_protocol::MAX_SKILL_ACTIONS,
+        });
+    }
+    let mut names = BTreeSet::new();
+    for action in &actions {
+        action.validate().map_err(SkillLoadError::Protocol)?;
+        if !names.insert(action.tool_name()) {
+            return Err(SkillLoadError::DuplicateAction {
+                tool_name: action.tool_name().to_string(),
+            });
+        }
+    }
+    Ok(actions)
 }
 
 fn load_tools(
@@ -339,6 +395,14 @@ pub(crate) enum SkillLoadError {
         message: String,
     },
     Protocol(SkillProtocolError),
+    ActionToolNotDeclared,
+    TooManyActions {
+        count: usize,
+        maximum: usize,
+    },
+    DuplicateAction {
+        tool_name: String,
+    },
 }
 
 impl fmt::Display for SkillLoadError {
@@ -365,6 +429,18 @@ impl fmt::Display for SkillLoadError {
                 write!(formatter, "invalid {}: {message}", path.display())
             }
             Self::Protocol(error) => error.fmt(formatter),
+            Self::ActionToolNotDeclared => {
+                formatter.write_str("Skill action must reference a declared metadata tool")
+            }
+            Self::TooManyActions { count, maximum } => {
+                write!(
+                    formatter,
+                    "Skill declares {count} actions; maximum is {maximum}"
+                )
+            }
+            Self::DuplicateAction { tool_name } => {
+                write!(formatter, "Skill action tool `{tool_name}` is duplicated")
+            }
         }
     }
 }
@@ -378,7 +454,10 @@ impl Error for SkillLoadError {
             | Self::NotUtf8
             | Self::InvalidDirectoryName
             | Self::PathEscape
-            | Self::Json { .. } => None,
+            | Self::Json { .. }
+            | Self::ActionToolNotDeclared
+            | Self::TooManyActions { .. }
+            | Self::DuplicateAction { .. } => None,
         }
     }
 }

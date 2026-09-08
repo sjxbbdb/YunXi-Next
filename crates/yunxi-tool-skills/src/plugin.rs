@@ -142,6 +142,7 @@ pub fn run_skills_plugin() -> Result<(), SkillsPluginError> {
                     _ => unreachable!("operation checked above"),
                 }
             }
+            HostMessage::Cancel { .. } => {}
             HostMessage::Shutdown => return Ok(()),
             HostMessage::Welcome { .. } => {
                 return Err(SkillsPluginError::UnexpectedHostMessage(
@@ -328,6 +329,8 @@ mod tests {
             skills.push(DiscoveredSkill {
                 metadata,
                 instructions,
+                directory: std::path::PathBuf::from("skills"),
+                actions: Vec::new(),
             });
         }
         let snapshot = DiscoverySnapshot {

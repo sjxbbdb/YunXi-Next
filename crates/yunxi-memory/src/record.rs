@@ -116,6 +116,14 @@ impl MemoryStatus {
             Self::Rejected | Self::Archived => yunxi_protocol::MemoryWriteStatus::Rejected,
         }
     }
+
+    pub(crate) fn is_pending(self) -> bool {
+        self == Self::Pending
+    }
+
+    pub(crate) fn is_archived(self) -> bool {
+        self == Self::Archived
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]

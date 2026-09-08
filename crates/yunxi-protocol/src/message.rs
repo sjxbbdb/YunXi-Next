@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    CapabilityDescriptor, InvocationRequest, InvocationResponse, PluginManifest, ToolCall,
-    ToolCallId, ToolCatalog, ToolName,
+    CapabilityDescriptor, InvocationRequest, InvocationResponse, ModelStreamEvent, PluginManifest,
+    ToolCall, ToolCallId, ToolCatalog, ToolName,
 };
 
 pub const PROTOCOL_VERSION: u32 = 2;
@@ -166,8 +166,19 @@ impl ChatMessage {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HostMessage {
-    Welcome { protocol_version: u32 },
-    Invoke { request: InvocationRequest },
+    Welcome {
+        protocol_version: u32,
+    },
+    Invoke {
+        request: InvocationRequest,
+    },
+    /// Requests that the plugin stop the in-flight invocation with this id.
+    ///
+    /// This is separate from Invoke so a plugin can observe control frames
+    /// while a worker is blocked in provider I/O.
+    Cancel {
+        request_id: u64,
+    },
     Shutdown,
 }
 
@@ -188,6 +199,12 @@ pub enum PluginMessage {
         manifest: Option<PluginManifest>,
     },
     Ready,
+    /// A bounded, non-terminal model delta for an invocation currently in
+    /// flight. Older callers can ignore streaming by using `invoke`.
+    InvocationProgress {
+        request_id: u64,
+        event: ModelStreamEvent,
+    },
     InvocationCompleted {
         response: InvocationResponse,
     },
@@ -242,6 +259,17 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&message).expect("serialize chat message"),
             r#"{"role":"user","content":"hello"}"#
+        );
+    }
+
+    #[test]
+    fn invocation_cancel_has_a_small_stable_wire_shape() {
+        let message = HostMessage::Cancel { request_id: 42 };
+        let json = serde_json::to_string(&message).expect("serialize cancel message");
+        assert_eq!(json, r#"{"type":"cancel","request_id":42}"#);
+        assert_eq!(
+            serde_json::from_str::<HostMessage>(&json).expect("deserialize cancel message"),
+            message
         );
     }
 }

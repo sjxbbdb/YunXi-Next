@@ -5,13 +5,23 @@ use std::fmt;
 use std::time::Duration;
 
 use yunxi_protocol::{
-    CapabilityDescriptor, CapabilityError, HostMessage, InvocationCodecError, InvocationResponse,
-    MEMORY_RECALL_OPERATION, MEMORY_WRITE_EXTRACT_OPERATION, MEMORY_WRITE_REVIEW_OPERATION,
-    MemoryRecallRequest, MemoryReviewRequest, MemoryWriteRequest, PluginMessage, ProtocolError,
-    capabilities, connect_plugin,
+    CapabilityDescriptor, CapabilityError, GrantKind, GrantRequirement, HostMessage,
+    InvocationCodecError, InvocationResponse, MEMORY_MANAGEMENT_CLEAR_OPERATION,
+    MEMORY_MANAGEMENT_LIST_OPERATION, MEMORY_MANAGEMENT_MUTATE_OPERATION,
+    MEMORY_MANAGEMENT_QUERY_OPERATION, MEMORY_MANAGEMENT_SET_ENABLED_OPERATION,
+    MEMORY_MANAGEMENT_SHOW_OPERATION, MEMORY_MANAGEMENT_STATUS_OPERATION, MEMORY_RECALL_OPERATION,
+    MEMORY_WRITE_EXTRACT_OPERATION, MEMORY_WRITE_REVIEW_OPERATION, ManagementRequestError,
+    MemoryClearRequest, MemoryListRequest, MemoryMutationRequest, MemoryQueryRequest,
+    MemoryRecallRequest, MemoryReviewRequest, MemorySetEnabledRequest, MemoryShowRequest,
+    MemoryStatusRequest, MemoryWriteRequest, PluginMessage, ProtocolError, capabilities,
+    connect_plugin_with_grants,
 };
 
-use crate::{MemoryRecallError, MemoryWriteError, extract_and_store, recall, review_memory};
+use crate::{
+    MemoryManagementError, MemoryRecallError, MemoryWriteError, clear_with_grant,
+    extract_and_store, list_with_grant, mutate_with_grant, query_with_grant, recall, review_memory,
+    set_enabled_with_grant, show_with_grant, status_with_grant,
+};
 
 pub const MEMORY_PLUGIN_ID: &str = "yunxi.memory";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -25,11 +35,19 @@ pub fn run_memory_plugin() -> Result<(), MemoryPluginError> {
         capabilities::MEMORY_WRITE,
         capabilities::MEMORY_WRITE_VERSION,
     )?;
-    let mut session = connect_plugin(
+    let management_capability = CapabilityDescriptor::new(
+        capabilities::MEMORY_MANAGEMENT,
+        capabilities::MEMORY_MANAGEMENT_VERSION,
+    )?;
+    let mut session = connect_plugin_with_grants(
         MEMORY_PLUGIN_ID,
-        "Read-only long-term memory",
+        "Long-term memory",
         env!("CARGO_PKG_VERSION"),
-        vec![recall_capability, write_capability],
+        vec![recall_capability, write_capability, management_capability],
+        vec![
+            GrantRequirement::required(GrantKind::WorkspaceRead),
+            GrantRequirement::required(GrantKind::WorkspaceWrite),
+        ],
         CONNECT_TIMEOUT,
     )?;
 
@@ -70,6 +88,120 @@ pub fn run_memory_plugin() -> Result<(), MemoryPluginError> {
                                 .map_err(MemoryPluginError::Invocation)
                         }),
                     (
+                        capabilities::MEMORY_MANAGEMENT,
+                        capabilities::MEMORY_MANAGEMENT_VERSION,
+                        MEMORY_MANAGEMENT_STATUS_OPERATION,
+                    ) => request
+                        .decode_payload::<MemoryStatusRequest>()
+                        .map_err(MemoryPluginError::Invocation)
+                        .and_then(|payload| {
+                            status_with_grant(payload.grant())
+                                .map_err(MemoryPluginError::Management)
+                        })
+                        .and_then(|result| {
+                            InvocationResponse::encode(request_id, &result)
+                                .map_err(MemoryPluginError::Invocation)
+                        }),
+                    (
+                        capabilities::MEMORY_MANAGEMENT,
+                        capabilities::MEMORY_MANAGEMENT_VERSION,
+                        MEMORY_MANAGEMENT_QUERY_OPERATION,
+                    ) => request
+                        .decode_payload::<MemoryQueryRequest>()
+                        .map_err(MemoryPluginError::Invocation)
+                        .and_then(|payload| {
+                            payload
+                                .validate()
+                                .map_err(MemoryPluginError::ManagementRequest)?;
+                            query_with_grant(&payload).map_err(MemoryPluginError::Management)
+                        })
+                        .and_then(|result| {
+                            InvocationResponse::encode(request_id, &result)
+                                .map_err(MemoryPluginError::Invocation)
+                        }),
+                    (
+                        capabilities::MEMORY_MANAGEMENT,
+                        capabilities::MEMORY_MANAGEMENT_VERSION,
+                        MEMORY_MANAGEMENT_MUTATE_OPERATION,
+                    ) => request
+                        .decode_payload::<MemoryMutationRequest>()
+                        .map_err(MemoryPluginError::Invocation)
+                        .and_then(|payload| {
+                            payload
+                                .validate()
+                                .map_err(MemoryPluginError::ManagementRequest)?;
+                            mutate_with_grant(&payload).map_err(MemoryPluginError::Management)
+                        })
+                        .and_then(|result| {
+                            InvocationResponse::encode(request_id, &result)
+                                .map_err(MemoryPluginError::Invocation)
+                        }),
+                    (
+                        capabilities::MEMORY_MANAGEMENT,
+                        capabilities::MEMORY_MANAGEMENT_VERSION,
+                        MEMORY_MANAGEMENT_CLEAR_OPERATION,
+                    ) => request
+                        .decode_payload::<MemoryClearRequest>()
+                        .map_err(MemoryPluginError::Invocation)
+                        .and_then(|payload| {
+                            clear_with_grant(&payload).map_err(MemoryPluginError::Management)
+                        })
+                        .and_then(|result| {
+                            InvocationResponse::encode(request_id, &result)
+                                .map_err(MemoryPluginError::Invocation)
+                        }),
+                    (
+                        capabilities::MEMORY_MANAGEMENT,
+                        capabilities::MEMORY_MANAGEMENT_VERSION,
+                        MEMORY_MANAGEMENT_SET_ENABLED_OPERATION,
+                    ) => request
+                        .decode_payload::<MemorySetEnabledRequest>()
+                        .map_err(MemoryPluginError::Invocation)
+                        .and_then(|payload| {
+                            set_enabled_with_grant(payload.grant(), payload.enabled())
+                                .map_err(MemoryPluginError::Management)
+                        })
+                        .and_then(|result| {
+                            InvocationResponse::encode(request_id, &result)
+                                .map_err(MemoryPluginError::Invocation)
+                        }),
+                    (
+                        capabilities::MEMORY_MANAGEMENT,
+                        capabilities::MEMORY_MANAGEMENT_VERSION,
+                        MEMORY_MANAGEMENT_LIST_OPERATION,
+                    ) => request
+                        .decode_payload::<MemoryListRequest>()
+                        .map_err(MemoryPluginError::Invocation)
+                        .and_then(|payload| {
+                            payload
+                                .validate()
+                                .map_err(MemoryPluginError::ManagementRequest)?;
+                            list_with_grant(payload.grant(), payload.limit())
+                                .map_err(MemoryPluginError::Management)
+                        })
+                        .and_then(|result| {
+                            InvocationResponse::encode(request_id, &result)
+                                .map_err(MemoryPluginError::Invocation)
+                        }),
+                    (
+                        capabilities::MEMORY_MANAGEMENT,
+                        capabilities::MEMORY_MANAGEMENT_VERSION,
+                        MEMORY_MANAGEMENT_SHOW_OPERATION,
+                    ) => request
+                        .decode_payload::<MemoryShowRequest>()
+                        .map_err(MemoryPluginError::Invocation)
+                        .and_then(|payload| {
+                            payload
+                                .validate()
+                                .map_err(MemoryPluginError::ManagementRequest)?;
+                            show_with_grant(payload.grant(), payload.id())
+                                .map_err(MemoryPluginError::Management)
+                        })
+                        .and_then(|result| {
+                            InvocationResponse::encode(request_id, &result)
+                                .map_err(MemoryPluginError::Invocation)
+                        }),
+                    (
                         capabilities::MEMORY_WRITE,
                         capabilities::MEMORY_WRITE_VERSION,
                         MEMORY_WRITE_REVIEW_OPERATION,
@@ -102,6 +234,7 @@ pub fn run_memory_plugin() -> Result<(), MemoryPluginError> {
                     }
                 }
             }
+            HostMessage::Cancel { .. } => {}
             HostMessage::Shutdown => return Ok(()),
             HostMessage::Welcome { .. } => {
                 return Err(MemoryPluginError::UnexpectedHostMessage(
@@ -131,6 +264,8 @@ pub enum MemoryPluginError {
     Capability(CapabilityError),
     Recall(MemoryRecallError),
     Write(MemoryWriteError),
+    Management(MemoryManagementError),
+    ManagementRequest(ManagementRequestError),
     Invocation(InvocationCodecError),
     Protocol(ProtocolError),
     UnexpectedHostMessage(String),
@@ -143,6 +278,9 @@ impl MemoryPluginError {
             Self::Recall(_) => "memory_recall_error",
             Self::Write(MemoryWriteError::WriteNotGranted) => "write_not_granted",
             Self::Write(_) => "memory_write_error",
+            Self::Management(MemoryManagementError::WriteNotGranted) => "write_not_granted",
+            Self::Management(_) => "memory_management_error",
+            Self::ManagementRequest(_) => "invalid_request",
             Self::Capability(_) | Self::Protocol(_) | Self::UnexpectedHostMessage(_) => {
                 "plugin_error"
             }
@@ -156,6 +294,8 @@ impl fmt::Display for MemoryPluginError {
             Self::Capability(error) => write!(formatter, "invalid capability: {error}"),
             Self::Recall(error) => error.fmt(formatter),
             Self::Write(error) => error.fmt(formatter),
+            Self::Management(error) => error.fmt(formatter),
+            Self::ManagementRequest(error) => error.fmt(formatter),
             Self::Invocation(error) => error.fmt(formatter),
             Self::Protocol(error) => error.fmt(formatter),
             Self::UnexpectedHostMessage(message) => formatter.write_str(message),
@@ -169,6 +309,8 @@ impl Error for MemoryPluginError {
             Self::Capability(error) => Some(error),
             Self::Recall(error) => Some(error),
             Self::Write(error) => Some(error),
+            Self::Management(error) => Some(error),
+            Self::ManagementRequest(error) => Some(error),
             Self::Invocation(error) => Some(error),
             Self::Protocol(error) => Some(error),
             Self::UnexpectedHostMessage(_) => None,

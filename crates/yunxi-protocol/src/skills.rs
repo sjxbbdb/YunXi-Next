@@ -11,6 +11,8 @@ use serde_json::Value;
 pub const TOOL_SKILLS_LIST_OPERATION: &str = "list";
 pub const TOOL_SKILLS_CONTEXT_OPERATION: &str = "context";
 pub const TOOL_SKILLS_STATUS_OPERATION: &str = "status";
+pub const TOOL_SKILLS_ACTION_OPERATION: &str = "action";
+pub const SKILL_ACTION_PROTOCOL_VERSION: u32 = 1;
 
 pub const MAX_SKILL_ID_BYTES: usize = 96;
 pub const MAX_SKILL_NAME_BYTES: usize = 128;
@@ -23,6 +25,15 @@ pub const MAX_SKILL_TOOL_DECLARATIONS: usize = 64;
 pub const MAX_SKILL_TOOL_NAME_BYTES: usize = 64;
 pub const MAX_SKILL_TOOL_DESCRIPTION_BYTES: usize = 1024;
 pub const MAX_SKILL_TOOL_SCHEMA_BYTES: usize = 32 * 1024;
+pub const MAX_SKILL_ACTIONS: usize = 64;
+pub const MAX_SKILL_ACTION_TOOL_NAME_BYTES: usize = 64;
+pub const MAX_SKILL_ACTION_PROGRAM_BYTES: usize = 512;
+pub const MAX_SKILL_ACTION_ARGUMENTS: usize = 32;
+pub const MAX_SKILL_ACTION_ARGUMENT_BYTES: usize = 1024;
+pub const MAX_SKILL_ACTION_INPUT_BYTES: usize = 64 * 1024;
+pub const MAX_SKILL_ACTION_TIMEOUT_MILLIS: u64 = 120_000;
+pub const MAX_SKILL_ACTION_OUTPUT_BYTES: usize = 1024 * 1024;
+pub const MAX_SKILL_ACTION_FRAME_BYTES: usize = 2 * 1024 * 1024;
 const MAX_SKILL_STATUS_ERROR_BYTES: usize = 2 * 1024;
 const MAX_SKILL_WARNINGS: usize = 32;
 const MAX_SKILL_WARNING_BYTES: usize = 1024;
@@ -32,6 +43,357 @@ pub struct SkillToolDescriptor {
     name: String,
     description: String,
     input_schema: Value,
+}
+
+/// An explicitly declared executable Skill action.
+///
+/// Action declarations live in `actions.json`, separate from the
+/// metadata-only `tools.json` contract. The program and arguments are fixed
+/// by the Skill package; callers can supply only a bounded JSON input object.
+/// This type grants no authority by itself. The host must still supply an
+/// approved action grant before executing it.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SkillActionSpec {
+    tool_name: String,
+    program: String,
+    #[serde(default)]
+    arguments: Vec<String>,
+    timeout_millis: u64,
+    max_output_bytes: usize,
+    #[serde(default)]
+    requires_workspace_write: bool,
+}
+
+impl<'de> Deserialize<'de> for SkillActionSpec {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct WireActionSpec {
+            tool_name: String,
+            program: String,
+            #[serde(default)]
+            arguments: Vec<String>,
+            timeout_millis: u64,
+            max_output_bytes: usize,
+            #[serde(default)]
+            requires_workspace_write: bool,
+        }
+
+        let wire = WireActionSpec::deserialize(deserializer)?;
+        Self::new(
+            wire.tool_name,
+            wire.program,
+            wire.arguments,
+            wire.timeout_millis,
+            wire.max_output_bytes,
+            wire.requires_workspace_write,
+        )
+        .map_err(D::Error::custom)
+    }
+}
+
+impl SkillActionSpec {
+    pub fn new(
+        tool_name: impl Into<String>,
+        program: impl Into<String>,
+        arguments: Vec<String>,
+        timeout_millis: u64,
+        max_output_bytes: usize,
+        requires_workspace_write: bool,
+    ) -> Result<Self, SkillProtocolError> {
+        let spec = Self {
+            tool_name: tool_name.into(),
+            program: program.into(),
+            arguments,
+            timeout_millis,
+            max_output_bytes,
+            requires_workspace_write,
+        };
+        spec.validate()?;
+        Ok(spec)
+    }
+
+    pub fn tool_name(&self) -> &str {
+        &self.tool_name
+    }
+
+    pub fn program(&self) -> &str {
+        &self.program
+    }
+
+    pub fn arguments(&self) -> &[String] {
+        &self.arguments
+    }
+
+    pub const fn timeout_millis(&self) -> u64 {
+        self.timeout_millis
+    }
+
+    pub const fn max_output_bytes(&self) -> usize {
+        self.max_output_bytes
+    }
+
+    pub const fn requires_workspace_write(&self) -> bool {
+        self.requires_workspace_write
+    }
+
+    pub fn validate(&self) -> Result<(), SkillProtocolError> {
+        validate_identifier(
+            "Skill action tool name",
+            &self.tool_name,
+            MAX_SKILL_ACTION_TOOL_NAME_BYTES,
+        )?;
+        validate_relative_path(&self.program)?;
+        if self.program.len() > MAX_SKILL_ACTION_PROGRAM_BYTES {
+            return Err(SkillProtocolError::ActionProgramTooLarge {
+                size: self.program.len(),
+                maximum: MAX_SKILL_ACTION_PROGRAM_BYTES,
+            });
+        }
+        if self.arguments.len() > MAX_SKILL_ACTION_ARGUMENTS {
+            return Err(SkillProtocolError::TooManyActionArguments {
+                count: self.arguments.len(),
+                maximum: MAX_SKILL_ACTION_ARGUMENTS,
+            });
+        }
+        for argument in &self.arguments {
+            validate_text(
+                "Skill action argument",
+                argument,
+                MAX_SKILL_ACTION_ARGUMENT_BYTES,
+                true,
+            )?;
+        }
+        if self.timeout_millis == 0 || self.timeout_millis > MAX_SKILL_ACTION_TIMEOUT_MILLIS {
+            return Err(SkillProtocolError::InvalidActionTimeout {
+                value: self.timeout_millis,
+                maximum: MAX_SKILL_ACTION_TIMEOUT_MILLIS,
+            });
+        }
+        if self.max_output_bytes == 0 || self.max_output_bytes > MAX_SKILL_ACTION_OUTPUT_BYTES {
+            return Err(SkillProtocolError::InvalidActionOutputLimit {
+                value: self.max_output_bytes,
+                maximum: MAX_SKILL_ACTION_OUTPUT_BYTES,
+            });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SkillActionRequest {
+    protocol_version: u32,
+    skill_id: String,
+    tool_name: String,
+    input: Value,
+}
+
+impl<'de> Deserialize<'de> for SkillActionRequest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct WireActionRequest {
+            protocol_version: u32,
+            skill_id: String,
+            tool_name: String,
+            input: Value,
+        }
+
+        let wire = WireActionRequest::deserialize(deserializer)?;
+        let request = Self {
+            protocol_version: wire.protocol_version,
+            skill_id: wire.skill_id,
+            tool_name: wire.tool_name,
+            input: wire.input,
+        };
+        request.validate().map_err(D::Error::custom)?;
+        Ok(request)
+    }
+}
+
+impl SkillActionRequest {
+    pub fn new(
+        skill_id: impl Into<String>,
+        tool_name: impl Into<String>,
+        input: Value,
+    ) -> Result<Self, SkillProtocolError> {
+        let request = Self {
+            protocol_version: SKILL_ACTION_PROTOCOL_VERSION,
+            skill_id: skill_id.into(),
+            tool_name: tool_name.into(),
+            input,
+        };
+        request.validate()?;
+        Ok(request)
+    }
+
+    pub const fn protocol_version(&self) -> u32 {
+        self.protocol_version
+    }
+
+    pub fn skill_id(&self) -> &str {
+        &self.skill_id
+    }
+
+    pub fn tool_name(&self) -> &str {
+        &self.tool_name
+    }
+
+    pub fn input(&self) -> &Value {
+        &self.input
+    }
+
+    pub fn validate(&self) -> Result<(), SkillProtocolError> {
+        if self.protocol_version != SKILL_ACTION_PROTOCOL_VERSION {
+            return Err(SkillProtocolError::UnsupportedActionProtocol {
+                version: self.protocol_version,
+                expected: SKILL_ACTION_PROTOCOL_VERSION,
+            });
+        }
+        validate_identifier("Skill id", &self.skill_id, MAX_SKILL_ID_BYTES)?;
+        validate_identifier(
+            "Skill action tool name",
+            &self.tool_name,
+            MAX_SKILL_ACTION_TOOL_NAME_BYTES,
+        )?;
+        if !self.input.is_object() {
+            return Err(SkillProtocolError::ActionInputMustBeObject);
+        }
+        let size = value_size(&self.input);
+        if size > MAX_SKILL_ACTION_INPUT_BYTES {
+            return Err(SkillProtocolError::ActionInputTooLarge {
+                size,
+                maximum: MAX_SKILL_ACTION_INPUT_BYTES,
+            });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillActionOutcome {
+    Success,
+    Failed,
+    TimedOut,
+    Cancelled,
+    ProtocolError,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct SkillActionResponse {
+    protocol_version: u32,
+    outcome: SkillActionOutcome,
+    exit_code: Option<i32>,
+    stdout: String,
+    stderr: String,
+    output_truncated: bool,
+}
+
+impl<'de> Deserialize<'de> for SkillActionResponse {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct WireActionResponse {
+            protocol_version: u32,
+            outcome: SkillActionOutcome,
+            exit_code: Option<i32>,
+            stdout: String,
+            stderr: String,
+            output_truncated: bool,
+        }
+
+        let wire = WireActionResponse::deserialize(deserializer)?;
+        let response = Self {
+            protocol_version: wire.protocol_version,
+            outcome: wire.outcome,
+            exit_code: wire.exit_code,
+            stdout: wire.stdout,
+            stderr: wire.stderr,
+            output_truncated: wire.output_truncated,
+        };
+        response.validate().map_err(D::Error::custom)?;
+        Ok(response)
+    }
+}
+
+impl SkillActionResponse {
+    pub fn new(
+        outcome: SkillActionOutcome,
+        exit_code: Option<i32>,
+        stdout: impl Into<String>,
+        stderr: impl Into<String>,
+        output_truncated: bool,
+    ) -> Result<Self, SkillProtocolError> {
+        let response = Self {
+            protocol_version: SKILL_ACTION_PROTOCOL_VERSION,
+            outcome,
+            exit_code,
+            stdout: stdout.into(),
+            stderr: stderr.into(),
+            output_truncated,
+        };
+        response.validate()?;
+        Ok(response)
+    }
+
+    pub const fn protocol_version(&self) -> u32 {
+        self.protocol_version
+    }
+
+    pub const fn outcome(&self) -> SkillActionOutcome {
+        self.outcome
+    }
+
+    pub const fn exit_code(&self) -> Option<i32> {
+        self.exit_code
+    }
+
+    pub fn stdout(&self) -> &str {
+        &self.stdout
+    }
+
+    pub fn stderr(&self) -> &str {
+        &self.stderr
+    }
+
+    pub const fn output_truncated(&self) -> bool {
+        self.output_truncated
+    }
+
+    pub fn validate(&self) -> Result<(), SkillProtocolError> {
+        if self.protocol_version != SKILL_ACTION_PROTOCOL_VERSION {
+            return Err(SkillProtocolError::UnsupportedActionProtocol {
+                version: self.protocol_version,
+                expected: SKILL_ACTION_PROTOCOL_VERSION,
+            });
+        }
+        validate_text(
+            "Skill action stdout",
+            &self.stdout,
+            MAX_SKILL_ACTION_OUTPUT_BYTES,
+            true,
+        )?;
+        validate_text(
+            "Skill action stderr",
+            &self.stderr,
+            MAX_SKILL_ACTION_OUTPUT_BYTES,
+            true,
+        )?;
+        Ok(())
+    }
 }
 
 impl SkillToolDescriptor {
@@ -822,6 +1184,31 @@ pub enum SkillProtocolError {
     ExecutableMetadata {
         field: String,
     },
+    ActionProgramTooLarge {
+        size: usize,
+        maximum: usize,
+    },
+    TooManyActionArguments {
+        count: usize,
+        maximum: usize,
+    },
+    InvalidActionTimeout {
+        value: u64,
+        maximum: u64,
+    },
+    InvalidActionOutputLimit {
+        value: usize,
+        maximum: usize,
+    },
+    UnsupportedActionProtocol {
+        version: u32,
+        expected: u32,
+    },
+    ActionInputMustBeObject,
+    ActionInputTooLarge {
+        size: usize,
+        maximum: usize,
+    },
     TooManySkills {
         count: usize,
         maximum: usize,
@@ -884,6 +1271,33 @@ impl fmt::Display for SkillProtocolError {
             Self::ExecutableMetadata { field } => write!(
                 formatter,
                 "Skill tool metadata cannot contain executable field `{field}`"
+            ),
+            Self::ActionProgramTooLarge { size, maximum } => write!(
+                formatter,
+                "Skill action program is {size} bytes; maximum is {maximum}"
+            ),
+            Self::TooManyActionArguments { count, maximum } => write!(
+                formatter,
+                "Skill action declares {count} arguments; maximum is {maximum}"
+            ),
+            Self::InvalidActionTimeout { value, maximum } => write!(
+                formatter,
+                "Skill action timeout {value} ms is outside 1..={maximum}"
+            ),
+            Self::InvalidActionOutputLimit { value, maximum } => write!(
+                formatter,
+                "Skill action output limit {value} bytes is outside 1..={maximum}"
+            ),
+            Self::UnsupportedActionProtocol { version, expected } => write!(
+                formatter,
+                "Skill action protocol {version} is unsupported; expected {expected}"
+            ),
+            Self::ActionInputMustBeObject => {
+                formatter.write_str("Skill action input must be a JSON object")
+            }
+            Self::ActionInputTooLarge { size, maximum } => write!(
+                formatter,
+                "Skill action input is {size} bytes; maximum is {maximum}"
             ),
             Self::TooManySkills { count, maximum } => {
                 write!(
@@ -971,5 +1385,42 @@ mod tests {
                 field: "Skill instructions"
             })
         ));
+    }
+
+    #[test]
+    fn executable_action_contract_is_separate_and_bounded() {
+        let spec = SkillActionSpec::new(
+            "check",
+            "bin/check.exe",
+            vec!["--strict".to_string()],
+            5_000,
+            4_096,
+            false,
+        )
+        .expect("action spec");
+        let wire = serde_json::to_string(&spec).expect("serialize action spec");
+        assert_eq!(
+            serde_json::from_str::<SkillActionSpec>(&wire).expect("parse action spec"),
+            spec
+        );
+        assert!(serde_json::from_str::<SkillActionSpec>(
+            r#"{"tool_name":"check","program":"../run","arguments":[],"timeout_millis":5000,"max_output_bytes":4096}"#
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn action_request_and_response_reject_wrong_protocol_and_unbounded_input() {
+        let request =
+            SkillActionRequest::new("check", "run", json!({"value":"ok"})).expect("request");
+        let mut wire = serde_json::to_value(request).expect("request JSON");
+        wire["protocol_version"] = json!(99);
+        assert!(serde_json::from_value::<SkillActionRequest>(wire).is_err());
+        assert!(SkillActionRequest::new("check", "run", json!("not an object")).is_err());
+
+        let response =
+            SkillActionResponse::new(SkillActionOutcome::Success, Some(0), "ok", "", false)
+                .expect("response");
+        assert_eq!(response.protocol_version(), SKILL_ACTION_PROTOCOL_VERSION);
     }
 }

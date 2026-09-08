@@ -53,8 +53,8 @@ plugin code.
 The Gateway facade lives in `yunxi-web-gateway`. It maps a refreshed CLI Host
 projection to `health.status`, `pluginInventory/list`, and `session.list`, and
 keeps `events.mux` and `events.host` in separate bounded in-memory queues.
-`yunxi-cli::WebHost` adds `session.create`, `session.history`, and
-`session.prompt` over the same `ChatSession`, plugin Host, approval boundary,
+`yunxi-cli::WebHost` adds session creation, per-session history, prompt,
+cancel, and bounded concurrent session state over the same `ChatSession`, plugin Host, approval boundary,
 and storage plugin used by the terminal path. Approval answers use the dsh
 `client-response` envelope on `POST /api/respond`; the requested event's
 `rpcId` is the only accepted correlation id. `HttpCarrier<WebHost>` is the
@@ -75,8 +75,9 @@ and processes when packages or the directory disappear. Explicit environment
 switches override that document for the process. The required Model entry is
 read-only. The settings domain has 15 built-in keys, and the current CLI/Web
 launch schema exposes all 15 connected composition-scoped optional switches,
-including Multi-agent. `voice` and `weixin` launch deterministic fixture routes
-when enabled and remain off by default.
+including Multi-agent. `voice` and `weixin` launch their bounded loopback
+adapters when enabled, or the explicitly configured sidecar/iLink transport,
+and remain off by default.
 
 `yunxi-web-gateway/build.rs` recursively validates `web/dist` and generates an
 exact embedded resource table. It admits only the required document, script,
@@ -116,16 +117,18 @@ all supervised plugin children.
 The carrier remains a local first-stage Web host rather than a production Web
 server. Only capability booleans are writable; provider configuration and
 credentials remain environment-owned. Authentication and non-loopback listener
-policy are not implemented, and one Host instance serializes its active Web session.
-Image input, token streaming, session cancellation, model mutation, and true
-multi-client event fan-out remain later work. A malformed JSON envelope that
+policy are not implemented. WebHost supports bounded independent sessions, but
+the carrier remains a single local Host and does not provide authenticated
+multi-user event fan-out. Image input, model mutation, and full dsh session
+mutation parity remain later work; local token/tool/lifecycle event streaming is
+already carried through bounded SSE polling. A malformed JSON envelope that
 is syntactically valid JSON returns a bounded structured `bad-request` response;
 invalid HTTP framing remains a normal HTTP 400/413 response. Credential
 descriptions expose only configured state and never return secret values.
 
 The imported browser adapter source contains Voice and Weixin inventory-field
-mappings, and the Rust Web schema and CLI composition launch their fixture
-routes when enabled. The UI is evidence of route/inventory wiring only; it is
+mappings, and the Rust Web schema and CLI composition launch their local
+adapters when enabled. The UI is evidence of route/inventory wiring only; it is
 not evidence of real microphone, speaker, login, or channel transport support.
 
 ## Migration Order

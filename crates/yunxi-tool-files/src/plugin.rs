@@ -81,6 +81,7 @@ pub fn run_file_tool_plugin() -> Result<(), FileToolPluginError> {
                     }
                 }
             }
+            HostMessage::Cancel { .. } => {}
             HostMessage::Shutdown => return Ok(()),
             HostMessage::Welcome { .. } => {
                 return Err(FileToolPluginError::UnexpectedHostMessage(

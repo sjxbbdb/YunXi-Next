@@ -1,12 +1,13 @@
 //! Bounded graph state and atomic persistence under Host-issued authority.
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::error::Error;
 use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process;
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -21,6 +22,8 @@ use yunxi_protocol::{
 
 const DOCUMENT_VERSION: u32 = 1;
 const MAX_DOCUMENT_BYTES: u64 = 4 * 1024 * 1024;
+const MAX_EVENT_DETAIL_BYTES: usize = 4096;
+const MAX_WORKER_MODEL_BYTES: usize = 128;
 
 #[derive(Clone, Debug)]
 pub struct CoordinatorStore {
@@ -29,7 +32,10 @@ pub struct CoordinatorStore {
     instance_id: String,
     authority: AgentDelegationGrant,
     writable: bool,
+    lock: Arc<Mutex<()>>,
 }
+
+static STORE_LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
 
 impl CoordinatorStore {
     pub fn from_grant(
@@ -55,14 +61,27 @@ impl CoordinatorStore {
             .unwrap_or_else(|| workspace_root.join(".yunxi-next"));
         let instance_id = instance_id.into();
         validate_instance_id(&instance_id)?;
+        let path = state_root
+            .join("multi-agent")
+            .join(format!("{}.json", authority.session_id()));
+        let lock = STORE_LOCKS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .map_err(|_| {
+                MultiAgentStoreError::InvalidDocument(
+                    "multi-agent store lock registry is poisoned".to_string(),
+                )
+            })?
+            .entry(path.clone())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone();
         Ok(Self {
-            path: state_root
-                .join("multi-agent")
-                .join(format!("{}.json", authority.session_id())),
+            path,
             workspace_root,
             instance_id,
             authority: authority.clone(),
             writable: authority.workspace().allows_next_write(),
+            lock,
         })
     }
 
@@ -70,10 +89,22 @@ impl CoordinatorStore {
         &self.path
     }
 
+    pub(crate) fn authority_for_runtime(&self) -> AgentDelegationGrant {
+        self.authority.clone()
+    }
+
+    pub(crate) fn validate_authority(
+        &self,
+        authority: &AgentDelegationGrant,
+    ) -> Result<(), MultiAgentStoreError> {
+        self.require_matching_authority(authority)
+    }
+
     pub fn spawn(
         &self,
         request: &AgentSpawnRequest,
     ) -> Result<AgentSpawnResult, MultiAgentStoreError> {
+        let _guard = self.acquire_lock()?;
         self.require_matching_authority(request.grant())?;
         request.validate().map_err(MultiAgentStoreError::Protocol)?;
         self.require_write()?;
@@ -131,6 +162,7 @@ impl CoordinatorStore {
             status: AgentStatus::Pending,
             turns_used: 0,
             child_grants: request.requested_child_grants().to_vec(),
+            worker_model: None,
             transcript: Vec::new(),
             created_at_millis: now,
             updated_at_millis: now,
@@ -147,6 +179,7 @@ impl CoordinatorStore {
     }
 
     pub fn list(&self) -> Result<AgentListResult, MultiAgentStoreError> {
+        let _guard = self.acquire_lock()?;
         let document = self.load_or_new()?;
         let agents = document
             .agents
@@ -169,6 +202,7 @@ impl CoordinatorStore {
         &self,
         request: &AgentInspectRequest,
     ) -> Result<AgentInspectResult, MultiAgentStoreError> {
+        let _guard = self.acquire_lock()?;
         self.require_matching_authority(request.grant())?;
         request.validate().map_err(MultiAgentStoreError::Protocol)?;
         let document = self.load_or_new()?;
@@ -178,10 +212,39 @@ impl CoordinatorStore {
             .map_err(MultiAgentStoreError::Protocol)
     }
 
+    pub(crate) fn set_worker_model(
+        &self,
+        agent_id: &str,
+        model: &str,
+    ) -> Result<(), MultiAgentStoreError> {
+        validate_worker_model(model)?;
+        let _guard = self.acquire_lock()?;
+        self.require_write()?;
+        let mut document = self.load_or_new()?;
+        let index = document.agent_index(agent_id)?;
+        if document.agents[index].worker_model.as_deref() == Some(model) {
+            return Ok(());
+        }
+        document.agents[index].worker_model = Some(model.to_string());
+        document.agents[index].updated_at_millis = now_millis();
+        self.save(&document)
+    }
+
+    pub(crate) fn worker_model(
+        &self,
+        agent_id: &str,
+    ) -> Result<Option<String>, MultiAgentStoreError> {
+        let _guard = self.acquire_lock()?;
+        let document = self.load_or_new()?;
+        let index = document.agent_index(agent_id)?;
+        Ok(document.agents[index].worker_model.clone())
+    }
+
     pub fn start_turn(
         &self,
         request: &AgentTurnStartRequest,
     ) -> Result<AgentTurnStartResult, MultiAgentStoreError> {
+        let _guard = self.acquire_lock()?;
         self.require_matching_authority(request.grant())?;
         request.validate().map_err(MultiAgentStoreError::Protocol)?;
         self.require_write()?;
@@ -237,10 +300,88 @@ impl CoordinatorStore {
             .map_err(MultiAgentStoreError::Protocol)
     }
 
+    /// Requeues a turn that was running when the previous coordinator stopped.
+    ///
+    /// This is deliberately separate from `interrupt`: an interrupted branch
+    /// is terminal and must never become runnable again. The persisted user
+    /// entry is retained so recovery can retry the same turn without charging
+    /// another turn against the budget.
+    pub(crate) fn requeue_running_turn(
+        &self,
+        agent_id: &str,
+    ) -> Result<AgentInspectResult, MultiAgentStoreError> {
+        let _guard = self.acquire_lock()?;
+        self.require_write()?;
+        let mut document = self.load_or_new()?;
+        let index = document.agent_index(agent_id)?;
+        if document.agents[index].status == AgentStatus::Running {
+            let has_user_entry = document.agents[index]
+                .transcript
+                .last()
+                .is_some_and(|entry| entry.role() == yunxi_protocol::AgentTranscriptRole::User);
+            if !has_user_entry {
+                return Err(MultiAgentStoreError::RecoveryNotAvailable(
+                    agent_id.to_string(),
+                ));
+            }
+            document.agents[index].status = AgentStatus::Pending;
+            document.agents[index].updated_at_millis = now_millis();
+            self.save(&document)?;
+        }
+        let agent = &document.agents[index];
+        AgentInspectResult::new(agent.snapshot()?, agent.transcript.clone())
+            .map_err(MultiAgentStoreError::Protocol)
+    }
+
+    /// Starts a previously requeued turn without adding a user entry or
+    /// consuming another per-agent or session turn budget.
+    pub(crate) fn start_recovered_turn(
+        &self,
+        agent_id: &str,
+    ) -> Result<AgentTurnStartResult, MultiAgentStoreError> {
+        let _guard = self.acquire_lock()?;
+        self.require_write()?;
+        let mut document = self.load_or_new()?;
+        let index = document.agent_index(agent_id)?;
+        let (snapshot, transcript, updated_at_millis) = {
+            let agent = &mut document.agents[index];
+            if agent.status == AgentStatus::Interrupted {
+                return Err(MultiAgentStoreError::Interrupted(agent_id.to_string()));
+            }
+            if agent.status != AgentStatus::Pending
+                || !agent
+                    .transcript
+                    .last()
+                    .is_some_and(|entry| entry.role() == yunxi_protocol::AgentTranscriptRole::User)
+            {
+                return Err(MultiAgentStoreError::RecoveryNotAvailable(
+                    agent_id.to_string(),
+                ));
+            }
+            agent.status = AgentStatus::Running;
+            agent.updated_at_millis = now_millis();
+            (
+                agent.snapshot()?,
+                agent.transcript.clone(),
+                agent.updated_at_millis,
+            )
+        };
+        let event = document.push_event(
+            agent_id,
+            AgentEventKind::TurnStarted,
+            "child model turn recovered after coordinator restart",
+            updated_at_millis,
+        )?;
+        self.save(&document)?;
+        AgentTurnStartResult::new(snapshot, transcript, event)
+            .map_err(MultiAgentStoreError::Protocol)
+    }
+
     pub fn complete_turn(
         &self,
         request: &AgentTurnCompleteRequest,
     ) -> Result<AgentMutationResult, MultiAgentStoreError> {
+        let _guard = self.acquire_lock()?;
         self.require_matching_authority(request.grant())?;
         request.validate().map_err(MultiAgentStoreError::Protocol)?;
         self.require_write()?;
@@ -281,6 +422,7 @@ impl CoordinatorStore {
         &self,
         request: &AgentTurnFailRequest,
     ) -> Result<AgentMutationResult, MultiAgentStoreError> {
+        let _guard = self.acquire_lock()?;
         self.require_matching_authority(request.grant())?;
         request.validate().map_err(MultiAgentStoreError::Protocol)?;
         self.require_write()?;
@@ -297,10 +439,11 @@ impl CoordinatorStore {
             agent.status = AgentStatus::Failed;
             agent.updated_at_millis = now;
         }
+        let detail = format!("{}: {}", request.code(), request.message());
         let event = document.push_event(
             request.agent_id(),
             AgentEventKind::Failed,
-            format!("{}: {}", request.code(), request.message()),
+            bounded_text(&detail, MAX_EVENT_DETAIL_BYTES),
             now,
         )?;
         let snapshot = document.agents[index].snapshot()?;
@@ -313,6 +456,7 @@ impl CoordinatorStore {
         &self,
         request: &AgentInterruptRequest,
     ) -> Result<AgentMutationResult, MultiAgentStoreError> {
+        let _guard = self.acquire_lock()?;
         self.require_matching_authority(request.grant())?;
         request.validate().map_err(MultiAgentStoreError::Protocol)?;
         self.require_write()?;
@@ -378,6 +522,14 @@ impl CoordinatorStore {
         Ok(())
     }
 
+    fn acquire_lock(&self) -> Result<MutexGuard<'_, ()>, MultiAgentStoreError> {
+        self.lock.lock().map_err(|_| {
+            MultiAgentStoreError::InvalidDocument(
+                "multi-agent session lock is poisoned".to_string(),
+            )
+        })
+    }
+
     fn require_write(&self) -> Result<(), MultiAgentStoreError> {
         if self.writable {
             Ok(())
@@ -403,27 +555,11 @@ impl CoordinatorStore {
         }
 
         if document.coordinator_instance_id != self.instance_id {
-            let now = now_millis();
-            let running = document
-                .agents
-                .iter()
-                .filter(|agent| agent.status == AgentStatus::Running)
-                .map(|agent| agent.id.clone())
-                .collect::<Vec<_>>();
-            for id in running {
-                let index = document.agent_index(&id)?;
-                document.agents[index].status = AgentStatus::Failed;
-                document.agents[index].updated_at_millis = now;
-                document.push_event(
-                    &id,
-                    AgentEventKind::Failed,
-                    "child turn abandoned after coordinator restart",
-                    now,
-                )?;
-            }
+            // A persisted `running` status is only evidence of the last
+            // coordinator's claim, never proof that its thread is alive. Keep
+            // it intact until the new runtime explicitly requeues or resumes
+            // it, so recovery can retry the same turn without losing context.
             document.coordinator_instance_id = self.instance_id.clone();
-            // Read-only Web projections still need a truthful post-restart view;
-            // writable callers persist the same recovery on their next mutation.
             if self.writable {
                 self.save(&document)?;
             }
@@ -574,6 +710,8 @@ struct StoredAgent {
     status: AgentStatus,
     turns_used: u16,
     child_grants: Vec<GrantKind>,
+    #[serde(default)]
+    worker_model: Option<String>,
     transcript: Vec<AgentTranscriptEntry>,
     created_at_millis: u128,
     updated_at_millis: u128,
@@ -597,6 +735,9 @@ impl StoredAgent {
 
     fn validate(&self) -> Result<(), MultiAgentStoreError> {
         self.snapshot()?;
+        if let Some(model) = &self.worker_model {
+            validate_worker_model(model)?;
+        }
         if self.transcript.len() > MAX_AGENT_TRANSCRIPT_ENTRIES {
             return Err(MultiAgentStoreError::InvalidDocument(format!(
                 "agent `{}` transcript exceeds its entry limit",
@@ -608,6 +749,20 @@ impl StoredAgent {
         }
         Ok(())
     }
+}
+
+fn validate_worker_model(model: &str) -> Result<(), MultiAgentStoreError> {
+    if model.is_empty()
+        || model.len() > MAX_WORKER_MODEL_BYTES
+        || !model.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.' | ':')
+        })
+    {
+        return Err(MultiAgentStoreError::InvalidDocument(
+            "worker model id must be a bounded ASCII token".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_instance_id(value: &str) -> Result<(), MultiAgentStoreError> {
@@ -727,6 +882,17 @@ fn now_millis() -> u128 {
         .as_millis()
 }
 
+fn bounded_text(value: &str, maximum: usize) -> String {
+    if value.len() <= maximum {
+        return value.to_string();
+    }
+    let mut end = maximum;
+    while !value.is_char_boundary(end) {
+        end -= 1;
+    }
+    value[..end].to_string()
+}
+
 #[derive(Debug)]
 pub enum MultiAgentStoreError {
     Protocol(AgentProtocolError),
@@ -753,6 +919,7 @@ pub enum MultiAgentStoreError {
     AlreadyRunning(String),
     NotRunning(String),
     Interrupted(String),
+    RecoveryNotAvailable(String),
     UnsupportedVersion(u32),
     InvalidDocument(String),
     DocumentTooLarge {
@@ -787,6 +954,7 @@ impl MultiAgentStoreError {
             | Self::TranscriptLimitReached(_) => "agent_budget_exhausted",
             Self::AlreadyRunning(_) => "agent_busy",
             Self::NotRunning(_) => "invalid_agent_state",
+            Self::RecoveryNotAvailable(_) => "invalid_agent_state",
             Self::Workspace { .. }
             | Self::NotDirectory(_)
             | Self::InvalidPath(_)
@@ -860,6 +1028,9 @@ impl fmt::Display for MultiAgentStoreError {
             Self::AlreadyRunning(id) => write!(formatter, "agent `{id}` is already running"),
             Self::NotRunning(id) => write!(formatter, "agent `{id}` has no active turn"),
             Self::Interrupted(id) => write!(formatter, "agent `{id}` is interrupted"),
+            Self::RecoveryNotAvailable(id) => {
+                write!(formatter, "agent `{id}` has no recoverable turn")
+            }
             Self::UnsupportedVersion(version) => {
                 write!(
                     formatter,
@@ -1015,7 +1186,44 @@ mod tests {
     }
 
     #[test]
-    fn restart_marks_only_running_branches_failed() {
+    fn nested_spawn_cannot_escalate_beyond_its_parent_grant() {
+        let root = fixture_root("yunxi-multi-agent-nested-grants");
+        fs::create_dir_all(&root).expect("workspace");
+        let grant = AgentDelegationGrant::new(
+            yunxi_protocol::WorkspaceGrant::read_write(&root),
+            "session-nested-grants",
+            "ticket-nested-grants",
+            AgentBudget::conservative(),
+        )
+        .expect("authority")
+        .with_allowed_child_grants([GrantKind::WorkspaceRead, GrantKind::WorkspaceWrite])
+        .expect("root grants");
+        let store = CoordinatorStore::from_grant(&grant, "nested-grants").expect("store");
+        let parent = store
+            .spawn(
+                &AgentSpawnRequest::new(grant.clone(), "read only parent")
+                    .expect("parent request")
+                    .with_requested_child_grants([GrantKind::WorkspaceRead])
+                    .expect("parent read grant"),
+            )
+            .expect("parent");
+
+        let escalation = AgentSpawnRequest::new(grant.clone(), "write from nested child")
+            .expect("nested request")
+            .with_parent(parent.agent().id())
+            .expect("nested parent")
+            .with_requested_child_grants([GrantKind::WorkspaceWrite])
+            .expect("root authority permits request");
+        assert!(matches!(
+            store.spawn(&escalation),
+            Err(MultiAgentStoreError::GrantEscalation)
+        ));
+        assert_eq!(store.list().expect("list").agents().len(), 1);
+        let _ignored = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn restart_keeps_running_branches_stale_until_recovery() {
         let root = fixture_root("yunxi-multi-agent-recovery");
         fs::create_dir_all(&root).expect("workspace");
         let grant = authority(&root, AgentBudget::conservative());
@@ -1042,16 +1250,21 @@ mod tests {
         let read_only = CoordinatorStore::from_grant(&read_only_grant, "instance-2")
             .expect("read-only restart view");
         let read_only_list = read_only.list().expect("read-only recovery view");
-        assert_eq!(read_only_list.agents()[0].status(), AgentStatus::Failed);
+        assert_eq!(read_only_list.agents()[0].status(), AgentStatus::Running);
 
         let restarted = CoordinatorStore::from_grant(&grant, "instance-2").expect("restart");
         let list = restarted.list().expect("recover list");
-        assert_eq!(list.agents()[0].status(), AgentStatus::Failed);
-        assert!(
-            list.events()
-                .iter()
-                .any(|event| event.detail().contains("coordinator restart"))
-        );
+        assert_eq!(list.agents()[0].status(), AgentStatus::Running);
+
+        let requeued = restarted
+            .requeue_running_turn(agent.agent().id())
+            .expect("requeue running branch");
+        assert_eq!(requeued.agent().status(), AgentStatus::Pending);
+
+        let resumed = restarted
+            .start_recovered_turn(agent.agent().id())
+            .expect("start recovered turn");
+        assert_eq!(resumed.agent().status(), AgentStatus::Running);
         let _ignored = fs::remove_dir_all(root);
     }
 

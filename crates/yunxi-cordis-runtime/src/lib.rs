@@ -2,12 +2,17 @@
 #![forbid(unsafe_code)]
 
 mod error;
+mod events;
 mod manifest;
 mod registry;
 mod runtime;
 mod snapshot;
 
 pub use error::RuntimeError;
+pub use events::{
+    MAX_RUNTIME_EVENT_MESSAGE_BYTES, MAX_RUNTIME_EVENT_PAGE, MAX_RUNTIME_EVENTS, RuntimeEvent,
+    RuntimeEventKind, RuntimeEventPage,
+};
 pub use manifest::{
     DefaultEnablement, MAX_DISPLAY_NAME_BYTES, MAX_PLUGIN_ID_BYTES, ManifestError, PluginManifest,
     PluginRisk, PluginRole,

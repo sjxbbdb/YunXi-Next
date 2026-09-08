@@ -62,6 +62,7 @@ YunXi Next/
     |       |-- README.md               source file index
     |       |-- lib.rs                  stable mailbox-plugin facade
     |       |-- plugin.rs               mailbox capability request loop
+    |       |-- sink.rs                 bounded outbound mailbox delivery sink
     |       |-- store.rs                encrypted records, keys, and idempotency
     |       `-- bin/                    standalone plugin entry point
     |           |-- README.md           binary purpose
@@ -125,28 +126,36 @@ YunXi Next/
     |   |-- src/                       terminal host implementation
     |   |   |-- README.md              source file index
     |   |   |-- args.rs                command-line parser
+    |   |   |-- commands.rs            command dispatch and output boundary
     |   |   |-- control.rs             detached status, diagnostics, enable/disable, and reload commands
     |   |   |-- lib.rs                 CLI coordinator and public entry point
     |   |   |-- management.rs          session, memory, and mailbox command types
     |   |   |-- main.rs                executable and built-in child mode switch
+    |   |   |-- migration.rs           legacy state import and rollback commands
     |   |   |-- repl.rs                commands and bounded chat history
     |   |   |-- session.rs             capability launch, composition, and model routing
+    |   |   |-- tui.rs                 terminal event loop and screen rendering
+    |   |   |-- ui.rs                  ANSI-aware compact presentation
+    |   |   |-- voice_runtime.rs       CLI Voice lifecycle and local adapter wiring
     |   |   |-- web.rs                 Web Host facade, session RPC, and subagent projection
     |   |   |-- session/               stateful orchestration split from model routing
     |   |   |   |-- README.md          session module ownership
-     |   |   |   |-- cordis.rs          trusted Cordis bootstrap bridge
-     |   |   |   |-- multi_agent.rs     coordinator calls and isolated child-model turns
-     |   |   |   |-- plugin_policy.rs   persisted enablement and legacy override policy
-     |   |   |   |-- spine_adapter.rs   generic Host adapters for spine contracts
-     |   |   |   |-- spine_runtime.rs   production spine-backed tool broker/controller
-     |   |   |   |-- stateful.rs        storage, memory-write, scheduler, and mailbox calls
-     |   |   |   `-- tool_loop.rs       bounded model-tool catalog and argument decoding
-    |   |   `-- ui.rs                  ANSI-aware compact presentation
+    |   |   |   |-- auxiliary.rs        auxiliary capability route helpers
+    |   |   |   |-- child_agent.rs      isolated child-agent request handling
+    |   |   |   |-- cordis.rs           trusted Cordis bootstrap bridge
+    |   |   |   |-- multi_agent.rs      coordinator calls and isolated child-model turns
+    |   |   |   |-- plugin_policy.rs    persisted enablement and legacy override policy
+    |   |   |   |-- scheduler.rs        scheduler route and proactive dispatch helpers
+    |   |   |   |-- spine_adapter.rs    generic Host adapters for spine contracts
+    |   |   |   |-- spine_runtime.rs    production spine-backed tool broker/controller
+    |   |   |   |-- stateful.rs         storage, memory-write, scheduler, and mailbox calls
+    |   |   |   `-- tool_loop.rs        bounded model-tool catalog and argument decoding
     |   `-- tests/                     complete process-path tests
     |       |-- README.md              integration test purpose
-     |       |-- chat_stack.rs          CLI-to-plugin-to-HTTP verification
-     |       |-- spine_adapter.rs       generic Host adapter verification
-     |       `-- web_host.rs            Web session, settings, restart, and approval verification
+    |       |-- chat_stack.rs          CLI-to-plugin-to-HTTP verification
+    |       |-- cli_surface.rs         management, migration, and legacy option verification
+    |       |-- spine_adapter.rs       generic Host adapter verification
+    |       `-- web_host.rs            Web session, settings, restart, and approval verification
     |-- yunxi-context/                 AGENTS.md context capability plugin
     |   |-- Cargo.toml                 protocol-only context package
     |   |-- README.md                  capability scope, limits, and layout
@@ -165,6 +174,7 @@ YunXi Next/
     |   |   |-- README.md              source dependency map
     |   |   |-- error.rs               public operation errors
     |   |   |-- lib.rs                 stable public facade
+    |   |   |-- limits.rs              bounded process and payload limits
     |   |   |-- bin/                   executable entry points
     |   |   |   |-- README.md          binary ownership rules
     |   |   |   `-- yunxi-kernel.rs    empty-kernel smoke executable
@@ -251,7 +261,10 @@ YunXi Next/
     |   |   |-- discovery.rs            bounded package manifest scanning and dependency ordering
     |   |   |-- lib.rs                  stable plugin-host facade
     |   |   |-- manager.rs              package rescan, replacement, and unload coordination
+    |   |   |-- resource.rs             per-plugin resource budget policy
+    |   |   |-- retry.rs                bounded restart and exhaustion policy
     |   |   |-- runtime.rs              launch, invoke, failure removal, and shutdown
+    |   |   |-- secret.rs               host-issued secret reference bridge
     |   |   `-- bin/                    plugin-host process fixtures
     |   |       `-- yunxi-plugin-fixture.rs deterministic package lifecycle fixture
     |   `-- tests/                      process/protocol isolation tests
@@ -267,9 +280,23 @@ YunXi Next/
     |       |-- lib.rs                  stable scheduler-plugin facade
     |       |-- plugin.rs               scheduler capability request loop
     |       |-- policy.rs               quiet-hour, signal, and limit policy
+    |       |-- template.rs             persisted schedule template validation
+    |       |-- worker.rs               cancellable bounded scheduler worker
     |       `-- bin/                    standalone plugin entry point
     |           |-- README.md           binary purpose
     |           `-- yunxi-scheduler.rs  scheduler plugin executable
+    |   `-- tests/                      process-boundary scheduler tests
+    |       `-- process.rs              worker lifecycle and limit verification
+    |-- yunxi-secret-broker/            host-controlled secret reference boundary
+    |   |-- Cargo.toml                  crypto and serialization dependencies
+    |   |-- README.md                   authorization, storage, and audit boundary
+    |   `-- src/                        secret broker implementation
+    |       |-- audit.rs                bounded metadata-only audit records
+    |       |-- broker.rs               reference issuance, resolve, and revoke policy
+    |       |-- error.rs                missing, unavailable, and corruption errors
+    |       |-- lib.rs                  stable Secret Broker facade
+    |       |-- model.rs                opaque references and scoped secret values
+    |       `-- store.rs                memory, environment, and encrypted file stores
     |-- yunxi-settings/                 bounded restart-scoped capability settings
     |   |-- Cargo.toml                  serde-only settings dependencies
     |   |-- README.md                   persistence, precedence, and exclusions
@@ -283,7 +310,9 @@ YunXi Next/
     |   |-- README.md                  session ownership and legacy boundary
     |   `-- src/                        session storage implementation
     |       |-- README.md               source file index
+    |       |-- event_log.rs            append-only event journal and replay bounds
     |       |-- lib.rs                  stable storage-plugin facade
+    |       |-- migration.rs            legacy record projection and import helpers
     |       |-- plugin.rs               session capability request loop
     |       |-- record.rs               Next schema and legacy projection
     |       |-- store.rs                bounded persistence and mutations
@@ -313,6 +342,9 @@ YunXi Next/
     |       |-- lib.rs                 stable MCP-plugin facade
     |       |-- plugin.rs              YunXi handshake and typed dispatch
     |       `-- bin/                   plugin and fixture entry points
+    |           |-- README.md           binary ownership
+    |           |-- yunxi-mcp-fixture.rs deterministic MCP server fixture
+    |           `-- yunxi-tool-mcp.rs    MCP bridge plugin executable
     |   `-- tests/                     external-process MCP client tests
     |       |-- README.md              integration test ownership
     |       |-- http.rs                HTTP/SSE, session, grant, and timeout fixtures
@@ -322,15 +354,18 @@ YunXi Next/
     |   |-- README.md                  discovery and execution boundary
     |   |-- src/                       Skills implementation
     |   |   |-- README.md              source file index
+    |   |   |-- action.rs              explicit opt-in Skill action validation and execution
     |   |   |-- config.rs              root and disabled-id configuration
     |   |   |-- discovery.rs           bounded SKILL.md and tools.json loading
     |   |   |-- lib.rs                 stable Skills-plugin facade
     |   |   |-- plugin.rs              typed list/context/status request loop
     |   |   `-- bin/                   standalone plugin entry point
     |   |       |-- README.md           binary purpose
+    |   |       |-- yunxi-skill-action-fixture.rs action-process fixture
     |   |       `-- yunxi-tool-skills.rs Skills plugin executable
     |   `-- tests/                     process-boundary Skills tests
     |       |-- README.md              integration test ownership
+    |       |-- actions.rs             explicit action and grant verification
     |       `-- process.rs             minimal Skill discovery fixture
     |-- yunxi-tool-patch/              Host-approved workspace patch plugin
     |   |-- Cargo.toml                  protocol and patch dependencies
@@ -354,30 +389,40 @@ YunXi Next/
     |       `-- bin/                    standalone plugin entry point
     |           |-- README.md           binary purpose
     |           `-- yunxi-tool-shell.rs shell plugin executable
-    |-- yunxi-voice/                   voice contracts and deterministic process fixture
-    |   |-- Cargo.toml                 bounded voice package and fixture binary
-    |   |-- README.md                  device boundary and non-production status
-    |   `-- src/                       bounded transcribe/synthesize contracts
+    |-- yunxi-voice/                   voice contracts and process adapters
+    |   |-- Cargo.toml                 bounded voice package and adapter binaries
+    |   |-- README.md                  device/sidecar boundary and external acceptance status
+    |   `-- src/                       bounded transcribe/synthesize contracts and adapters
     |       |-- audio.rs               audio formats and bounded chunks
     |       |-- error.rs               voice contract errors
     |       |-- fixture.rs             deterministic in-process fixtures
     |       |-- identifiers.rs         bounded stream/request identifiers
     |       |-- lib.rs                 public voice facade
     |       |-- message.rs             transcribe/synthesize request contracts
-    |       |-- plugin.rs              protocol plugin fixture and dispatch
+    |       |-- plugin.rs              Host plugin selection and operation dispatch
     |       |-- provider.rs             replaceable device/provider traits and test doubles
     |       |-- stream.rs               bounded audio queues, backpressure, and deadlines
     |       |-- state.rs               cancellation/backpressure state
     |       |-- transcript.rs          partial/final transcript events
-    |       `-- bin/yunxi-voice-fixture.rs test-only child process
+    |       |-- host.rs                Host-facing provider lifecycle and fallback
+    |       |-- local.rs                bounded local file/device adapter
+    |       |-- process.rs             sidecar process boundary
+    |       |-- sidecar.rs              JSONL sidecar protocol and provider bridge
+    |       `-- bin/                   adapter and fixture entry points
+    |           |-- README.md           binary ownership
+    |           |-- yunxi-voice-fixture.rs deterministic loopback contract executable
+    |           `-- yunxi-voice-sidecar-fixture.rs deterministic sidecar provider executable
     |   `-- tests/                     contract and Host process tests
+    |       |-- host_provider.rs       Host provider selection and fallback tests
     |       |-- host_runtime.rs        expected capabilities and disable removal
+    |       |-- local_adapter.rs       local file/device adapter tests
     |       |-- loopback.rs             bounded fixture protocol behavior
+    |       |-- process_sidecar.rs      sidecar process lifecycle and isolation tests
     |       `-- providers.rs            mock/loopback provider boundary tests
-    |-- yunxi-weixin/                 Weixin channel contract and process fixture
-    |   |-- Cargo.toml                 protocol and Host-test dependencies
-    |   |-- README.md                  channel boundary and non-production status
-    |   `-- src/                       bounded channel contracts and fixture
+    |-- yunxi-weixin/                 Weixin channel contract and process adapters
+    |   |-- Cargo.toml                 protocol, transport, and Host-test dependencies
+    |   |-- README.md                  channel/iLink boundary and external acceptance status
+    |   `-- src/                       bounded channel contracts, transports, and adapters
     |       |-- error.rs               channel validation errors
     |       |-- fixture.rs             canonical inbound/outbound messages
     |       |-- identifiers.rs         bounded IDs and idempotency keys
@@ -386,13 +431,23 @@ YunXi Next/
     |       |-- message.rs              typed direction and delivery contracts
     |       |-- adapter.rs              replaceable transport, secret, and signature boundaries
     |       |-- control.rs              bounded channel lifecycle and idempotency control
-    |       |-- plugin.rs              process-host fixture and state dispatch
+    |       |-- plugin.rs              contract fixture dispatch and shared operations
+    |       |-- process_plugin.rs      Host loopback/iLink selection and lifecycle dispatch
+    |       |-- ilink.rs               bounded HTTP/loopback iLink transport
+    |       |-- poll_worker.rs         cancellable bounded long-poll worker
+    |       |-- runtime.rs             control-plane and channel lifecycle
+    |       |-- bridge.rs              Agent handoff and idempotent reply bridge
+    |       |-- secret_store.rs        encrypted and in-memory SecretStore implementations
     |       |-- state.rs               ACK/retry/cancel/backpressure state
-    |       `-- bin/                   fixture entry points
+    |       `-- bin/                   adapter and fixture entry points
     |           |-- README.md           binary ownership
     |           |-- yunxi-weixin-fixture.rs single-process contract loop
-    |           `-- yunxi-weixin-plugin-fixture.rs Host integration fixture
-    |   `-- tests/host_runtime.rs       process handshake and route isolation tests
+    |           |-- yunxi-weixin-plugin-fixture.rs Host integration fixture
+    |           `-- yunxi-weixin-plugin.rs production-capable process adapter entry point
+    |   `-- tests/                     channel adapter and Host integration tests
+    |       |-- host_runtime.rs        process handshake and route isolation tests
+    |       |-- ilink_http.rs          iLink HTTP, long-poll, and cancellation tests
+    |       `-- secret_store.rs        encrypted SecretStore and grant tests
     |-- yunxi-protocol/                 local host/plugin wire contract
     |   |-- Cargo.toml                  serialization-only dependencies
     |   |-- README.md                   crate scope and layout
@@ -411,12 +466,14 @@ YunXi Next/
     |       |-- mailbox.rs              encrypted mailbox payload contracts
     |       |-- memory_write.rs         memory extraction and review contracts
     |       |-- message.rs              versioned host/plugin messages
+    |       |-- model_stream.rs         model token and tool-call stream contracts
     |       |-- mcp.rs                  bounded MCP list/call/status contracts
     |       |-- multi_agent.rs          bounded delegation, graph, inspect, turn, and event contracts
     |       |-- scheduler.rs            proactive scheduling payload contracts
     |       |-- sessions.rs             persistent-session payload contracts
     |       |-- skills.rs               bounded Skill metadata/context contracts
     |       |-- tool_calls.rs           versioned model tool orchestration contracts
+    |       |-- tools.rs                generic tool catalog and invocation contracts
     |       |-- stream.rs               bounded streaming event contracts
     |       `-- transport.rs            bounded JSONL TCP transport
     |-- yunxi-web-gateway/              dsh-compatible Web dispatcher and HTTP/SSE carrier

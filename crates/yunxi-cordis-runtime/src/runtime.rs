@@ -6,6 +6,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use yunxi_cordis_core::{Context, CordisError, Fiber, FiberId, FiberSnapshot, FiberState, Plugin};
 
 use crate::error::RuntimeError;
+use crate::events::{RuntimeEventJournal, RuntimeEventKind};
 use crate::manifest::PluginManifest;
 use crate::registry::PluginRegistry;
 use crate::snapshot::{
@@ -75,6 +76,7 @@ pub struct CordisRuntime {
     root: Context,
     records: BTreeMap<String, PluginRecord>,
     overrides: BTreeMap<String, bool>,
+    events: RuntimeEventJournal,
     started: bool,
     closed: bool,
 }
@@ -107,6 +109,7 @@ impl CordisRuntime {
             root: Context::new(),
             records,
             overrides: BTreeMap::new(),
+            events: RuntimeEventJournal::new(),
             started: false,
             closed: false,
         }
@@ -130,12 +133,20 @@ impl CordisRuntime {
         self.closed
     }
 
+    /// Return lifecycle events after an opaque monotonically increasing
+    /// cursor.  The page is bounded and reports when the cursor fell behind
+    /// the retained window, allowing Web clients to fall back to a snapshot.
+    pub fn events_since(&self, after_sequence: u64, limit: usize) -> crate::RuntimeEventPage {
+        self.events.page(after_sequence, limit)
+    }
+
     /// Mount all entries according to their manifest defaults and overrides.
     /// Optional failures are retained and do not stop later entries. A Core
     /// or AgentSpine failure is returned after the remaining entries have been
     /// attempted.
     pub fn start_default(&mut self) -> Result<StartupReport, RuntimeError> {
         self.ensure_open("start")?;
+        self.record_event(RuntimeEventKind::StartupStarted, None, None, None);
         self.started = true;
         let ids = self
             .registry
@@ -174,6 +185,12 @@ impl CordisRuntime {
                     }
                 }
                 self.deactivate_without_mount(index);
+                self.record_event(
+                    RuntimeEventKind::PluginSkipped,
+                    Some(&plugin_id),
+                    Some(PluginRuntimeState::Disabled),
+                    None,
+                );
                 report.skipped.push(plugin_id);
                 continue;
             }
@@ -464,6 +481,7 @@ impl CordisRuntime {
         if self.closed {
             return Ok(());
         }
+        self.record_event(RuntimeEventKind::ShutdownStarted, None, None, None);
         let indexes = (0..self.registry.len()).rev().collect::<Vec<_>>();
         let mut first_error = None;
         for index in indexes {
@@ -484,6 +502,7 @@ impl CordisRuntime {
         }
         self.started = false;
         self.closed = true;
+        self.record_event(RuntimeEventKind::ShutdownCompleted, None, None, None);
         first_error.map_or(Ok(()), Err)
     }
 
@@ -525,6 +544,12 @@ impl CordisRuntime {
         if record.fiber.is_none() {
             record.fiber_state = None;
         }
+        self.record_event(
+            RuntimeEventKind::PluginDisabled,
+            Some(id),
+            Some(PluginRuntimeState::Disabled),
+            None,
+        );
     }
 
     fn reset_for_manual_mount(&mut self, index: usize) {
@@ -567,6 +592,12 @@ impl CordisRuntime {
                 .saturating_add(1)
                 .min(MAX_MOUNT_ATTEMPTS);
         }
+        self.record_event(
+            RuntimeEventKind::PluginMounting,
+            Some(id),
+            Some(PluginRuntimeState::Mounting),
+            None,
+        );
 
         let plugin = match catch_unwind(AssertUnwindSafe(|| definition.factory().instantiate())) {
             Ok(plugin) => plugin,
@@ -611,6 +642,12 @@ impl CordisRuntime {
                 record.failure = None;
                 record.mount_attempts = 0;
                 record.fiber = Some(fiber);
+                self.record_event(
+                    RuntimeEventKind::PluginMounted,
+                    Some(id),
+                    Some(PluginRuntimeState::Mounted),
+                    None,
+                );
                 Ok(fiber_id)
             }
             Err(cause) => {
@@ -635,6 +672,15 @@ impl CordisRuntime {
             });
         }
 
+        // Emit the transition before borrowing the record.  The journal is
+        // owned by this runtime, so keeping the record borrow short avoids a
+        // mutable-borrow overlap while the Fiber performs its disposer.
+        self.record_event(
+            RuntimeEventKind::PluginUnmounting,
+            Some(id),
+            Some(PluginRuntimeState::Unmounting),
+            None,
+        );
         let result = {
             let record = self.records.get_mut(id).expect("registry record exists");
             let Some(fiber) = record.fiber.as_ref() else {
@@ -650,27 +696,47 @@ impl CordisRuntime {
             fiber.unmount()
         };
 
-        let record = self.records.get_mut(id).expect("registry record exists");
-        let _removed_fiber = record.fiber.take();
-        record.enabled = false;
-        record.lifecycle = PluginRuntimeState::Disabled;
-        record.fiber_state = Some(FiberState::Unmounted);
-        record.mount_attempts = 0;
-        match result {
-            Ok(()) => {
-                record.failure = None;
+        let failure_message = {
+            let record = self.records.get_mut(id).expect("registry record exists");
+            let _removed_fiber = record.fiber.take();
+            record.enabled = false;
+            record.lifecycle = PluginRuntimeState::Disabled;
+            record.fiber_state = Some(FiberState::Unmounted);
+            record.mount_attempts = 0;
+            match result {
+                Ok(()) => {
+                    record.failure = None;
+                    None
+                }
+                Err(cause) => {
+                    let error = RuntimeError::PluginUnmountFailed {
+                        plugin_id: id.to_owned(),
+                        cause,
+                    };
+                    let message = bounded_message(error.to_string());
+                    record.failure =
+                        Some(FailureInfo::new(FailurePhase::Unmount, message.clone(), 1));
+                    Some((message, error))
+                }
+            }
+        };
+        match failure_message {
+            None => {
+                self.record_event(
+                    RuntimeEventKind::PluginDisabled,
+                    Some(id),
+                    Some(PluginRuntimeState::Disabled),
+                    None,
+                );
                 Ok(())
             }
-            Err(cause) => {
-                let error = RuntimeError::PluginUnmountFailed {
-                    plugin_id: id.to_owned(),
-                    cause,
-                };
-                record.failure = Some(FailureInfo::new(
-                    FailurePhase::Unmount,
-                    bounded_message(error.to_string()),
-                    1,
-                ));
+            Some((message, error)) => {
+                self.record_event(
+                    RuntimeEventKind::PluginFailed,
+                    Some(id),
+                    Some(PluginRuntimeState::Failed),
+                    Some(&message),
+                );
                 Err(error)
             }
         }
@@ -678,18 +744,38 @@ impl CordisRuntime {
 
     fn record_failure(&mut self, index: usize, phase: FailurePhase, message: String) {
         let id = self.registry.definition_at(index).id();
-        let record = self.records.get_mut(id).expect("registry record exists");
-        record.lifecycle = PluginRuntimeState::Failed;
-        record.fiber_state = match phase {
-            FailurePhase::Factory | FailurePhase::Identity => None,
-            FailurePhase::Mount => Some(FiberState::Failed),
-            FailurePhase::Unmount => Some(FiberState::Unmounted),
+        let failure_message = {
+            let record = self.records.get_mut(id).expect("registry record exists");
+            record.lifecycle = PluginRuntimeState::Failed;
+            record.fiber_state = match phase {
+                FailurePhase::Factory | FailurePhase::Identity => None,
+                FailurePhase::Mount => Some(FiberState::Failed),
+                FailurePhase::Unmount => Some(FiberState::Unmounted),
+            };
+            let message = bounded_message(message);
+            record.failure = Some(FailureInfo::new(
+                phase,
+                message.clone(),
+                record.mount_attempts.max(1),
+            ));
+            message
         };
-        record.failure = Some(FailureInfo::new(
-            phase,
-            bounded_message(message),
-            record.mount_attempts.max(1),
-        ));
+        self.record_event(
+            RuntimeEventKind::PluginFailed,
+            Some(id),
+            Some(PluginRuntimeState::Failed),
+            Some(&failure_message),
+        );
+    }
+
+    fn record_event(
+        &mut self,
+        kind: RuntimeEventKind,
+        plugin_id: Option<&str>,
+        state: Option<PluginRuntimeState>,
+        message: Option<&str>,
+    ) {
+        self.events.record(kind, plugin_id, state, message);
     }
 }
 
